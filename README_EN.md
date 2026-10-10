@@ -46,8 +46,8 @@ Set an admin password of at least 12 bytes in `backend/.env`. To use released im
 ```dotenv
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=replace-with-your-own-strong-password
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.4.0
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.4.0
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.4.1
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.4.1
 LOCAL_FILES_DIR=./files
 ```
 
@@ -59,7 +59,7 @@ docker compose --env-file backend/.env pull
 docker compose --env-file backend/.env up -d --no-build
 ```
 
-Open `http://127.0.0.1:8081` and log in with the credentials you configured. Create a LOCAL storage with `root_path=/files`, or configure S3. Choose the destination directly on the upload page; no mount is required.
+Open `http://127.0.0.1:8081/admin/login` and log in with the credentials you configured. Create a LOCAL storage with `root_path=/files`, or configure S3. Choose the destination directly on the upload page; no mount is required. Create API Keys for ordinary users, who sign in at `/login`.
 
 The default bind address is loopback. Use an HTTPS reverse proxy for public access. Nginx proxies `/api` to the backend on the same origin; the backend has no separate host port. Set `BIND_ADDRESS` for LAN access when needed.
 
@@ -75,9 +75,11 @@ docker compose --env-file backend/.env up -d --build
 
 The **Go backend** workflow is [.github/workflows/backend.yml](.github/workflows/backend.yml). Relevant branch pushes and pull requests run checks and upload binary artifacts. Manual runs publish commit-tagged GHCR images only when `publish_images` is selected. Pushing a `go-vX.Y.Z` tag publishes both images and a GitHub Release. Prerelease tags such as `go-vX.Y.Z-rc.1` create a prerelease and do not update `latest`.
 
-Both images support `linux/amd64` and `linux/arm64`. Publication waits for Go checks, binary builds and Docker upload / sharing smoke tests. See the [publishing guide](backend/README.md#github-ci-构建与发布) for details.
+Both images support `linux/amd64` and `linux/arm64`. Publication waits for Go race, static and vulnerability checks, binary builds, Docker smoke tests and browser regression tests. A failed build tag does not mean images or a Release were published. See the [publishing guide](backend/README.md#github-ci-构建与发布) for details.
 
 ## Data and upgrades
+
+To upgrade from Go `0.3.1`, retain your data volume, files and environment file, update both image variables to the same new version, then run `pull` and `up -d --no-build` as above. No database reinitialization is needed. Refresh old browser assets if needed. See the [changelog](CHANGELOG.md).
 
 The `go-data` volume contains `cloudpaste-go.db`, SQLite WAL files, `encryption.key` and upload staging data. Stop the service and back up the entire volume. A database-only backup cannot decrypt stored credentials. `docker compose down` preserves the volume; `down -v` deletes it.
 
@@ -103,10 +105,12 @@ In another terminal, use Node.js 22 and npm for frontend development:
 cd frontend
 npm ci
 npm run test:go-upload
-npm run dev
+VITE_BACKEND_URL=http://127.0.0.1:3000 npm run dev -- --host 127.0.0.1
 ```
 
-The development proxy defaults to `http://localhost:8787`. `npm run build` generates static assets in `frontend/dist/`. See the [backend guide](backend/README.md) and [API reference](Api-doc.md) for resource limits, security boundaries and supported endpoints.
+Open `http://127.0.0.1:3000`; Vite forwards same-origin `/api` requests to `http://127.0.0.1:8787`. The override avoids older local settings that connect directly to `localhost:8787` and trigger CORS errors. In PowerShell, set `$env:VITE_BACKEND_URL='http://127.0.0.1:3000'` before running `npm run dev -- --host 127.0.0.1`. `npm run build` generates static assets in `frontend/dist/`. See the [backend guide](backend/README.md) and [API reference](Api-doc.md) for resource limits, security boundaries and supported endpoints.
+
+The default chain-cloud favicon uses `frontend/public/chain-cloud.svg`, with browser color-scheme adaptation, a 16/32/48 px ICO and a 180 px touch icon. A custom favicon URL overrides tab icons; clearing it restores defaults. Touch icons remain local. Run `node scripts/generate-icons.mjs` from `frontend/` to regenerate raster assets using Chrome, Edge or Playwright Chromium.
 
 ## License
 

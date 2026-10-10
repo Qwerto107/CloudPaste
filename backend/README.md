@@ -45,8 +45,8 @@ docker compose --env-file backend/.env up -d --build
 | 涉及本项目的分支提交 / PR | 构建并上传 Actions 附件 | 不发布 | 不创建 |
 | 手动运行，默认选项 | 构建并上传 Actions 附件 | 不发布 | 不创建 |
 | 手动勾选 `publish_images` | 构建并上传 Actions 附件 | 发布 `sha-完整提交号` | 不创建 |
-| 推送 `go-v0.2.0` 等稳定标签 | 构建并上传 Actions 附件 | 发布版本号、提交号及 `latest` | 发布二进制与校验文件 |
-| 推送 `go-v0.2.0-rc.1` 等预发布标签 | 构建并上传 Actions 附件 | 发布版本号及提交号 | 发布预发行版本，不更新镜像 `latest` |
+| 推送 `go-vX.Y.Z` 稳定标签 | 构建并上传 Actions 附件 | 发布版本号、提交号及 `latest` | 发布二进制与校验文件 |
+| 推送 `go-vX.Y.Z-rc.1` 等预发布标签 | 构建并上传 Actions 附件 | 发布版本号及提交号 | 发布预发行版本，不更新镜像 `latest` |
 
 普通 Actions 附件保留 30 天，名称为 `cloudpaste-go-linux-amd64`、`cloudpaste-go-linux-arm64`；里面包含同名 `.tar.gz` 和 `.tar.gz.sha256` 文件。压缩包内包含可执行文件 `cloudpaste`、README 和许可证。解压前可在附件所在目录运行 `sha256sum -c cloudpaste-go-linux-amd64.tar.gz.sha256`。二进制提供 Go API，前端仍需通过静态资源或配套前端镜像部署。
 
@@ -66,8 +66,8 @@ ghcr.io/qwerto107/cloudpaste-frontend
 使用已发布镜像部署时，在 `.env` 中同时设置两个镜像，使用相同版本：
 
 ```dotenv
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.2.0
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.2.0
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.4.1
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.4.1
 ```
 
 ```sh
@@ -106,9 +106,11 @@ npm ci
 npm run test:go-upload
 npm run test:security
 npm run build
-npm run dev
+VITE_BACKEND_URL=http://127.0.0.1:3000 npm run dev -- --host 127.0.0.1
 ```
 
 前端端到端验证 `npm run test:e2e` 会启动独立临时 Go 服务和无界面浏览器，验证登录跳转、中文上传、预览、管理操作、设置、权限及无第三方请求。先构建 `backend/bin/sharing-backend.exe`，Linux 可用 `SHARING_TEST_BINARY` 指定二进制。浏览器使用本机 Chrome / Edge 或 Playwright Chromium；可通过 `SHARING_TEST_BROWSER` 指定。
 
-部署端的资源占用应在实际主机与负载下测量；前端资源减少不等于保证 Go RSS 下降。本地未提供 Docker 引擎，真实容器检查仍由 GitHub CI 执行。
+前端开发统一访问 `http://127.0.0.1:3000`，通过 Vite 代理 `/api` 到 `127.0.0.1:8787`。上述环境变量覆盖旧 `.env.development` 的直连后端配置；PowerShell 先设置 `$env:VITE_BACKEND_URL='http://127.0.0.1:3000'` 再启动。生产环境使用同源反向代理。
+
+CI 使用 `go test -race ./... -count=1 -timeout=300s`；浏览器验证等待管理员退出完成后再检查 API Key 流程，避免把尚未结束的管理员请求计入普通用户请求。部署端资源用量应在实际主机和负载下测量，前端资源减少不等于保证 Go RSS 下降。

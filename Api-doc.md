@@ -138,8 +138,35 @@ curl --fail-with-body -X PUT 'http://127.0.0.1:8081/api/fs/upload?path=/local' \
 
 `PUT /api/files/{id}` 支持 `filename`、`remark`、`password`、`clearPassword`、`expires_at`、`max_views` 和 `slug`。`filename` 仅修改显示名，必须是安全的单个文件名。省略 `max_views` 保留当前查看次数；显式修改查看限制会重置次数。
 
-分享上传使用 `PUT /api/share/upload`，管理员使用 `/api/admin/share/upload`。`X-Share-Filename` 是 URL 编码文件名；`X-Share-Options` 是 UTF-8 JSON 的标准 Base64，包含 `storage_config_id`、`expires_in`（小时）、`password`、`remark`、`max_views`、可选 `path`；请求体是原始文件。
+分享上传使用 `PUT /api/share/upload`，管理员使用 `/api/admin/share/upload`。`X-Share-Filename` 是 URL 编码文件名；`X-Share-Options` 是 UTF-8 JSON 的标准 Base64，包含 `storage_config_id`、`expires_in`（小时，可用小数，例如 `0.5` 为 30 分钟）、`password`、`remark`、`max_views`、可选 `path` 和 `slug`；请求体是原始文件。
 
 新文本省略 `expires_at`、新文件省略 `expires_in` 时使用站点默认有效期。文本显式 `expires_at:null`、文件 `expires_in:0` 表示不过期。过期分享和删除分享记录不自动删除存储文件。
 
 挂载、目录密码、分片接口仍保留供已有数据与受限路径授权兼容；精简前端不再显示挂载浏览和相关高级入口。`/api/admin/dashboard/stats` 已移除。
+
+## 自定义分享链接
+
+`POST /api/paste` 的 JSON 或文件上传选项中的 `slug` 用于自定义链接末尾名称，例如 `my-note` 对应前端 `/paste/my-note`，文件则对应 `/file/my-note`。留空自动生成；只允许 1–100 个英文字母、数字、短横线和下划线。同类分享名称重复会返回错误，不覆盖原分享。
+
+文本使用 `expires_at`（RFC 3339 时间或 `null`），文件上传使用 `expires_in`（小时，0 表示不过期）。`max_views:0` 表示不限次数，正整数表示查看上限；前端直接显示访问密码和查看次数，不需要展开更多选项。批量上传按每个文件独立创建分享。
+
+## 创建自定义 API Key
+
+管理员调用 `POST /api/admin/api-keys`，示例请求体如下（示例密钥仅展示格式，请替换为自己的随机值）：
+
+```json
+{
+  "name": "临时分享用户",
+  "custom_key": "replace-with-your-own-random-key",
+  "permissions": 527,
+  "role": "GENERAL",
+  "is_enable": true,
+  "basic_path": "/",
+  "storage_config_ids": [],
+  "expires_at": null
+}
+```
+
+`custom_key` 省略或空字符串时自动生成；后端要求非空自定义值长度为 24–128 字节，前端进一步限制为不含空格的可见 ASCII 字符，便于放入认证请求头。重复值创建失败。`527 = 1 + 2 + 4 + 8 + 512` 表示文本与文件分享、管理自己记录及上传权限；按需要减少权限。空存储列表仍受存储公开标记和其他授权检查约束。
+
+创建响应的 `data.key` 为完整密钥，列表只返回脱敏密钥。`PUT /api/admin/api-keys/{id}` 编辑名称、权限和有效期，不更换已有密钥；需要换密钥时创建新 Key 后停用或删除旧 Key。API Key 用户不能管理密钥。
