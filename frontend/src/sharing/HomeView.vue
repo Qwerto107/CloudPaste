@@ -5,6 +5,7 @@ import { hasPermission } from "./session.js";
 import { settings } from "./settings.js";
 import Icon from "./Icon.vue";
 import ShareNameField from "./ShareNameField.vue";
+import ExpirySelect from "./ExpirySelect.vue";
 const MarkdownPreview = defineAsyncComponent(
   () => import("./MarkdownPreview.vue"),
 );
@@ -12,10 +13,9 @@ const title = ref("");
 const slug = ref("");
 const content = ref("");
 const password = ref("");
-const hours = ref(Number(settings.share_default_expiry_hours || 24));
+const hours = ref(Number(settings.share_default_expiry_hours ?? 24));
 const maxViews = ref(0);
 const preview = ref(false);
-const advanced = ref(false);
 const busy = ref(false);
 const error = ref("");
 const link = ref("");
@@ -113,26 +113,18 @@ async function copy() {
       <p class="editor-meta muted small">{{ content.length }} 个字符</p>
       <ShareNameField v-model="slug" id="text-share-name" :disabled="busy" />
       <div class="share-options">
-        <div class="form-row">
+        <div class="form-row share-main-fields">
+          <ExpirySelect v-model="hours" />
           <label
-            >有效期<select v-model.number="hours">
-              <option
-                v-if="
-                  ![0, 1, 24, 168, 720].includes(
-                    Number(settings.share_default_expiry_hours),
-                  )
-                "
-                :value="Number(settings.share_default_expiry_hours)"
-              >
-                站点默认（{{ settings.share_default_expiry_hours }} 小时）
-              </option>
-              <option :value="1">1 小时</option>
-              <option :value="24">1 天</option>
-              <option :value="168">7 天</option>
-              <option :value="720">30 天</option>
-              <option :value="0">长期保留</option>
-            </select></label
-          ><label
+            >最多查看次数<input
+              v-model.number="maxViews"
+              type="number"
+              min="0"
+              step="1"
+              required
+            /><small class="muted">0 表示不限次数</small></label
+          >
+          <label
             >访问密码<input
               v-model="password"
               type="password"
@@ -141,29 +133,9 @@ async function copy() {
               maxlength="72"
           /></label>
         </div>
-        <button
-          type="button"
-          class="quiet"
-          :aria-expanded="advanced"
-          @click="advanced = !advanced"
-        >
-          <Icon name="settings" />
-          {{ advanced ? "收起" : "更多选项" }}</button
-        ><button
-          class="primary"
-          :disabled="busy || !allowed || !content.trim()"
-        >
+        <button class="primary" :disabled="busy || !allowed || !content.trim()">
           <Icon name="link" />{{ busy ? "正在创建…" : "创建分享" }}
         </button>
-      </div>
-      <div v-if="advanced" class="advanced-options">
-        <label
-          >最多查看次数<input
-            v-model.number="maxViews"
-            type="number"
-            min="0"
-            placeholder="0 为不限"
-        /></label>
       </div>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
     </form>

@@ -128,6 +128,7 @@ async function openEditor(item = null) {
         {
           name: "",
           is_enable: true,
+          custom_key: "",
           basic_path: "/",
           storage_config_ids: [],
           expires_at: new Date(Date.now() + 365 * 86400000).toISOString(),
@@ -192,6 +193,8 @@ async function save() {
         storage_config_ids: values.storage_config_ids || [],
         expires_at: values.expires_at || null,
       };
+      // 仅创建时提交完整密钥；编辑权限不会更换已有凭据。
+      if (!editID.value) body.custom_key = values.custom_key || "";
       target = `/admin/api-keys${editID.value ? "/" + encodeURIComponent(editID.value) : ""}`;
     } else {
       body = {
@@ -213,8 +216,10 @@ async function save() {
       }
     }
     const result = await request(target, { method, body });
-    if (panel.value === "keys" && !editID.value)
+    if (panel.value === "keys" && !editID.value) {
       newlyCreatedKey.value = result.key;
+      values.custom_key = "";
+    }
     success.value = "已保存";
     await load();
   } catch (reason) {
@@ -383,7 +388,15 @@ onMounted(load);
     <section v-if="editing" class="panel">
       <div class="editor-heading">
         <h2>{{ editID ? "编辑" : "新增" }}{{ title }}</h2>
-        <button class="quiet" @click="editing = false">取消</button>
+        <button
+          class="quiet"
+          @click="
+            editing = false;
+            values.custom_key = '';
+          "
+        >
+          取消
+        </button>
       </div>
       <form @submit.prevent="save">
         <template v-if="panel === 'storage'"
@@ -457,6 +470,21 @@ onMounted(load);
           ><label
             >名称<input v-model="values.name" required maxlength="100"
           /></label>
+          <label v-if="!editID"
+            >自定义密钥<input
+              v-model="values.custom_key"
+              type="password"
+              autocomplete="new-password"
+              minlength="24"
+              maxlength="128"
+              pattern="[!-~]{24,128}"
+              placeholder="留空自动生成"
+              aria-describedby="custom-key-hint"
+            /><small id="custom-key-hint" class="muted"
+              >可选，24–128
+              位英文字母、数字或半角符号，不含空格。建议使用随机组合。</small
+            ></label
+          >
           <fieldset>
             <legend>权限</legend>
             <label v-for="entry in permissions" :key="entry.bit" class="check"

@@ -22,7 +22,9 @@ The mint interface supports light and dark modes. The first visit follows the sy
 
 ## Admin isolation
 
-API Key users sign in at `/login` and manage their shares under `/manage/*`. Administrators sign in separately at `/admin/login` and use `/admin/*`. The ordinary-user interface contains no admin navigation links.
+API Key users sign in at `/login` and manage their shares under `/manage/*`. The login page links to the separate administrator login at `/admin/login`, followed by `/admin/*` for administration. Signed-in ordinary-user management pages contain no admin navigation links.
+
+Text and file sharing show expiry, access password and maximum views directly (0 means unlimited views). Expiry options range from minutes to days, plus no expiry. New API Keys can use a custom value of 24–128 visible ASCII characters without spaces; leaving it blank generates a key. Editing permissions does not replace the key.
 
 Settings are grouped into General, File previews, and Site appearance, with descriptive controls, units, and unsaved-change protection. Advanced HTML is collapsed by default; fixed security policies are read-only.
 

@@ -118,5 +118,11 @@ async function login() {
         {{ busy ? "正在登录…" : "登录" }}
       </button>
     </form>
+    <p class="login-alternative">
+      <RouterLink v-if="mode === 'apikey'" to="/admin/login"
+        >管理员登录 →</RouterLink
+      >
+      <RouterLink v-else to="/login">使用 API Key 登录 →</RouterLink>
+    </p>
   </section>
 </template>

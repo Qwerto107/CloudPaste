@@ -5,10 +5,11 @@ import { hasPermission, session } from "./session.js";
 import { settings } from "./settings.js";
 import Icon from "./Icon.vue";
 import ShareNameField from "./ShareNameField.vue";
+import ExpirySelect from "./ExpirySelect.vue";
 const files = ref([]);
 const storages = ref([]);
 const storage = ref("");
-const hours = ref(Number(settings.share_default_expiry_hours || 24));
+const hours = ref(Number(settings.share_default_expiry_hours ?? 24));
 const password = ref("");
 const remark = ref("");
 const maxViews = ref(0);
@@ -163,24 +164,24 @@ async function copy(value) {
               {{ item.name }} · {{ item.storage_type }}
             </option>
           </select></label
-        ><label
-          >有效期<select v-model.number="hours">
-            <option
-              v-if="
-                ![0, 1, 24, 168, 720].includes(
-                  Number(settings.share_default_expiry_hours),
-                )
-              "
-              :value="Number(settings.share_default_expiry_hours)"
-            >
-              站点默认（{{ settings.share_default_expiry_hours }} 小时）
-            </option>
-            <option :value="1">1 小时</option>
-            <option :value="24">1 天</option>
-            <option :value="168">7 天</option>
-            <option :value="720">30 天</option>
-            <option :value="0">长期保留</option>
-          </select></label
+        >
+        <ExpirySelect v-model="hours" />
+        <label
+          >访问密码<input
+            v-model="password"
+            type="password"
+            placeholder="可选"
+            autocomplete="new-password"
+            maxlength="72"
+        /></label>
+        <label
+          >最多查看次数<input
+            v-model.number="maxViews"
+            type="number"
+            min="0"
+            step="1"
+            required
+          /><small class="muted">0 表示不限次数</small></label
         >
       </div>
       <button
@@ -192,22 +193,6 @@ async function copy(value) {
         <Icon name="settings" />{{ advanced ? "收起" : "更多选项" }}
       </button>
       <div v-if="advanced" class="advanced-options">
-        <div class="form-row">
-          <label
-            >访问密码<input
-              v-model="password"
-              type="password"
-              placeholder="可选"
-              autocomplete="new-password"
-              maxlength="72" /></label
-          ><label
-            >最多查看次数<input
-              v-model.number="maxViews"
-              type="number"
-              min="0"
-              placeholder="0 为不限"
-          /></label>
-        </div>
         <label
           >备注<input v-model="remark" maxlength="4000" placeholder="可选"
         /></label>

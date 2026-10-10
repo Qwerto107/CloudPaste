@@ -153,7 +153,9 @@ try {
     if (!request.url().startsWith(origin)) external.push(request.url());
   });
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(origin + "/admin/login");
+  await page.goto(origin + "/login");
+  await page.getByRole("link", { name: "管理员登录 →", exact: true }).click();
+  await page.waitForURL("**/admin/login");
   // 首次跟随系统，手动选择后刷新仍保留；严格 CSP 下无需内联脚本。
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
   await page.getByRole("button", { name: "切换到浅色模式" }).click();
@@ -220,7 +222,23 @@ try {
     false,
   );
   await page.getByLabel(/自定义链接名称/).fill("mint-text-demo");
+  // 查看上限无需展开；分钟有效期写入真实记录，防止只改了下拉文案。
+  assert.ok(await page.getByLabel(/最多查看次数/).isVisible());
+  await page.getByLabel(/最多查看次数/).fill("20");
+  await page
+    .getByLabel("有效期", { exact: true })
+    .selectOption({ label: "5 分钟" });
+  const textCreated = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/admin/paste") &&
+      response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "创建分享", exact: true }).click();
+  const textRecord = (await (await textCreated).json()).data;
+  assert.equal(textRecord.max_views, 20);
+  assert.ok(
+    Math.abs(Date.parse(textRecord.expires_at) - Date.now() - 300000) < 10000,
+  );
   const sharedText = page.getByLabel("分享链接");
   await sharedText.waitFor();
   const textURL = await sharedText.inputValue();
@@ -240,7 +258,23 @@ try {
     buffer: Buffer.from("中文文件内容"),
   });
   await page.getByLabel(/自定义链接名称/).fill("mint-file-demo");
+  assert.ok(await page.getByLabel(/最多查看次数/).isVisible());
+  await page.getByLabel(/最多查看次数/).fill("20");
+  await page
+    .getByLabel("有效期", { exact: true })
+    .selectOption({ label: "10 分钟" });
+  const fileCreated = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/admin/share/upload") &&
+      response.request().method() === "PUT" &&
+      response.ok(),
+  );
   await page.getByRole("button", { name: "上传并创建分享" }).click();
+  const fileRecord = (await (await fileCreated).json()).data;
+  assert.equal(fileRecord.max_views, 20);
+  assert.ok(
+    Math.abs(Date.parse(fileRecord.expires_at) - Date.now() - 600000) < 10000,
+  );
   await page.getByRole("heading", { name: "分享链接", exact: true }).waitFor();
   const fileURL = await page.locator(".share-result input").inputValue();
   assert.ok(fileURL.endsWith("/file/mint-file-demo"));
@@ -364,6 +398,43 @@ try {
   await page
     .getByRole("heading", { name: "保存新密钥", exact: true })
     .waitFor();
+  // 自动生成和自定义共存，重复密钥由服务端拒绝，不会覆盖已有权限。
+  const customKey = "mint-custom-test-key-2026-abcdef";
+  await page.getByRole("button", { name: "新增密钥", exact: true }).click();
+  await page.getByLabel("名称", { exact: true }).fill("自定义测试密钥");
+  const keyInput = page.getByLabel(/自定义密钥/);
+  await keyInput.fill("too-short");
+  assert.equal(
+    await keyInput.evaluate((input) => input.checkValidity()),
+    false,
+  );
+  await keyInput.fill(customKey);
+  await page.getByLabel("创建文本分享", { exact: true }).check();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await page
+    .getByRole("heading", { name: "保存新密钥", exact: true })
+    .waitFor();
+  assert.equal(await page.locator(".result input").inputValue(), customKey);
+  const keyContext = await browser.newContext();
+  const keyPage = await keyContext.newPage();
+  await keyPage.goto(origin + "/login");
+  await keyPage.getByLabel("API Key", { exact: true }).fill(customKey);
+  await keyPage.getByRole("button", { name: "登录", exact: true }).click();
+  await keyPage.waitForURL("**/manage/account");
+  await keyContext.close();
+  await page.getByRole("button", { name: "新增密钥", exact: true }).click();
+  await page.getByLabel("名称", { exact: true }).fill("重复密钥");
+  await keyInput.fill(customKey);
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await page.getByText("密钥不可用", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  await page
+    .getByRole("row")
+    .filter({ hasText: "自定义测试密钥" })
+    .getByRole("button", { name: "编辑", exact: true })
+    .click();
+  assert.equal(await page.getByLabel(/自定义密钥/).count(), 0);
+  await page.getByRole("button", { name: "取消", exact: true }).click();
   await page.goto(origin + "/admin/text-management");
   await page.getByRole("button", { name: "编辑", exact: true }).click();
   await page.getByLabel("标题", { exact: true }).fill("已编辑文本");
@@ -486,6 +557,8 @@ try {
   await page.getByLabel("API Key", { exact: true }).fill(user.key);
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await page.waitForURL("**/manage/text-management");
+  // URL 先于异步页面渲染更新，等管理页出现后再检查入口隔离。
+  await page.getByRole("heading", { name: "文本管理", exact: true }).waitFor();
   assert.equal(await page.locator('a[href^="/admin"]').count(), 0);
   await page.reload();
   await page.getByRole("heading", { name: "文本管理", exact: true }).waitFor();
@@ -530,15 +603,16 @@ try {
     mimeType: "text/plain",
     buffer: Buffer.from("旅途中的一些记录"),
   });
-  await page.getByRole("button", { name: "更多选项", exact: true }).click();
+  assert.ok(await page.getByLabel("访问密码", { exact: true }).isVisible());
   await page.getByLabel("访问密码", { exact: true }).fill("temporary-password");
-  await page.getByRole("button", { name: "收起", exact: true }).click();
   await page.getByRole("button", { name: "更多选项", exact: true }).click();
+  await page.getByLabel("备注", { exact: true }).fill("测试备注");
+  await page.getByRole("button", { name: "收起", exact: true }).click();
   assert.equal(
     await page.getByLabel("访问密码", { exact: true }).inputValue(),
     "temporary-password",
   );
-  await page.getByRole("button", { name: "收起", exact: true }).click();
+  assert.ok(await page.getByLabel("访问密码", { exact: true }).isVisible());
   await page.screenshot({
     path: resolve(root, "backend/bin/mint-mobile-light.png"),
     fullPage: true,

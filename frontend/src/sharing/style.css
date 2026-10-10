@@ -385,7 +385,7 @@ textarea::placeholder {
 }
 .share-options {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 1.25rem;
 }
@@ -394,6 +394,17 @@ textarea::placeholder {
 }
 .share-options label {
   margin: 0;
+}
+.login-alternative {
+  margin: 1.25rem 0 0;
+  text-align: center;
+  font-size: 0.9rem;
+}
+/* 常用分享设置直接展示，窄屏沿用单列布局。 */
+@media (min-width: 721px) {
+  .form-row.share-main-fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 .advanced-options {
   border-top: 1px solid var(--line);
