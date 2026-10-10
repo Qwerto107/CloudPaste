@@ -79,7 +79,7 @@ func (a *App) registerSystem(mux *apiMux) {
 		return nil
 	}))
 	mux.HandleFunc("GET /api/version", a.handle(func(w http.ResponseWriter, r *http.Request) error {
-		a.write(w, 200, map[string]any{"version": "0.3.0", "name": "cloudpaste", "environment": "Docker / standalone", "storage": "SQLite", "goVersion": runtime.Version(), "uptime": int(time.Since(a.started).Seconds()), "features": map[string]bool{"upload": true, "webdav": false, "readOnlyStorage": false}}, "获取版本成功")
+		a.write(w, 200, map[string]any{"version": "0.3.1", "name": "cloudpaste", "environment": "Docker / standalone", "storage": "SQLite", "goVersion": runtime.Version(), "uptime": int(time.Since(a.started).Seconds()), "features": map[string]bool{"upload": true, "webdav": false, "readOnlyStorage": false}}, "获取版本成功")
 		return nil
 	}))
 	mux.HandleFunc("GET /api/system/max-upload-size", a.handle(func(w http.ResponseWriter, r *http.Request) error {

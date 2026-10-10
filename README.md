@@ -14,7 +14,7 @@
 - 管理员账号管理：修改用户名与密码，撤销旧会话。
 - 全局、预览和站点设置：上传大小、默认有效期、预览格式与大小、站外图片、入口开关、站点标题、图标、页脚、公告与安全过滤后的自定义 HTML。
 
-当前精简版需要从源码构建；已发布的 `0.2.0` 镜像仍是旧界面。
+精简版从 `0.3.1` 开始提供，`0.2.0` 镜像仍是旧界面。
 
 新分享默认 24 小时后停止访问，可修改默认值或单独选择不过期。过期和删除分享记录都不会自动清理文件本体。
 
@@ -40,8 +40,8 @@ mkdir -p files
 ```dotenv
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=请替换为你自己的强密码
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.2.0
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.2.0
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.3.1
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.3.1
 LOCAL_FILES_DIR=./files
 ```
 

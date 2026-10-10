@@ -60,7 +60,8 @@ jobs:
             [[ ${#GITHUB_REF_NAME} -le 100 ]]
           fi
           test -z "$(gofmt -l cmd internal)"
-          go test -race ./... -count=1 -timeout=120s
+          # 竞态检测下 bcrypt 会显著变慢，给完整回归测试留出足够时间。
+          go test -race ./... -count=1 -timeout=300s
           go vet ./...
       - name: 检查可达依赖漏洞
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...

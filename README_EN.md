@@ -36,8 +36,8 @@ Set an admin password of at least 12 bytes in `backend/.env`. To use released im
 ```dotenv
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=replace-with-your-own-strong-password
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.2.0
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.2.0
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.3.1
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.3.1
 LOCAL_FILES_DIR=./files
 ```
 
