@@ -4,6 +4,7 @@ import { request, uploadShare, shareURL } from "./api.js";
 import { hasPermission, session } from "./session.js";
 import { settings } from "./settings.js";
 import Icon from "./Icon.vue";
+import ShareNameField from "./ShareNameField.vue";
 const files = ref([]);
 const storages = ref([]);
 const storage = ref("");
@@ -40,19 +41,32 @@ onMounted(async () => {
   }
 });
 function select(event) {
-  files.value = Array.from(event.target.files || []).slice(0, 30);
+  results.value = [];
+  files.value = Array.from(event.target.files || [])
+    .slice(0, 30)
+    .map((file) => ({ file, slug: "" }));
 }
 function drop(event) {
-  if (!busy.value)
-    files.value = Array.from(event.dataTransfer.files || []).slice(0, 30);
+  if (!busy.value && allowed.value) {
+    results.value = [];
+    files.value = Array.from(event.dataTransfer.files || [])
+      .slice(0, 30)
+      .map((file) => ({ file, slug: "" }));
+  }
 }
 async function upload() {
   busy.value = true;
   error.value = "";
-  results.value = [];
   controller = new AbortController();
   try {
-    for (const file of files.value) {
+    const names = files.value.map((entry) => entry.slug).filter(Boolean);
+    if (new Set(names).size !== names.length)
+      throw new Error(
+        "多个文件不能使用相同的链接名称，请分别填写或留空自动生成。",
+      );
+    // 每个文件分别指定链接；成功项从队列移除，失败后重试不重复上传已完成文件。
+    for (const entry of [...files.value]) {
+      const { file, slug } = entry;
       if (file.size > Number(settings.max_upload_size) * 1048576)
         throw new Error(`${file.name} 超过单文件大小限制`);
       current.value = file.name;
@@ -61,6 +75,7 @@ async function upload() {
         file,
         {
           storage_config_id: storage.value,
+          slug,
           path: session.basicPath || "/",
           expires_in: hours.value,
           password: password.value,
@@ -74,6 +89,7 @@ async function upload() {
         name: file.name,
         url: shareURL("file", record.slug),
       });
+      files.value = files.value.filter((item) => item !== entry);
     }
     files.value = [];
   } catch (reason) {
@@ -99,7 +115,9 @@ async function copy(value) {
   </div>
   <section class="panel">
     <div v-if="!allowed" class="notice">
-      上传需要文件分享权限。<RouterLink to="/admin/login">登录</RouterLink>
+      上传需要文件分享权限。<RouterLink to="/login"
+        >使用 API Key 登录</RouterLink
+      >
     </div>
     <form @submit.prevent="upload">
       <label
@@ -120,9 +138,22 @@ async function copy(value) {
         ></label
       >
       <ul v-if="files.length" class="file-queue">
-        <li v-for="(file, index) in files" :key="index">
-          <span class="file-name"><Icon name="file" />{{ file.name }}</span
-          ><small>{{ (file.size / 1048576).toFixed(2) }} MiB</small>
+        <li
+          v-for="(entry, index) in files"
+          :key="entry.file"
+          class="file-upload-entry"
+        >
+          <div class="file-upload-heading">
+            <span class="file-name"
+              ><Icon name="file" />{{ entry.file.name }}</span
+            ><small>{{ (entry.file.size / 1048576).toFixed(2) }} MiB</small>
+          </div>
+          <ShareNameField
+            v-model="entry.slug"
+            :id="'file-share-name-' + index"
+            type="file"
+            :disabled="busy"
+          />
         </li>
       </ul>
       <div class="form-row">

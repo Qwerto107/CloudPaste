@@ -4,10 +4,12 @@ import { request, shareURL } from "./api.js";
 import { hasPermission } from "./session.js";
 import { settings } from "./settings.js";
 import Icon from "./Icon.vue";
+import ShareNameField from "./ShareNameField.vue";
 const MarkdownPreview = defineAsyncComponent(
   () => import("./MarkdownPreview.vue"),
 );
 const title = ref("");
+const slug = ref("");
 const content = ref("");
 const password = ref("");
 const hours = ref(Number(settings.share_default_expiry_hours || 24));
@@ -33,6 +35,7 @@ async function share() {
       method: "POST",
       body: {
         title: title.value,
+        slug: slug.value,
         content: content.value,
         password: password.value,
         expires_at,
@@ -64,9 +67,7 @@ async function copy() {
   </div>
   <section class="panel compose-panel">
     <div v-if="!allowed" class="notice">
-      创建分享需要授权。<RouterLink to="/admin/login"
-        >登录管理员或 API Key</RouterLink
-      >
+      创建分享需要授权。<RouterLink to="/login">使用 API Key 登录</RouterLink>
     </div>
     <form @submit.prevent="share">
       <input
@@ -110,6 +111,7 @@ async function copy() {
         aria-label="分享内容"
       ></textarea>
       <p class="editor-meta muted small">{{ content.length }} 个字符</p>
+      <ShareNameField v-model="slug" id="text-share-name" :disabled="busy" />
       <div class="share-options">
         <div class="form-row">
           <label

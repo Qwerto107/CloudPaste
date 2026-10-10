@@ -32,15 +32,21 @@ const routes = [
     meta: { title: "文件预览", fileShare: true },
   },
   {
+    path: "/login",
+    name: "UserLogin",
+    component: () => import("../sharing/LoginView.vue"),
+    meta: { title: "API Key 登录" },
+  },
+  {
     path: "/admin/login",
     name: "AdminLogin",
     component: () => import("../sharing/LoginView.vue"),
-    meta: { title: "登录" },
+    meta: { title: "管理员登录", adminArea: true },
   },
   {
     path: "/admin",
     component: () => import("../sharing/AdminLayout.vue"),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, adminArea: true },
     children: [
       {
         path: "",
@@ -54,9 +60,33 @@ const routes = [
         ["storage", "storage", "存储管理", 0],
         ["key-management", "keys", "密钥与权限", 0],
         ["account", "account", "账号管理", -1],
-        ["settings/global", "global", "全局设置", 0],
-        ["settings/preview", "preview", "预览设置", 0],
-        ["settings/site", "site", "站点设置", 0],
+        ["settings/global", "global", "常规设置", 0],
+        ["settings/preview", "preview", "文件预览设置", 0],
+        ["settings/site", "site", "站点外观设置", 0],
+      ].map(([path, panel, title, permission]) => ({
+        path,
+        component: path.startsWith("settings/")
+          ? () => import("../sharing/SettingsView.vue")
+          : management,
+        meta: { panel, title, permission },
+      })),
+    ],
+  },
+  {
+    path: "/manage",
+    component: () => import("../sharing/AdminLayout.vue"),
+    meta: { requiresAuth: true, userArea: true },
+    children: [
+      {
+        path: "",
+        name: "UserHome",
+        component: management,
+        meta: { panel: "account" },
+      },
+      ...[
+        ["text-management", "texts", "文本管理", 4],
+        ["file-management", "files", "文件管理", 8],
+        ["account", "account", "账号信息", -1],
       ].map(([path, panel, title, permission]) => ({
         path,
         component: management,
@@ -68,19 +98,32 @@ const routes = [
 ];
 const router = createRouter({ history: createWebHistory(), routes });
 function managementHome() {
+  const base = session.type === "admin" ? "/admin" : "/manage";
   return hasPermission(4)
-    ? "/admin/text-management"
+    ? base + "/text-management"
     : hasPermission(8)
-      ? "/admin/file-management"
-      : "/admin/account";
+      ? base + "/file-management"
+      : base + "/account";
 }
 // 导航先恢复身份，再按权限选择管理页，避免登录成功后被旧守卫重定向回来。
 router.beforeEach(async (to) => {
   await Promise.all([initializeSession(), loadSettings()]);
   const loggedIn = session.type !== "none";
+  // 页面入口也按身份隔离：API Key 的登录和管理过程始终留在普通用户路由。
+  if (
+    (to.meta.adminArea && session.type === "apikey") ||
+    (to.meta.userArea && session.type === "admin")
+  )
+    return managementHome();
   if (to.meta.requiresAuth && !loggedIn)
-    return { path: "/admin/login", query: { redirect: to.fullPath } };
-  if (loggedIn && (to.name === "AdminLogin" || to.name === "AdminHome"))
+    return {
+      path: to.meta.adminArea ? "/admin/login" : "/login",
+      query: { redirect: to.fullPath },
+    };
+  if (
+    loggedIn &&
+    ["AdminLogin", "AdminHome", "UserLogin", "UserHome"].includes(to.name)
+  )
     return managementHome();
   if (
     to.meta.requiresAuth &&
@@ -93,13 +136,13 @@ router.beforeEach(async (to) => {
       ? "/upload"
       : loggedIn
         ? managementHome()
-        : "/admin/login";
+        : "/login";
   if (to.name === "Upload" && settings.site_upload_page_enabled === "false")
     return settings.site_home_editor_enabled !== "false"
       ? "/"
       : loggedIn
         ? managementHome()
-        : "/admin/login";
+        : "/login";
 });
 router.afterEach((to) => {
   document.title = `${to.meta.title || "分享"} · ${settings.site_title || "CloudPaste"}`;

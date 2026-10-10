@@ -212,10 +212,24 @@ try {
     .fill(
       '# 本站预览\n中文内容\n<img src="https://tracker.example/test" onerror="window.compromised=true">',
     );
+  await page.getByLabel(/自定义链接名称/).fill("../invalid");
+  assert.equal(
+    await page
+      .getByLabel(/自定义链接名称/)
+      .evaluate((input) => input.checkValidity()),
+    false,
+  );
+  await page.getByLabel(/自定义链接名称/).fill("mint-text-demo");
   await page.getByRole("button", { name: "创建分享", exact: true }).click();
   const sharedText = page.getByLabel("分享链接");
   await sharedText.waitFor();
   const textURL = await sharedText.inputValue();
+  assert.ok(textURL.endsWith("/paste/mint-text-demo"));
+  await page.goto(origin + "/");
+  await page.getByLabel("分享内容").fill("不能覆盖原分享");
+  await page.getByLabel(/自定义链接名称/).fill("mint-text-demo");
+  await page.getByRole("button", { name: "创建分享", exact: true }).click();
+  await page.getByText("链接后缀已被占用", { exact: true }).waitFor();
   await page.goto(textURL);
   await page.getByRole("heading", { name: "本站预览" }).waitFor();
   assert.equal(await page.evaluate(() => window.compromised), undefined);
@@ -225,9 +239,11 @@ try {
     mimeType: "text/plain",
     buffer: Buffer.from("中文文件内容"),
   });
+  await page.getByLabel(/自定义链接名称/).fill("mint-file-demo");
   await page.getByRole("button", { name: "上传并创建分享" }).click();
   await page.getByRole("heading", { name: "分享链接", exact: true }).waitFor();
   const fileURL = await page.locator(".share-result input").inputValue();
+  assert.ok(fileURL.endsWith("/file/mint-file-demo"));
   await page.goto(fileURL);
   await page
     .locator(".plain-preview")
@@ -245,17 +261,100 @@ try {
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await page.getByText("新的名称.txt", { exact: true }).waitFor();
   await page.goto(origin + "/admin/settings/global");
+  await page.getByLabel(/新分享默认有效期/).fill("2");
+  await page.getByText("有未保存的修改", { exact: true }).waitFor();
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("link", { name: "文件预览", exact: true }).click();
+  assert.ok(page.url().endsWith("/admin/settings/global"));
+  await page.getByRole("button", { name: "撤销修改", exact: true }).click();
+  assert.equal(await page.getByLabel(/新分享默认有效期/).inputValue(), "24");
+  assert.ok(await page.getByRole("button", { name: "保存设置" }).isDisabled());
+  // 保存失败保留草稿，固定安全项不进入可编辑表单和提交体。
+  await page.route("**/api/admin/settings/group/1", (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ success: false, message: "测试保存失败" }),
+    }),
+  );
+  await page.getByLabel(/新分享默认有效期/).fill("3");
+  await page.getByRole("button", { name: "保存设置" }).click();
+  await page.getByText("测试保存失败", { exact: true }).waitFor();
+  assert.equal(await page.getByLabel(/新分享默认有效期/).inputValue(), "3");
+  await page.unroute("**/api/admin/settings/group/1");
   await page.getByLabel(/新分享默认有效期/).fill("1");
+  const settingsPut = page.waitForRequest(
+    (request) =>
+      request.method() === "PUT" &&
+      request.url().endsWith("/api/admin/settings/group/1"),
+  );
   await page.getByRole("button", { name: "保存设置" }).click();
+  assert.deepEqual(Object.keys((await settingsPut).postDataJSON()).sort(), [
+    "max_upload_size",
+    "share_default_expiry_hours",
+  ]);
   await page.getByText("设置已保存", { exact: true }).waitFor();
-  await page.goto(origin + "/admin/settings/preview");
+  await page.screenshot({
+    path: resolve(root, "backend/bin/settings-global-dark.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "切换到浅色模式" }).click();
+  await page.screenshot({
+    path: resolve(root, "backend/bin/settings-global-light.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "切换到暗色模式" }).click();
+  await page.getByRole("link", { name: "文件预览", exact: true }).click();
   await page.getByLabel(/文本文件预览上限/).fill("64");
+  await page.getByRole("switch", { name: "允许站外图片", exact: true }).check();
   await page.getByRole("button", { name: "保存设置" }).click();
   await page.getByText("设置已保存", { exact: true }).waitFor();
-  await page.goto(origin + "/admin/settings/site");
+  await page.reload();
+  assert.equal(await page.getByLabel(/文本文件预览上限/).inputValue(), "64");
+  assert.ok(
+    await page
+      .getByRole("switch", { name: "允许站外图片", exact: true })
+      .isChecked(),
+  );
+  await page
+    .getByRole("switch", { name: "允许站外图片", exact: true })
+    .uncheck();
+  await page.getByRole("button", { name: "保存设置" }).click();
+  await page.getByText("设置已保存", { exact: true }).waitFor();
+  await page.getByRole("link", { name: "站点外观", exact: true }).click();
+  assert.equal(await page.locator("details").getAttribute("open"), null);
+  await page.locator("summary").click();
+  await page
+    .getByLabel("页面顶部 HTML", { exact: true })
+    .fill("<strong>本地测试说明</strong>");
   await page.getByLabel(/^站点标题/).fill("临时分享站");
   await page.getByRole("button", { name: "保存设置" }).click();
   await page.getByText("设置已保存", { exact: true }).waitFor();
+  await page.reload();
+  await page.locator("summary").click();
+  assert.equal(
+    await page.getByLabel("页面顶部 HTML", { exact: true }).inputValue(),
+    "<strong>本地测试说明</strong>",
+  );
+  await page.getByLabel("页面顶部 HTML", { exact: true }).fill("");
+  await page.getByRole("button", { name: "保存设置" }).click();
+  await page.getByText("设置已保存", { exact: true }).waitFor();
+  await page.locator("summary").click();
+  for (const width of [320, 390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert.ok(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      `设置页溢出: ${width}px`,
+    );
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: resolve(root, "backend/bin/settings-mobile-dark.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(origin + "/admin/key-management");
   await page.getByRole("button", { name: "新增密钥", exact: true }).click();
   await page.getByLabel("名称", { exact: true }).fill("UI 创建密钥");
@@ -379,13 +478,27 @@ try {
   const uploaded = await readdir(filesDirectory);
   assert.equal(uploaded.length, 4);
   await page.getByRole("button", { name: "退出", exact: true }).click();
-  await page.goto(origin + "/admin/login");
-  await page.getByRole("button", { name: "API Key", exact: true }).click();
+  const userRequests = [];
+  page.on("request", (request) => userRequests.push(request.url()));
+  await page.goto(origin + "/manage/text-management");
+  await page.waitForURL("**/login?redirect=**");
+  assert.equal(await page.getByLabel("账号", { exact: true }).count(), 0);
   await page.getByLabel("API Key", { exact: true }).fill(user.key);
   await page.getByRole("button", { name: "登录", exact: true }).click();
-  await page.waitForURL("**/admin/text-management");
+  await page.waitForURL("**/manage/text-management");
+  assert.equal(await page.locator('a[href^="/admin"]').count(), 0);
+  await page.reload();
+  await page.getByRole("heading", { name: "文本管理", exact: true }).waitFor();
+  assert.ok(
+    !userRequests.some((url) =>
+      new URL(url).pathname.startsWith("/api/admin/"),
+    ),
+    "普通用户调用了管理员接口",
+  );
   await page.goto(origin + "/admin/storage");
-  await page.waitForURL("**/admin/text-management");
+  await page.waitForURL("**/manage/text-management");
+  await page.goto(origin + "/admin/settings/global");
+  await page.waitForURL("**/manage/text-management");
   assert.equal(
     await page.getByRole("link", { name: "密钥与权限", exact: true }).count(),
     0,
@@ -399,7 +512,7 @@ try {
   // 小屏可操作性检查：导航可见且页面不产生整体横向滚动。
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
-    for (const path of ["/", "/upload", "/admin/text-management"]) {
+    for (const path of ["/", "/upload", "/manage/text-management"]) {
       await page.goto(origin + path);
       await page.locator(".panel").first().waitFor();
       assert.ok(
@@ -457,6 +570,68 @@ try {
     "light",
   );
   await privateContext.close();
+  // API Key 在普通接口中批量创建自定义链接；同批重名在上传前拦截。
+  await page.locator('input[type="file"]').setInputFiles([
+    {
+      name: "batch-one.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("one"),
+    },
+    {
+      name: "batch-two.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("two"),
+    },
+  ]);
+  await page
+    .getByLabel(/自定义链接名称/)
+    .nth(0)
+    .fill("batch-one");
+  await page
+    .getByLabel(/自定义链接名称/)
+    .nth(1)
+    .fill("batch-one");
+  const uploadsBefore = userRequests.filter((url) =>
+    url.endsWith("/api/share/upload"),
+  ).length;
+  await page.getByRole("button", { name: "上传并创建分享" }).click();
+  await page
+    .getByText("多个文件不能使用相同的链接名称，请分别填写或留空自动生成。", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(
+    userRequests.filter((url) => url.endsWith("/api/share/upload")).length,
+    uploadsBefore,
+  );
+  // 后一个文件使用已占用名称时，保留前一个文件的成功链接，修改后可单独重试。
+  await page
+    .getByLabel(/自定义链接名称/)
+    .nth(1)
+    .fill("mint-file-demo");
+  await page.getByRole("button", { name: "上传并创建分享" }).click();
+  await page.getByText("链接后缀已被占用", { exact: true }).waitFor();
+  assert.equal(await page.locator(".share-result input").count(), 1);
+  assert.equal(await page.getByLabel(/自定义链接名称/).count(), 1);
+  await page.getByLabel(/自定义链接名称/).fill("batch-two");
+  await page.getByRole("button", { name: "上传并创建分享" }).click();
+  await page.waitForFunction(
+    () => document.querySelectorAll(".share-result input").length === 2,
+  );
+  assert.deepEqual(
+    await page
+      .locator(".share-result input")
+      .evaluateAll((inputs) =>
+        inputs.map((input) => new URL(input.value).pathname),
+      ),
+    ["/file/batch-one", "/file/batch-two"],
+  );
+  assert.ok(
+    !userRequests.some((url) =>
+      new URL(url).pathname.startsWith("/api/admin/"),
+    ),
+    "普通用户操作调用了管理员接口",
+  );
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(origin + "/");
   await page.screenshot({

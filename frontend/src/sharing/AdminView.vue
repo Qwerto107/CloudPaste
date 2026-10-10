@@ -10,7 +10,6 @@ import {
 import { useRoute, useRouter } from "vue-router";
 import { request, shareURL } from "./api.js";
 import { session, clearSession } from "./session.js";
-import { loadSettings } from "./settings.js";
 const MarkdownPreview = defineAsyncComponent(
   () => import("./MarkdownPreview.vue"),
 );
@@ -25,9 +24,6 @@ const title = computed(
       storage: "存储管理",
       keys: "密钥与权限",
       account: "账号管理",
-      global: "全局设置",
-      preview: "预览设置",
-      site: "站点设置",
     })[panel.value],
 );
 const items = ref([]);
@@ -43,8 +39,6 @@ const values = reactive({});
 const newlyCreatedKey = ref("");
 const previewText = ref(null);
 const storageChoices = ref([]);
-const definitions = ref([]);
-const settingValues = reactive({});
 const permissions = [
   { bit: 1, label: "创建文本分享" },
   { bit: 2, label: "上传并创建文件分享" },
@@ -60,7 +54,6 @@ const visible = computed(() =>
       .includes(filter.value.toLowerCase()),
   ),
 );
-const groups = { global: 1, preview: 2, site: 4 };
 const endpoint = computed(
   () =>
     ({
@@ -77,14 +70,7 @@ async function load() {
   editing.value = false;
   previewText.value = null;
   try {
-    if (groups[panel.value]) {
-      definitions.value = await request(
-        `/admin/settings?group=${groups[panel.value]}`,
-      );
-      for (const item of definitions.value)
-        settingValues[item.key] =
-          item.type === "bool" ? item.value === "true" : item.value;
-    } else if (panel.value !== "account") {
+    if (panel.value !== "account") {
       const data = await request(
         endpoint.value +
           (panel.value === "texts" || panel.value === "files"
@@ -289,25 +275,6 @@ async function textPreview(item) {
     error.value = reason.message;
   }
 }
-async function saveSettings() {
-  busy.value = true;
-  error.value = "";
-  try {
-    const body = {};
-    for (const item of definitions.value)
-      if (item.flags !== 2) body[item.key] = settingValues[item.key];
-    await request(`/admin/settings/group/${groups[panel.value]}`, {
-      method: "PUT",
-      body,
-    });
-    await loadSettings(true);
-    success.value = "设置已保存";
-  } catch (reason) {
-    error.value = reason.message;
-  } finally {
-    busy.value = false;
-  }
-}
 const currentPassword = ref("");
 const newPassword = ref("");
 const newUsername = ref(session.name);
@@ -370,35 +337,7 @@ onMounted(load);
       我已保存，隐藏密钥
     </button>
   </section>
-  <section v-if="groups[panel]" class="panel">
-    <form @submit.prevent="saveSettings">
-      <label v-for="item in definitions" :key="item.key"
-        ><span
-          >{{ item.description || item.key }}
-          <small v-if="item.flags === 2" class="muted"
-            >（固定安全策略）</small
-          ></span
-        ><input
-          v-if="item.type === 'bool'"
-          v-model="settingValues[item.key]"
-          type="checkbox"
-          :disabled="item.flags === 2"
-        /><textarea
-          v-else-if="item.type === 'textarea'"
-          v-model="settingValues[item.key]"
-          rows="5"
-          :disabled="item.flags === 2"
-        ></textarea
-        ><input
-          v-else
-          v-model="settingValues[item.key]"
-          :type="item.type === 'number' ? 'number' : 'text'"
-          :disabled="item.flags === 2"
-        /><small class="muted">{{ item.key }}</small></label
-      ><button class="primary" :disabled="busy">保存设置</button>
-    </form>
-  </section>
-  <section v-else-if="panel === 'account'" class="panel">
+  <section v-if="panel === 'account'" class="panel">
     <h2>{{ session.name || "当前账号" }}</h2>
     <p class="muted">
       {{ session.type === "admin" ? "管理员" : "API Key 用户" }}

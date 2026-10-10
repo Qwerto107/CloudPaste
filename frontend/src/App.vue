@@ -78,7 +78,14 @@ async function logout() {
         v-if="settings.site_upload_page_enabled !== 'false'"
         to="/upload"
         ><Icon name="folder" />文件分享</RouterLink
-      ><RouterLink :to="session.type === 'none' ? '/admin/login' : '/admin'"
+      ><RouterLink
+        :to="
+          session.type === 'none'
+            ? '/login'
+            : session.type === 'admin'
+              ? '/admin'
+              : '/manage'
+        "
         ><Icon name="grid" />{{
           session.type === "none" ? "登录" : "管理"
         }}</RouterLink

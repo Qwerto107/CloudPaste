@@ -22,6 +22,12 @@ The mint interface supports light and dark modes. The first visit follows the sy
 
 ## Admin isolation
 
+API Key users sign in at `/login` and manage their shares under `/manage/*`. Administrators sign in separately at `/admin/login` and use `/admin/*`. The ordinary-user interface contains no admin navigation links.
+
+Settings are grouped into General, File previews, and Site appearance, with descriptive controls, units, and unsaved-change protection. Advanced HTML is collapsed by default; fixed security policies are read-only.
+
+Text and file creation support custom link names such as `/paste/my-note` and `/file/my-file`. Leave blank for a generated name. Names accept 1–100 ASCII letters, digits, hyphens, or underscores and must be unique within the share type. Batch uploads allow a different name per file.
+
 Admins use `/api/admin/*`, API Keys use ordinary `/api/*`, and visitors use public share endpoints. Apply your IP allowlist or mTLS policy to the complete admin prefix in the external reverse proxy. Admin login is still required; do not expose internal ports that bypass your proxy. See the [API reference](Api-doc.md).
 
 ## Docker deployment

@@ -1,16 +1,22 @@
 <script setup>
-import { ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { request, backendBase } from "./api.js";
 import { saveSession } from "./session.js";
 const router = useRouter();
 const route = useRoute();
-const mode = ref("admin");
+const mode = computed(() => (route.name === "AdminLogin" ? "admin" : "apikey"));
 const username = ref("");
 const password = ref("");
 const apiKey = ref("");
 const busy = ref(false);
 const error = ref("");
+watch(mode, () => {
+  username.value = "";
+  password.value = "";
+  apiKey.value = "";
+  error.value = "";
+});
 async function login() {
   busy.value = true;
   error.value = "";
@@ -61,9 +67,13 @@ async function login() {
       redirect.startsWith("/") &&
       !redirect.startsWith("//") &&
       !redirect.startsWith("/admin/login") &&
+      !redirect.startsWith("/login") &&
+      (mode.value === "admin" || !redirect.startsWith("/admin")) &&
       router.resolve(redirect).matched.length
         ? redirect
-        : "/admin";
+        : mode.value === "admin"
+          ? "/admin"
+          : "/manage";
     const failure = await router.replace(target);
     if (failure) throw new Error("已登录，但页面跳转失败，请刷新后重试");
   } catch (reason) {
@@ -75,16 +85,14 @@ async function login() {
 </script>
 <template>
   <section class="panel login-panel">
-    <p class="eyebrow">访问你的分享空间</p>
-    <h1>登录</h1>
-    <p class="muted">管理员管理站点，API Key 按授权创建和管理分享。</p>
-    <div class="tabs">
-      <button :class="{ active: mode === 'admin' }" @click="mode = 'admin'">
-        管理员</button
-      ><button :class="{ active: mode === 'apikey' }" @click="mode = 'apikey'">
-        API Key
-      </button>
-    </div>
+    <h1>{{ mode === "admin" ? "管理员登录" : "API Key 登录" }}</h1>
+    <p class="muted">
+      {{
+        mode === "admin"
+          ? "登录后台，管理分享、存储与站点设置。"
+          : "输入密钥，按授权创建和管理你的分享。"
+      }}
+    </p>
     <form @submit.prevent="login">
       <template v-if="mode === 'admin'"
         ><label
