@@ -1,0 +1,296 @@
+name: Go backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_images:
+        description: "检查通过后将双架构镜像发布到 GHCR"
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - backend/**
+      - frontend/**
+      - docker/frontend/**
+      - docker-compose.yml
+      - .dockerignore
+      - .gitattributes
+      - .github/workflows/backend.yml
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'go-v*'
+    paths:
+      - backend/**
+      - frontend/**
+      - docker/frontend/**
+      - docker-compose.yml
+      - .dockerignore
+      - .gitattributes
+      - .github/workflows/backend.yml
+
+permissions:
+  contents: read
+
+# 发布任务排队执行，避免中途取消导致两个镜像或发行附件不完整。
+concurrency:
+  group: cloudpaste-go-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # 官方 v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # 官方 v6
+        with:
+          go-version: 1.27.2
+          cache-dependency-path: backend/go.sum
+      - name: 检查格式、竞态与静态问题
+        run: |
+          # 标签只作为数据读取；先校验，再允许后续发布任务运行。
+          if [[ "$GITHUB_REF" == refs/tags/go-v* ]]; then
+            [[ "$GITHUB_REF_NAME" =~ ^go-v[0-9]+\.[0-9]+\.[0-9]+(-[[:alnum:]][[:alnum:].-]*)?$ ]]
+            [[ ${#GITHUB_REF_NAME} -le 100 ]]
+          fi
+          test -z "$(gofmt -l cmd internal)"
+          go test -race ./... -count=1 -timeout=120s
+          go vet ./...
+      - name: 检查可达依赖漏洞
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+  frontend:
+    name: 静态前端与浏览器回归
+    needs: go
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # 官方 v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # 官方 v6
+        with:
+          go-version: 1.27.2
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # 官方 v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 构建隔离测试后端
+        working-directory: backend
+        run: go build -o bin/sharing-backend ./cmd/cloudpaste
+      - name: 检查分享页面、安全过滤与真实媒体预览
+        working-directory: frontend
+        env:
+          SHARING_TEST_BINARY: ${{ github.workspace }}/backend/bin/sharing-backend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run test:go-upload
+          npm run test:security
+          npm run build
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+
+  binaries:
+    name: Linux ${{ matrix.arch }} 二进制
+    needs: go
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # 官方 v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # 官方 v6
+        with:
+          go-version: 1.27.2
+          cache-dependency-path: backend/go.sum
+      - name: 构建、打包并计算校验值
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+        run: |
+          target="cloudpaste-go-linux-${GOARCH}"
+          mkdir -p "bin/release/$target"
+          go build -trimpath -ldflags='-s -w' -o "bin/release/$target/cloudpaste" ./cmd/cloudpaste
+          chmod 0755 "bin/release/$target/cloudpaste"
+          cp README.md "bin/release/$target/README.md"
+          cp ../LICENSE "bin/release/$target/LICENSE"
+          # tar 保留可执行权限，外层 Actions 附件不会改变二进制的权限。
+          # 固定时间和所有者，重跑同一提交时不会因打包时间改变校验值。
+          epoch="$(git show -s --format=%ct HEAD)"
+          tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner -czf "bin/release/$target.tar.gz" -C bin/release "$target"
+          cd bin/release
+          sha256sum "$target.tar.gz" > "$target.tar.gz.sha256"
+      - name: 上传可下载的二进制及校验文件
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # 官方 v7
+        with:
+          name: cloudpaste-go-linux-${{ matrix.arch }}
+          path: backend/bin/release/*.tar.gz*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # 仅用于每次新建的 CI 数据卷，不对应真实部署凭证。
+      ADMIN_PASSWORD: CI-only-password-12345
+      LOCAL_FILES_DIR: ./.go-smoke-files
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # 官方 v6
+        with:
+          persist-credentials: false
+      - name: 准备可读写测试目录
+        run: |
+          mkdir -p .go-smoke-files
+          printf '0123456789' > .go-smoke-files/demo.txt
+          sudo chown -R 65532:65532 .go-smoke-files
+      - name: 检查 Compose 配置并启动镜像
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml up -d --build --wait --wait-timeout 120
+      - name: 检查前后端与核心安全约束
+        run: python3 backend/scripts/docker_smoke.py
+      - name: 输出失败日志
+        if: failure()
+        run: docker compose -f docker-compose.yml logs --tail=100
+      - name: 清理本次 CI 容器与临时数据卷
+        if: always()
+        run: docker compose -f docker-compose.yml down -v
+
+  images:
+    name: 发布 ${{ matrix.component }} 双架构镜像
+    needs: [go, frontend, binaries, docker]
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.publish_images) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/go-v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+          - component: frontend
+            context: .
+            dockerfile: ./docker/frontend/Dockerfile
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # 官方 v6
+        with:
+          persist-credentials: false
+      - name: 生成小写镜像名称和发布版本
+        id: names
+        env:
+          IMAGE_COMPONENT: ${{ matrix.component }}
+        run: |
+          repository="${GITHUB_REPOSITORY,,}"
+          echo "image=ghcr.io/${repository}-${IMAGE_COMPONENT}" >> "$GITHUB_OUTPUT"
+          # 手动构建只发布提交号；正式版本标签才更新版本号及 latest。
+          version=""
+          stable=false
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/go-v* ]]; then
+            version="${GITHUB_REF_NAME#go-v}"
+            if [[ "$version" != *-* ]]; then stable=true; fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
+      - name: 设置架构模拟器
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # 官方 v4
+        with:
+          platforms: arm64
+      - name: 设置多架构构建工具
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # 官方 v4
+      - name: 登录 GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # 官方 v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 生成镜像标签和来源信息
+        id: metadata
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # 官方 v6
+        with:
+          images: ${{ steps.names.outputs.image }}
+          flavor: latest=false
+          tags: |
+            type=sha,format=long,prefix=sha-
+            type=raw,value=${{ steps.names.outputs.version }},enable=${{ steps.names.outputs.version != '' }},priority=900
+            type=raw,value=latest,enable=${{ steps.names.outputs.stable == 'true' }}
+      - name: 构建并发布两个架构的镜像
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # 官方 v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha,scope=go-${{ matrix.component }}
+          cache-to: type=gha,scope=go-${{ matrix.component }},mode=max
+
+  release:
+    name: 发布版本二进制附件
+    needs: [binaries, images]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/go-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 下载本次运行的二进制附件
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # 官方 v8
+        with:
+          pattern: cloudpaste-go-linux-*
+          merge-multiple: true
+          path: release-assets
+      - name: 校验附件并发布 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd release-assets
+          sha256sum -c ./*.sha256
+          tag="$GITHUB_REF_NAME"
+          version="${tag#go-v}"
+          repository="${GITHUB_REPOSITORY,,}"
+          prerelease=false
+          if [[ "$version" == *-* ]]; then prerelease=true; fi
+          printf '%s\n\n' '提供 Linux amd64、arm64 二进制及 SHA-256 校验文件。' > release-notes.md
+          printf '源码提交：%s\n\n' "$GITHUB_SHA" >> release-notes.md
+          printf '后端镜像：ghcr.io/%s-backend:%s\n' "$repository" "$version" >> release-notes.md
+          printf '前端镜像：ghcr.io/%s-frontend:%s\n' "$repository" "$version" >> release-notes.md
+          # 先创建草稿，全部附件上传成功后再公开；重跑只补缺失附件。
+          if ! gh release view "$tag" --json tagName > /dev/null 2>&1; then
+            gh release create "$tag" --verify-tag --draft --title "$tag" --notes-file release-notes.md
+          fi
+          existing_assets="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+          for asset in ./*.tar.gz ./*.sha256; do
+            if ! grep -Fxq "${asset#./}" <<< "$existing_assets"; then
+              gh release upload "$tag" "$asset"
+            fi
+          done
+          # 校验真正保存到 Release 的附件，避免中断重跑后出现附件与校验文件不匹配。
+          mkdir verified-assets
+          gh release download "$tag" --dir verified-assets --pattern 'cloudpaste-go-linux-*'
+          (cd verified-assets && sha256sum -c ./*.sha256)
+          gh release edit "$tag" --draft=false --prerelease="$prerelease"

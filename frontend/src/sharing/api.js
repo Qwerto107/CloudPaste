@@ -1,0 +1,124 @@
+import { session, clearSession } from "./session.js";
+
+export const backendBase = (
+  window.appConfig?.backendUrl ||
+  (typeof __BACKEND_URL__ !== "undefined" ? __BACKEND_URL__ : "") ||
+  window.location.origin
+).replace(/\/$/, "");
+const base = backendBase;
+
+// 管理员和 API Key 保持独立入口，公开分享绝不附带登录凭据。
+export function apiURL(endpoint, publicRequest = false) {
+  const scope =
+    !publicRequest &&
+    session.type === "admin" &&
+    !endpoint.startsWith("/admin/")
+      ? "/admin"
+      : "";
+  return `${base}/api${scope}${endpoint}`;
+}
+export function authorization() {
+  return session.token
+    ? `${session.type === "admin" ? "Bearer" : "ApiKey"} ${session.token}`
+    : "";
+}
+
+export async function request(
+  endpoint,
+  { method = "GET", body, public: publicRequest = false, signal } = {},
+) {
+  const headers = { "Content-Type": "application/json" };
+  if (!publicRequest && authorization())
+    headers.Authorization = authorization();
+  const response = await fetch(apiURL(endpoint, publicRequest), {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: signal || AbortSignal.timeout(30000),
+    cache: "no-store",
+  });
+  let value;
+  try {
+    value = await response.json();
+  } catch {
+    throw new Error(
+      `接口未返回 JSON（HTTP ${response.status}），请检查反向代理配置`,
+    );
+  }
+  if (!response.ok || !value.success) {
+    const error = Object.assign(
+      new Error(value.message || `请求失败（${response.status}）`),
+      { status: response.status, code: value.code, data: value.data },
+    );
+    if (!publicRequest && response.status === 401) clearSession();
+    throw error;
+  }
+  return value.data;
+}
+
+export function uploadShare(file, fields, onProgress, signal) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const abort = () => xhr.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    const cleanup = () => signal?.removeEventListener("abort", abort);
+    xhr.open("PUT", apiURL("/share/upload"));
+    xhr.timeout = 3600000;
+    xhr.setRequestHeader("Authorization", authorization());
+    xhr.setRequestHeader(
+      "Content-Type",
+      file.type || "application/octet-stream",
+    );
+    xhr.setRequestHeader("X-Share-Filename", encodeURIComponent(file.name));
+    // UTF-8 编码后转 Base64，中文备注和密码不会损坏。
+    const bytes = new TextEncoder().encode(JSON.stringify(fields));
+    xhr.setRequestHeader(
+      "X-Share-Options",
+      btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join("")),
+    );
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable)
+        onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+    xhr.onload = () => {
+      cleanup();
+      try {
+        const value = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300 && value.success)
+          resolve(value.data);
+        else reject(new Error(value.message || "上传失败"));
+      } catch {
+        reject(new Error(`上传接口返回异常（HTTP ${xhr.status}）`));
+      }
+    };
+    xhr.onerror = () => {
+      cleanup();
+      reject(new Error("上传连接失败"));
+    };
+    xhr.ontimeout = () => {
+      cleanup();
+      reject(new Error("上传超时"));
+    };
+    xhr.onabort = () => {
+      cleanup();
+      reject(new Error("上传已取消"));
+    };
+    if (signal?.aborted) {
+      cleanup();
+      reject(new Error("上传已取消"));
+      return;
+    }
+    xhr.send(file);
+  });
+}
+
+// 下载票据也可能经过独立后端域名，统一补全服务器返回的相对链接。
+export function contentURL(value) {
+  const url = new URL(value, `${base}/`);
+  if (!["http:", "https:"].includes(url.protocol))
+    throw new Error("文件链接协议无效");
+  return url.href;
+}
+export function shareURL(type, slug) {
+  return `${window.location.origin}/${type}/${encodeURIComponent(slug)}`;
+}
