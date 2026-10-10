@@ -50,8 +50,8 @@ mkdir -p files
 ```dotenv
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=请替换为你自己的强密码
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.3.1
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.3.1
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.4.0
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.4.0
 LOCAL_FILES_DIR=./files
 ```
 
