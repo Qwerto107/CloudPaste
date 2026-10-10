@@ -41,9 +41,16 @@ watch(
   () => settings.site_favicon_url,
   (value) => {
     try {
-      const url = new URL(value || "/cloudpaste.svg", location.origin);
-      if (["https:", "http:"].includes(url.protocol))
-        document.querySelector('link[rel="icon"]').href = url.href;
+      const url = value ? new URL(value, location.origin) : null;
+      if (url && !["https:", "http:"].includes(url.protocol)) return;
+      // 同时更新两种格式，避免浏览器继续选择默认图标；清空设置恢复本站资源。
+      for (const icon of document.querySelectorAll("link[data-site-icon]")) {
+        icon.dataset.defaultHref ||= icon.getAttribute("href");
+        icon.dataset.defaultType ||= icon.type;
+        icon.href = url?.href || icon.dataset.defaultHref;
+        if (url) icon.removeAttribute("type");
+        else icon.type = icon.dataset.defaultType;
+      }
     } catch {}
   },
 );

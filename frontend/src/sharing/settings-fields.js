@@ -61,7 +61,7 @@ export const fields = {
   site_favicon_url: {
     label: "站点图标",
     help: "填写图标地址，建议使用本站资源；留空使用默认图标。",
-    placeholder: "/cloudpaste.svg",
+    placeholder: "/chain-cloud.svg",
   },
   site_footer_markdown: {
     label: "页脚内容",
