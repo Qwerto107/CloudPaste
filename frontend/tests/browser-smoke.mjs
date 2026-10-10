@@ -138,7 +138,10 @@ try {
     headless: true,
     ...(installed ? { executablePath: installed } : {}),
   });
-  const context = await browser.newContext();
+  const context = await browser.newContext({
+    colorScheme: "dark",
+    viewport: { width: 1440, height: 1000 },
+  });
   context.setDefaultTimeout(15000);
   context.setDefaultNavigationTimeout(15000);
   const page = await context.newPage();
@@ -151,6 +154,15 @@ try {
   });
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(origin + "/admin/login");
+  // 首次跟随系统，手动选择后刷新仍保留；严格 CSP 下无需内联脚本。
+  assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  await page.getByRole("button", { name: "切换到浅色模式" }).click();
+  await page.reload();
+  assert.equal(await page.locator("html").getAttribute("data-theme"), "light");
+  await page.screenshot({
+    path: resolve(root, "backend/bin/mint-login-light.png"),
+    fullPage: true,
+  });
   await page.getByLabel("账号", { exact: true }).fill("admin");
   await page.getByLabel("密码", { exact: true }).fill(password);
   await page.getByRole("button", { name: "登录", exact: true }).click();
@@ -166,6 +178,34 @@ try {
     "登录提前加载了 Markdown",
   );
   await page.getByRole("link", { name: "文本分享", exact: true }).click();
+  await page.getByLabel("分享标题").fill("浏览器分享验证");
+  await page
+    .getByLabel("分享内容")
+    .fill(
+      "# 临时笔记\n\n把需要分享的内容留在这里。\n\n- 支持文本与 Markdown\n- 为链接设置有效期\n- 添加访问密码，按需分享",
+    );
+  await page.screenshot({
+    path: resolve(root, "backend/bin/mint-home-light.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "切换到暗色模式" }).click();
+  assert.equal(
+    await page.getByLabel("分享标题").inputValue(),
+    "浏览器分享验证",
+  );
+  await page.screenshot({
+    path: resolve(root, "backend/bin/mint-home-dark.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "预览", exact: true }).click();
+  await page.getByRole("heading", { name: "临时笔记", exact: true }).waitFor();
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  assert.ok(
+    (await page.getByLabel("分享内容").inputValue()).includes("临时笔记"),
+  );
+  await page.reload();
+  assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  // 刷新不保存草稿，重新填写用于后续真实分享验证。
   await page.getByLabel("分享标题").fill("浏览器分享验证");
   await page
     .getByLabel("分享内容")
@@ -230,6 +270,15 @@ try {
   await page.getByLabel("标题", { exact: true }).fill("已编辑文本");
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await page.getByText("已编辑文本", { exact: true }).waitFor();
+  await page.screenshot({
+    path: resolve(root, "backend/bin/mint-admin-dark.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "切换到浅色模式" }).click();
+  await page.screenshot({
+    path: resolve(root, "backend/bin/mint-admin-light.png"),
+    fullPage: true,
+  });
   await page.goto(origin + "/admin/storage");
   await page.getByRole("button", { name: "测试", exact: true }).click();
   await page.getByText("连接测试通过", { exact: true }).waitFor();
@@ -347,6 +396,69 @@ try {
     .waitFor({ state: "attached" });
   await page.goto(origin + "/");
   await page.getByLabel("分享内容").waitFor();
+  // 小屏可操作性检查：导航可见且页面不产生整体横向滚动。
+  for (const width of [320, 390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const path of ["/", "/upload", "/admin/text-management"]) {
+      await page.goto(origin + path);
+      await page.locator(".panel").first().waitFor();
+      assert.ok(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        `页面溢出: ${path}, ${width}px`,
+      );
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(origin + "/upload");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "旅行笔记.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("旅途中的一些记录"),
+  });
+  await page.getByRole("button", { name: "更多选项", exact: true }).click();
+  await page.getByLabel("访问密码", { exact: true }).fill("temporary-password");
+  await page.getByRole("button", { name: "收起", exact: true }).click();
+  await page.getByRole("button", { name: "更多选项", exact: true }).click();
+  assert.equal(
+    await page.getByLabel("访问密码", { exact: true }).inputValue(),
+    "temporary-password",
+  );
+  await page.getByRole("button", { name: "收起", exact: true }).click();
+  await page.screenshot({
+    path: resolve(root, "backend/bin/mint-mobile-light.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "切换到暗色模式" }).click();
+  await page.screenshot({
+    path: resolve(root, "backend/bin/mint-mobile-dark.png"),
+    fullPage: true,
+  });
+  // 禁用本地存储时仍可加载并切换主题，不中断登录或分享页面。
+  const privateContext = await browser.newContext({ colorScheme: "dark" });
+  await privateContext.addInitScript(() => {
+    Object.defineProperty(window, "localStorage", {
+      get() {
+        throw new DOMException("Storage blocked", "SecurityError");
+      },
+    });
+  });
+  const privatePage = await privateContext.newPage();
+  privatePage.on("pageerror", (error) => errors.push(error.message));
+  await privatePage.goto(origin + "/admin/login");
+  assert.equal(
+    await privatePage.locator("html").getAttribute("data-theme"),
+    "dark",
+  );
+  await privatePage.getByRole("button", { name: "切换到浅色模式" }).click();
+  assert.equal(
+    await privatePage.locator("html").getAttribute("data-theme"),
+    "light",
+  );
+  await privateContext.close();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(origin + "/");
   await page.screenshot({
     path: resolve(root, "backend/bin/sharing-home.png"),
     fullPage: true,
@@ -368,6 +480,7 @@ try {
       security: "XSS 与角色隔离",
       externalRequests: external.length,
       loginResourceRequests,
+      theme: "跟随系统、切换记忆、存储禁用降级及四种屏宽",
     }),
   );
 } finally {

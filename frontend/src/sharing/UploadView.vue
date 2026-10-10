@@ -3,6 +3,7 @@ import { computed, onMounted, onBeforeUnmount, ref } from "vue";
 import { request, uploadShare, shareURL } from "./api.js";
 import { hasPermission, session } from "./session.js";
 import { settings } from "./settings.js";
+import Icon from "./Icon.vue";
 const files = ref([]);
 const storages = ref([]);
 const storage = ref("");
@@ -11,6 +12,7 @@ const password = ref("");
 const remark = ref("");
 const maxViews = ref(0);
 const busy = ref(false);
+const advanced = ref(false);
 const progress = ref(0);
 const current = ref("");
 const results = ref([]);
@@ -100,13 +102,18 @@ async function copy(value) {
       上传需要文件分享权限。<RouterLink to="/admin/login">登录</RouterLink>
     </div>
     <form @submit.prevent="upload">
-      <label class="drop-zone" @dragover.prevent @drop.prevent="drop"
+      <label
+        class="drop-zone"
+        :class="{ disabled: busy || !allowed }"
+        @dragover.prevent
+        @drop.prevent="drop"
         ><input
           type="file"
           multiple
+          aria-label="选择文件"
           :disabled="busy || !allowed"
           @change="select"
-        /><strong>选择文件，或拖到这里</strong
+        /><Icon name="upload" /><strong>选择文件，或拖到这里</strong
         ><span class="muted"
           >每次最多 30 个文件，单文件不超过
           {{ settings.max_upload_size }} MiB</span
@@ -114,7 +121,7 @@ async function copy(value) {
       >
       <ul v-if="files.length" class="file-queue">
         <li v-for="(file, index) in files" :key="index">
-          <span>{{ file.name }}</span
+          <span class="file-name"><Icon name="file" />{{ file.name }}</span
           ><small>{{ (file.size / 1048576).toFixed(2) }} MiB</small>
         </li>
       </ul>
@@ -145,25 +152,35 @@ async function copy(value) {
           </select></label
         >
       </div>
-      <div class="form-row">
+      <button
+        type="button"
+        class="quiet"
+        :aria-expanded="advanced"
+        @click="advanced = !advanced"
+      >
+        <Icon name="settings" />{{ advanced ? "收起" : "更多选项" }}
+      </button>
+      <div v-if="advanced" class="advanced-options">
+        <div class="form-row">
+          <label
+            >访问密码<input
+              v-model="password"
+              type="password"
+              placeholder="可选"
+              autocomplete="new-password"
+              maxlength="72" /></label
+          ><label
+            >最多查看次数<input
+              v-model.number="maxViews"
+              type="number"
+              min="0"
+              placeholder="0 为不限"
+          /></label>
+        </div>
         <label
-          >访问密码<input
-            v-model="password"
-            type="password"
-            placeholder="可选"
-            autocomplete="new-password"
-            maxlength="72" /></label
-        ><label
-          >最多查看次数<input
-            v-model.number="maxViews"
-            type="number"
-            min="0"
-            placeholder="0 为不限"
+          >备注<input v-model="remark" maxlength="4000" placeholder="可选"
         /></label>
       </div>
-      <label
-        >备注<input v-model="remark" maxlength="4000" placeholder="可选"
-      /></label>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <div v-if="busy" class="upload-progress">
         <span
@@ -173,13 +190,14 @@ async function copy(value) {
         ><progress :value="progress" max="100"></progress>
       </div>
       <div class="actions">
+        <span class="muted small">到期后链接失效，原文件仍保留在存储中。</span>
         <button v-if="busy" type="button" @click="controller?.abort()">
           取消上传</button
         ><button
           class="primary"
           :disabled="busy || !allowed || !storage || !files.length"
         >
-          {{ busy ? "正在上传…" : "上传并创建分享" }}
+          <Icon name="link" />{{ busy ? "正在上传…" : "上传并创建分享" }}
         </button>
       </div>
     </form>

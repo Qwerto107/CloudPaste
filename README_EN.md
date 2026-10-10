@@ -18,6 +18,8 @@ Backup/restore, WebDAV, dashboards, complex file browsing, jobs, indexing and Of
 
 All application assets are served locally. There are no CDN libraries or remote fonts. Markdown loads on demand and blocks external images by default. Offline precaching is disabled; the upgrade worker clears old application caches. Site HTML is sanitized and cannot execute scripts or embed forms/iframes.
 
+The mint interface supports light and dark modes. The first visit follows the system preference, and manual choices are remembered in the browser. Mobile screens use bottom navigation; icons are local SVGs with no external fonts or icon libraries.
+
 ## Admin isolation
 
 Admins use `/api/admin/*`, API Keys use ordinary `/api/*`, and visitors use public share endpoints. Apply your IP allowlist or mTLS policy to the complete admin prefix in the external reverse proxy. Admin login is still required; do not expose internal ports that bypass your proxy. See the [API reference](Api-doc.md).

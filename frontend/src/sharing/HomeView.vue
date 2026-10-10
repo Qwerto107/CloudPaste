@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, ref } from "vue";
 import { request, shareURL } from "./api.js";
 import { hasPermission } from "./session.js";
 import { settings } from "./settings.js";
+import Icon from "./Icon.vue";
 const MarkdownPreview = defineAsyncComponent(
   () => import("./MarkdownPreview.vue"),
 );
@@ -61,7 +62,7 @@ async function copy() {
     <h1>把文字留在这里</h1>
     <p class="muted">粘贴文本或 Markdown，生成一个带有效期的分享链接。</p>
   </div>
-  <section class="panel">
+  <section class="panel compose-panel">
     <div v-if="!allowed" class="notice">
       创建分享需要授权。<RouterLink to="/admin/login"
         >登录管理员或 API Key</RouterLink
@@ -75,11 +76,26 @@ async function copy() {
         maxlength="200"
         aria-label="分享标题"
       />
-      <div class="editor-heading">
-        <span>{{ preview ? "Markdown 预览" : "文本内容" }}</span
-        ><button type="button" class="quiet" @click="preview = !preview">
-          {{ preview ? "继续编辑" : "预览" }}
-        </button>
+      <div class="editor-heading compose-heading">
+        <div class="tabs" aria-label="编辑视图">
+          <button
+            type="button"
+            :class="{ active: !preview }"
+            :aria-pressed="!preview"
+            @click="preview = false"
+          >
+            编辑
+          </button>
+          <button
+            type="button"
+            :class="{ active: preview }"
+            :aria-pressed="preview"
+            @click="preview = true"
+          >
+            预览
+          </button>
+        </div>
+        <span class="muted small">支持 Markdown</span>
       </div>
       <MarkdownPreview
         v-if="preview"
@@ -93,53 +109,61 @@ async function copy() {
         required
         aria-label="分享内容"
       ></textarea>
-      <div class="form-row">
-        <label
-          >有效期<select v-model.number="hours">
-            <option
-              v-if="
-                ![0, 1, 24, 168, 720].includes(
-                  Number(settings.share_default_expiry_hours),
-                )
-              "
-              :value="Number(settings.share_default_expiry_hours)"
-            >
-              站点默认（{{ settings.share_default_expiry_hours }} 小时）
-            </option>
-            <option :value="1">1 小时</option>
-            <option :value="24">1 天</option>
-            <option :value="168">7 天</option>
-            <option :value="720">30 天</option>
-            <option :value="0">长期保留</option>
-          </select></label
-        ><label
-          >访问密码<input
-            v-model="password"
-            type="password"
-            placeholder="可选"
-            autocomplete="new-password"
-            maxlength="72"
-        /></label>
-      </div>
-      <button type="button" class="quiet" @click="advanced = !advanced">
-        {{ advanced ? "收起" : "更多选项" }}</button
-      ><label v-if="advanced"
-        >最多查看次数<input
-          v-model.number="maxViews"
-          type="number"
-          min="0"
-          placeholder="0 为不限"
-      /></label>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <div class="actions">
-        <span class="muted small">{{ content.length }} 个字符</span
+      <p class="editor-meta muted small">{{ content.length }} 个字符</p>
+      <div class="share-options">
+        <div class="form-row">
+          <label
+            >有效期<select v-model.number="hours">
+              <option
+                v-if="
+                  ![0, 1, 24, 168, 720].includes(
+                    Number(settings.share_default_expiry_hours),
+                  )
+                "
+                :value="Number(settings.share_default_expiry_hours)"
+              >
+                站点默认（{{ settings.share_default_expiry_hours }} 小时）
+              </option>
+              <option :value="1">1 小时</option>
+              <option :value="24">1 天</option>
+              <option :value="168">7 天</option>
+              <option :value="720">30 天</option>
+              <option :value="0">长期保留</option>
+            </select></label
+          ><label
+            >访问密码<input
+              v-model="password"
+              type="password"
+              placeholder="可选"
+              autocomplete="new-password"
+              maxlength="72"
+          /></label>
+        </div>
+        <button
+          type="button"
+          class="quiet"
+          :aria-expanded="advanced"
+          @click="advanced = !advanced"
+        >
+          <Icon name="settings" />
+          {{ advanced ? "收起" : "更多选项" }}</button
         ><button
           class="primary"
           :disabled="busy || !allowed || !content.trim()"
         >
-          {{ busy ? "正在创建…" : "创建分享" }}
+          <Icon name="link" />{{ busy ? "正在创建…" : "创建分享" }}
         </button>
       </div>
+      <div v-if="advanced" class="advanced-options">
+        <label
+          >最多查看次数<input
+            v-model.number="maxViews"
+            type="number"
+            min="0"
+            placeholder="0 为不限"
+        /></label>
+      </div>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
     </form>
   </section>
   <section v-if="link" class="panel result">

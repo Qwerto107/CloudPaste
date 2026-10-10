@@ -12,18 +12,15 @@ import { sanitizeHTML } from "./sharing/sanitize.js";
 import { settings } from "./sharing/settings.js";
 import { session, clearSession } from "./sharing/session.js";
 import { request } from "./sharing/api.js";
+import Icon from "./sharing/Icon.vue";
 const MarkdownPreview = defineAsyncComponent(
   () => import("./sharing/MarkdownPreview.vue"),
 );
 const router = useRouter();
 const error = ref("");
 const announcement = ref(false);
-const dark = ref(false);
-try {
-  dark.value = localStorage.getItem("sharing-theme") === "dark";
-} catch {
-  /* 隐私模式下使用默认主题。 */
-}
+// 首次主题由头部同源脚本提前设置，避免暗色页面刷新时闪白。
+const dark = ref(document.documentElement.dataset.theme === "dark");
 function applyTheme() {
   document.documentElement.dataset.theme = dark.value ? "dark" : "light";
   try {
@@ -31,7 +28,6 @@ function applyTheme() {
   } catch {}
 }
 watch(dark, applyTheme);
-applyTheme();
 // 站点自定义内容只接受清理后的 HTML，不执行脚本或事件属性。
 function clean(value) {
   return sanitizeHTML(
@@ -70,31 +66,59 @@ async function logout() {
 <template>
   <header class="site-header">
     <RouterLink class="brand" to="/"
-      ><span class="brand-icon">P</span
-      >{{ settings.site_title || "CloudPaste" }}</RouterLink
+      ><span class="brand-icon"><Icon name="cloud" /></span
+      ><span class="brand-name">{{
+        settings.site_title || "CloudPaste"
+      }}</span></RouterLink
     >
     <nav aria-label="主导航">
       <RouterLink v-if="settings.site_home_editor_enabled !== 'false'" to="/"
-        >文本分享</RouterLink
+        ><Icon name="text" />文本分享</RouterLink
       ><RouterLink
         v-if="settings.site_upload_page_enabled !== 'false'"
         to="/upload"
-        >文件分享</RouterLink
-      ><RouterLink :to="session.type === 'none' ? '/admin/login' : '/admin'">{{
-        session.type === "none" ? "登录" : "管理"
-      }}</RouterLink
-      ><button
+        ><Icon name="folder" />文件分享</RouterLink
+      ><RouterLink :to="session.type === 'none' ? '/admin/login' : '/admin'"
+        ><Icon name="grid" />{{
+          session.type === "none" ? "登录" : "管理"
+        }}</RouterLink
+      >
+    </nav>
+    <div class="header-actions">
+      <span
+        v-if="session.type !== 'none'"
+        class="account-chip"
+        :title="session.name"
+        ><span class="avatar">{{
+          (session.name || "U").slice(0, 1).toUpperCase()
+        }}</span
+        ><span class="account-name">{{ session.name || "用户" }}</span></span
+      >
+      <button
         v-if="settings.site_announcement_enabled === 'true'"
         class="quiet"
+        aria-label="站点公告"
+        :aria-expanded="announcement"
         @click="announcement = !announcement"
       >
-        公告</button
-      ><button class="quiet" @click="dark = !dark">
-        {{ dark ? "浅色" : "深色" }}</button
-      ><button v-if="session.type !== 'none'" class="quiet" @click="logout">
-        退出
+        <Icon name="bell" /></button
+      ><button
+        class="quiet theme-toggle"
+        :aria-label="dark ? '切换到浅色模式' : '切换到暗色模式'"
+        :title="dark ? '切换到浅色模式' : '切换到暗色模式'"
+        @click="dark = !dark"
+      >
+        <Icon :name="dark ? 'sun' : 'moon'" /></button
+      ><button
+        v-if="session.type !== 'none'"
+        class="quiet"
+        aria-label="退出"
+        title="退出"
+        @click="logout"
+      >
+        <Icon name="logout" />
       </button>
-    </nav>
+    </div>
   </header>
   <main class="site-main">
     <p v-if="error" class="error" role="alert">
