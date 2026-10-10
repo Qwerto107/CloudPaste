@@ -9,6 +9,7 @@ on:
         default: false
   pull_request:
     paths:
+      - docs/binary.md
       - backend/**
       - frontend/**
       - docker/frontend/**
@@ -22,6 +23,7 @@ on:
     tags:
       - 'go-v*'
     paths:
+      - docs/binary.md
       - backend/**
       - frontend/**
       - docker/frontend/**
@@ -129,7 +131,8 @@ jobs:
           mkdir -p "bin/release/$target"
           go build -trimpath -ldflags='-s -w' -o "bin/release/$target/cloudpaste" ./cmd/cloudpaste
           chmod 0755 "bin/release/$target/cloudpaste"
-          cp README.md "bin/release/$target/README.md"
+          # 压缩包携带可独立阅读的二进制启动说明。
+          cp ../docs/binary.md "bin/release/$target/README.md"
           cp ../LICENSE "bin/release/$target/LICENSE"
           # tar 保留可执行权限，外层 Actions 附件不会改变二进制的权限。
           # 固定时间和所有者，重跑同一提交时不会因打包时间改变校验值。

@@ -1,6 +1,6 @@
-# CloudPaste Go 后端 API
+# API 参考
 
-本文对应 `backend/` 中的 Go 后端。管理员接口与普通用户接口已分离，管理员前缀为 `/api/admin`。外部 Nginx 的 IP 白名单或 mTLS 由部署者配置，后端本身不验证这些网络策略。
+本文对应 CloudPaste 的 HTTP API。管理员前缀为 `/api/admin`，普通用户使用 `/api`。外部 Nginx 的 IP 白名单或 mTLS 由部署者配置，后端本身不验证这些网络策略。返回 [文档中心](README.md)。
 
 ## 身份与入口
 
@@ -72,13 +72,13 @@
 | POST | `/api/fs/multipart/complete` | 校验、合并并发布，`512` |
 | PUT | `/api/fs/multipart/part/{id}/{number}` | 专用 `sign`；复核原身份、会话及上传权限 |
 
-旧的 `POST /api/proxy/link` 及其管理员对应路径仍明确返回不支持，不能用于任意代理。
+`POST /api/proxy/link` 及其管理员对应路径返回不支持，不能用于任意代理。
 
 普通存储响应的字段白名单为 `id`、`name`、`storage_type`、`is_public`、`is_default`、`status`、`readonly`、`capabilities` 和 `upload_protocol`。真实路径、上游地址、桶名称、区域、用户名、备注、凭据和管理时间字段仅供管理员查看；`reveal` 参数不能扩大 API Key 的响应范围。存储 ACL 和公开标记仍同时生效。
 
 ## 管理员专属
 
-原来散落在普通路径中的管理员专属操作已移入下列前缀，旧路径不保留管理能力。
+下列操作只接受管理员身份，并统一位于管理员前缀下。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -114,7 +114,7 @@
 
 普通 JSON 成功响应为 `{"success":true,"code":"OK","message":"操作成功","data":{}}`；创建资源通常返回 HTTP `201` 和 `code="CREATED"`。错误使用相应 HTTP 状态，包含 `success=false`、字符串 `code` 和 `message`。下载和原始文本返回各自格式。GET 路由也匹配 HEAD，文件读取支持 Range。
 
-原始上传使用 `Content-Type: application/octet-stream` 和 `X-FS-Filename`；表单上传使用 `multipart/form-data`，文件字段名为 `file`。中文文件名和元信息编码可参考 [分享客户端](frontend/src/sharing/api.js)。
+原始上传使用 `Content-Type: application/octet-stream` 和 `X-FS-Filename`；表单上传使用 `multipart/form-data`，文件字段名为 `file`。中文文件名和元信息编码可参考 [分享客户端](../frontend/src/sharing/api.js)。
 
 普通 API Key 上传示例：
 
@@ -128,11 +128,11 @@ curl --fail-with-body -X PUT 'http://127.0.0.1:8081/api/fs/upload?path=/local' \
 
 管理员改用 `/api/admin/fs/upload` 和 Bearer 会话令牌。上传先私有暂存，再检查实际大小、当前授权和目标配置；冲突返回 `409`，超过单文件上限返回 `413`，临时额度不足返回 `507`。分片会话保留 24 小时，分片大小为 5–16 MiB。
 
-`/api/upload-direct`、浏览器上游直传、删除文件本体尚未实现；WebDAV 已移除。完整限制见 [后端说明](backend/README.md)，路由与权限见 [后端源码](backend/internal/server/)。
+上传由本站后端接收；API 不提供浏览器上游直传和文件本体删除操作。资源配置见 [部署指南](deployment.md)，路由与权限见 [后端源码](../backend/internal/server/)。
 
-## 精简分享站设置
+## 系统设置
 
-全局、预览和站点设置分组分别为 `1`、`2`、`4`。已删除 WebDAV 设置、服务和存储驱动；`/dav` 及 `/api/admin/dav` 返回 404，Basic 认证不再支持。
+全局、预览和站点设置分组分别为 `1`、`2`、`4`。认证使用管理员 Bearer 会话或 API Key，不接受 Basic 认证。
 
 可写全局设置：`max_upload_size`（MiB，只能降低环境硬上限）、`share_default_expiry_hours`（0–876000 小时）。可写预览设置：`preview_max_text_kb`（16–2048）、`preview_text_types`、`preview_image_types`、`preview_video_types`、`preview_audio_types`（逗号分隔扩展名）、`preview_allow_external_images`（布尔）。站点设置包括标题、图标、页脚、顶部 / 底部安全 HTML、文本 / 文件入口开关及公告；只读设置不能修改。
 
@@ -142,7 +142,7 @@ curl --fail-with-body -X PUT 'http://127.0.0.1:8081/api/fs/upload?path=/local' \
 
 新文本省略 `expires_at`、新文件省略 `expires_in` 时使用站点默认有效期。文本显式 `expires_at:null`、文件 `expires_in:0` 表示不过期。过期分享和删除分享记录不自动删除存储文件。
 
-挂载、目录密码、分片接口仍保留供已有数据与受限路径授权兼容；精简前端不再显示挂载浏览和相关高级入口。`/api/admin/dashboard/stats` 已移除。
+挂载、目录密码和分片接口用于程序化访问及路径授权；这些接口不对应前端导航入口。
 
 ## 自定义分享链接
 

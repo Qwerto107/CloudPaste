@@ -1,0 +1,105 @@
+<div align="center">
+
+<img src="../frontend/public/chain-cloud.svg" width="76" height="76" alt="CloudPaste">
+
+# CloudPaste
+
+**A small place for things you want to share.**
+
+Self-hosted text and file sharing, with custom links, expiration, passwords and view limits.
+
+[中文](../README.md) · [Documentation](README.md) · [API](api.md) · [Releases](https://github.com/Qwerto107/CloudPaste/releases)
+
+**Go + Vue**　 / 　**LOCAL · S3**　 / 　**Docker · amd64 · arm64**
+
+</div>
+
+---
+
+## A focused sharing experience
+
+![CloudPaste mint product mockup: desktop sharing, management and mobile upload](assets/product-showcase.png)
+
+*Product design mockup showing the desktop and mobile experience.*
+
+<details>
+<summary><strong>View actual application screenshots</strong></summary>
+
+![Text sharing in light mode](assets/share-light.png)
+
+<table>
+  <tr><th width="70%">Dark mode</th><th width="30%">Mobile upload</th></tr>
+  <tr><td valign="top"><img src="assets/share-dark.png" alt="Dark text editor"></td><td valign="top"><img src="assets/upload-mobile.png" alt="Mobile file sharing"></td></tr>
+</table>
+
+Screenshots show the current application with demonstration content.
+
+</details>
+
+| Feature | What it offers |
+| --- | --- |
+| Text sharing | Plain text and Markdown, with editing and preview modes |
+| File sharing | Drag and drop, batch uploads, individual link names and retrying remaining files |
+| Link controls | Custom names, passwords, view limits and expiration from minutes to days |
+| Previews | Text, images, browser-native video and audio; download other formats |
+| Storage | Local directories and S3, connection tests, defaults and access controls |
+| API Keys | Generated or custom values, separate sharing and management permissions |
+| Administration | Share records, storage, keys, admin account and site settings |
+
+New shares expire after 24 hours by default. Expiring or deleting a share revokes access without deleting the stored file. Editing a filename changes its display name only.
+
+## Docker quick start
+
+Run from the repository root with Docker Compose available:
+
+```sh
+cp backend/.env.example backend/.env
+mkdir -p files
+```
+
+Edit `backend/.env` with your own strong password and matching image versions:
+
+```dotenv
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=replace-with-your-own-strong-password
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.4.1
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.4.1
+LOCAL_FILES_DIR=./files
+```
+
+On Linux, grant UID/GID `65532` access to the file directory. For a newly created dedicated directory, use `sudo chown 65532:65532 files`.
+
+```sh
+docker compose --env-file backend/.env pull
+docker compose --env-file backend/.env up -d --no-build
+```
+
+Open `http://127.0.0.1:8081/admin/login`, sign in and configure LOCAL storage with `/files` as its root, or add S3 storage. Create API Keys for other users, who sign in at `/login`.
+
+See the [deployment guide](deployment.md) for public access, directory permissions, resource limits and upgrades. [Linux binaries](binary.md) are also available for standalone hosting.
+
+## Local assets, clear boundaries
+
+The Vue frontend builds into static pages. Scripts, styles and icons are served by the site; Markdown loads on demand. The backend streams uploads through private staging before writing to storage.
+
+API Key management pages use `/manage/*`; administrator pages use `/admin/*`. Admin APIs use `/api/admin/*` and can be protected by an external reverse proxy with an IP allowlist or mTLS, in addition to account authentication.
+
+Markdown blocks external images by default. Custom site HTML is sanitized. The mint interface supports light and dark modes, remembered theme choices and mobile navigation. The chain-cloud favicon adapts to the browser color scheme.
+
+## Documentation
+
+| Topic | Guide |
+| --- | --- |
+| Sharing, permissions and settings | [Usage](usage.md) |
+| Docker, data and upgrades | [Deployment](deployment.md) |
+| Standalone backend | [Binaries](binary.md) |
+| Guest, API Key and administrator endpoints | [API reference](api.md) |
+| Local development and checks | [Development](development.md) |
+| Multi-platform images and release assets | [Publishing](releasing.md) |
+| Version changes | [Changelog](changelog.md) |
+
+Detailed guides are currently in Chinese.
+
+---
+
+Built with Go, SQLite and Vue · [Apache License 2.0](../LICENSE)
