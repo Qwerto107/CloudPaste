@@ -152,6 +152,10 @@ button:disabled {
   font-size: 1.15rem;
   letter-spacing: -0.025em;
 }
+/* 站点标题是首页入口，悬停时不沿用正文链接的下划线。 */
+.brand:hover {
+  text-decoration: none;
+}
 .brand-name {
   overflow: hidden;
   text-overflow: ellipsis;
