@@ -7,12 +7,12 @@
 | 身份 | 入口 | 认证 |
 | --- | --- | --- |
 | 未登录访客 | 公开 `/api/*` 分享及站点信息 | 公开分享仍校验密码、过期、次数及读取票据 |
-| API Key 用户 | 普通 `/api/*`，WebDAV 为 `/dav` | `Authorization: ApiKey <密钥>` |
-| 管理员 | `/api/admin/*`，WebDAV 为 `/api/admin/dav` | `Authorization: Bearer <会话令牌>`；管理 WebDAV 也支持管理员 Basic 认证 |
+| API Key 用户 | 普通 `/api/*` | `Authorization: ApiKey <密钥>` |
+| 管理员 | `/api/admin/*` | `Authorization: Bearer <会话令牌>` |
 
 目前没有普通用户注册体系。API Key 必须启用且未过期，并满足权限、路径范围和存储 ACL；非管理员内容管理还检查归属。
 
-管理员凭据不能用于普通用户入口，API Key 不能用于管理员入口。管理员下载和分片票据只能在管理员前缀中使用，换到普通路径会失败。外部代理必须覆盖 `/api/admin` 本身和 `/api/admin/` 下全部请求，包括登录、下载、分片与 WebDAV；不要暴露可绕过代理的后端端口。
+管理员凭据不能用于普通用户入口，API Key 不能用于管理员入口。管理员下载和分片票据只能在管理员前缀中使用，换到普通路径会失败。外部代理必须覆盖 `/api/admin` 本身和 `/api/admin/` 下全部请求，包括登录、下载与分片；不要暴露可绕过代理的后端端口。
 
 共享业务接口为管理员提供对应路径：普通用户的 `/api/fs/list` 对应管理员的 `/api/admin/fs/list`，`/api/paste` 对应 `/api/admin/paste`。管理员路径仍要求管理员身份，不能依靠改 URL 提权。前端根据此次请求的认证身份选择路径。
 
@@ -44,7 +44,7 @@
 | 方法 | 路径 | 用途 / 权限位 |
 | --- | --- | --- |
 | GET | `/api/test/api-key` | 当前身份及权限，有效认证 |
-| GET | `/api/storage`、`/api/storage/{id}` | 需具备 `256`、`512` 或 `65536` 中至少一项权限；仅返回存储选择和能力字段 |
+| GET | `/api/storage`、`/api/storage/{id}` | 需具备 `256`、`512`  中至少一项权限；仅返回存储选择和能力字段 |
 | GET | `/api/storage-types` | 支持的存储和配置字段 |
 | POST | `/api/paste` | 创建文本，`1` |
 | GET | `/api/pastes`、`/api/pastes/{id}` | 列表和详情，`4` |
@@ -69,8 +69,6 @@
 | POST | `/api/fs/multipart/abort` | 取消会话，`512` |
 | POST | `/api/fs/multipart/complete` | 校验、合并并发布，`512` |
 | PUT | `/api/fs/multipart/part/{id}/{number}` | 专用 `sign`；复核原身份、会话及上传权限 |
-| PROPFIND | `/dav`、`/dav/{path...}` | 只读目录查询，Depth 0/1，`65536` |
-| GET / HEAD | `/dav/{path...}` | 文件读取，`65536` |
 
 旧的 `POST /api/proxy/link` 及其管理员对应路径仍明确返回不支持，不能用于任意代理。
 
@@ -104,19 +102,17 @@
 | GET | `/api/admin/settings/groups` | 设置分组 |
 | GET | `/api/admin/settings/metadata` | 设置字段元信息 |
 | PUT | `/api/admin/settings/group/{group}` | 修改可写设置 |
-| GET | `/api/admin/dashboard/stats` | 管理统计 |
 | POST | `/api/admin/cache/clear` | 清理上游连接缓存 |
 | GET / HEAD | `/api/admin/p/{path...}` | 管理员短期读取票据，仅管理前缀有效 |
 | PUT | `/api/admin/fs/multipart/part/{id}/{number}` | 管理员分片票据，仅管理前缀有效 |
-| PROPFIND / GET / HEAD | `/api/admin/dav`、`/api/admin/dav/{path...}` | 管理员只读 WebDAV |
 
 管理员共享业务接口还包括 `/api/admin/storage` 的 GET、`/api/admin/fs/*`、`/api/admin/paste`、`/api/admin/pastes/*`、`/api/admin/files/*`、`/api/admin/share/upload` 等，按前一节的路径映射调用。
 
 ## 返回格式与上传
 
-普通 JSON 成功响应为 `{"success":true,"code":"OK","message":"操作成功","data":{}}`；创建资源通常返回 HTTP `201` 和 `code="CREATED"`。错误使用相应 HTTP 状态，包含 `success=false`、字符串 `code` 和 `message`。下载、原始文本和 WebDAV 返回各自格式。GET 路由也匹配 HEAD，文件读取支持 Range。
+普通 JSON 成功响应为 `{"success":true,"code":"OK","message":"操作成功","data":{}}`；创建资源通常返回 HTTP `201` 和 `code="CREATED"`。错误使用相应 HTTP 状态，包含 `success=false`、字符串 `code` 和 `message`。下载和原始文本返回各自格式。GET 路由也匹配 HEAD，文件读取支持 Range。
 
-原始上传使用 `Content-Type: application/octet-stream` 和 `X-FS-Filename`；表单上传使用 `multipart/form-data`，文件字段名为 `file`。中文文件名和元信息编码可参考 [上传驱动](frontend/src/modules/storage-core/drivers/go/GoDriver.js)。
+原始上传使用 `Content-Type: application/octet-stream` 和 `X-FS-Filename`；表单上传使用 `multipart/form-data`，文件字段名为 `file`。中文文件名和元信息编码可参考 [分享客户端](frontend/src/sharing/api.js)。
 
 普通 API Key 上传示例：
 
@@ -130,4 +126,18 @@ curl --fail-with-body -X PUT 'http://127.0.0.1:8081/api/fs/upload?path=/local' \
 
 管理员改用 `/api/admin/fs/upload` 和 Bearer 会话令牌。上传先私有暂存，再检查实际大小、当前授权和目标配置；冲突返回 `409`，超过单文件上限返回 `413`，临时额度不足返回 `507`。分片会话保留 24 小时，分片大小为 5–16 MiB。
 
-`/api/upload-direct`、浏览器上游直传、WebDAV 写入和删除文件本体尚未实现。完整限制见 [后端说明](backend/README.md)，路由与权限见 [后端源码](backend/internal/server/)。
+`/api/upload-direct`、浏览器上游直传、删除文件本体尚未实现；WebDAV 已移除。完整限制见 [后端说明](backend/README.md)，路由与权限见 [后端源码](backend/internal/server/)。
+
+## 精简分享站设置
+
+全局、预览和站点设置分组分别为 `1`、`2`、`4`。已删除 WebDAV 设置、服务和存储驱动；`/dav` 及 `/api/admin/dav` 返回 404，Basic 认证不再支持。
+
+可写全局设置：`max_upload_size`（MiB，只能降低环境硬上限）、`share_default_expiry_hours`（0–876000 小时）。可写预览设置：`preview_max_text_kb`（16–2048）、`preview_text_types`、`preview_image_types`、`preview_video_types`、`preview_audio_types`（逗号分隔扩展名）、`preview_allow_external_images`（布尔）。站点设置包括标题、图标、页脚、顶部 / 底部安全 HTML、文本 / 文件入口开关及公告；只读设置不能修改。
+
+`PUT /api/files/{id}` 支持 `filename`、`remark`、`password`、`clearPassword`、`expires_at`、`max_views` 和 `slug`。`filename` 仅修改显示名，必须是安全的单个文件名。省略 `max_views` 保留当前查看次数；显式修改查看限制会重置次数。
+
+分享上传使用 `PUT /api/share/upload`，管理员使用 `/api/admin/share/upload`。`X-Share-Filename` 是 URL 编码文件名；`X-Share-Options` 是 UTF-8 JSON 的标准 Base64，包含 `storage_config_id`、`expires_in`（小时）、`password`、`remark`、`max_views`、可选 `path`；请求体是原始文件。
+
+新文本省略 `expires_at`、新文件省略 `expires_in` 时使用站点默认有效期。文本显式 `expires_at:null`、文件 `expires_in:0` 表示不过期。过期分享和删除分享记录不自动删除存储文件。
+
+挂载、目录密码、分片接口仍保留供已有数据与受限路径授权兼容；精简前端不再显示挂载浏览和相关高级入口。`/api/admin/dashboard/stats` 已移除。
