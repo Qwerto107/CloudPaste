@@ -549,6 +549,9 @@ try {
   const uploaded = await readdir(filesDirectory);
   assert.equal(uploaded.length, 4);
   await page.getByRole("button", { name: "退出", exact: true }).click();
+  // 退出包含异步撤销请求，必须等待会话清除及跳转完成再进入普通用户测试。
+  await page.waitForURL(origin + "/");
+  await page.getByRole("link", { name: "登录", exact: true }).waitFor();
   const userRequests = [];
   page.on("request", (request) => userRequests.push(request.url()));
   await page.goto(origin + "/manage/text-management");
@@ -566,7 +569,11 @@ try {
     !userRequests.some((url) =>
       new URL(url).pathname.startsWith("/api/admin/"),
     ),
-    "普通用户调用了管理员接口",
+    "普通用户调用了管理员接口：" +
+      userRequests
+        .filter((url) => new URL(url).pathname.startsWith("/api/admin/"))
+        .map((url) => new URL(url).pathname)
+        .join(", "),
   );
   await page.goto(origin + "/admin/storage");
   await page.waitForURL("**/manage/text-management");
