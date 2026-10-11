@@ -62,7 +62,9 @@ async function login() {
     apiKey.value = "";
     // 只允许本站已注册的页面，并等待导航结果，失败时显示具体原因。
     const redirect = route.query.redirect;
-    const target =
+    let target = "/";
+    if (mode.value === "admin") target = "/admin";
+    if (
       typeof redirect === "string" &&
       redirect.startsWith("/") &&
       !redirect.startsWith("//") &&
@@ -70,10 +72,8 @@ async function login() {
       !redirect.startsWith("/login") &&
       (mode.value === "admin" || !redirect.startsWith("/admin")) &&
       router.resolve(redirect).matched.length
-        ? redirect
-        : mode.value === "admin"
-          ? "/admin"
-          : "/manage";
+    )
+      target = redirect;
     const failure = await router.replace(target);
     if (failure) throw new Error("已登录，但页面跳转失败，请刷新后重试");
   } catch (reason) {

@@ -1,11 +1,13 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref } from "vue";
+import { useRoute } from "vue-router";
 import { request, uploadShare, shareURL } from "./api.js";
 import { hasPermission, session } from "./session.js";
 import { settings } from "./settings.js";
 import Icon from "./Icon.vue";
 import ShareNameField from "./ShareNameField.vue";
 import ExpirySelect from "./ExpirySelect.vue";
+const route = useRoute();
 const files = ref([]);
 const storages = ref([]);
 const storage = ref("");
@@ -118,7 +120,8 @@ async function copy(value) {
   </div>
   <section class="panel">
     <div v-if="!allowed" class="notice">
-      上传需要文件分享权限。<RouterLink to="/login"
+      上传需要文件分享权限。<RouterLink
+        :to="{ path: '/login', query: { redirect: route.fullPath } }"
         >使用 API Key 登录</RouterLink
       >
     </div>

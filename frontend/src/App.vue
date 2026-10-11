@@ -7,7 +7,7 @@ import {
   ref,
   watch,
 } from "vue";
-import { useRouter } from "vue-router";
+import { useRouter, useRoute } from "vue-router";
 import { sanitizeHTML } from "./sharing/sanitize.js";
 import { settings } from "./sharing/settings.js";
 import { session, clearSession } from "./sharing/session.js";
@@ -17,6 +17,15 @@ const MarkdownPreview = defineAsyncComponent(
   () => import("./sharing/MarkdownPreview.vue"),
 );
 const router = useRouter();
+const route = useRoute();
+const accountTarget = computed(() => {
+  if (session.type === "admin") return "/admin";
+  if (session.type === "apikey") return "/manage";
+  // 分享页的顶部登录入口也保留原路径，包括查询参数和锚点。
+  if (route.name === "Home" || route.name === "Upload")
+    return { path: "/login", query: { redirect: route.fullPath } };
+  return "/login";
+});
 const error = ref("");
 const announcement = ref(false);
 // 首次主题由头部同源脚本提前设置，避免暗色页面刷新时闪白。
@@ -85,14 +94,7 @@ async function logout() {
         v-if="settings.site_upload_page_enabled !== 'false'"
         to="/upload"
         ><Icon name="folder" />文件分享</RouterLink
-      ><RouterLink
-        :to="
-          session.type === 'none'
-            ? '/login'
-            : session.type === 'admin'
-              ? '/admin'
-              : '/manage'
-        "
+      ><RouterLink :to="accountTarget"
         ><Icon name="grid" />{{
           session.type === "none" ? "登录" : "管理"
         }}</RouterLink

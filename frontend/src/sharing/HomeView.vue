@@ -1,5 +1,6 @@
 <script setup>
 import { computed, defineAsyncComponent, ref } from "vue";
+import { useRoute } from "vue-router";
 import { request, shareURL } from "./api.js";
 import { hasPermission } from "./session.js";
 import { settings } from "./settings.js";
@@ -9,6 +10,7 @@ import ExpirySelect from "./ExpirySelect.vue";
 const MarkdownPreview = defineAsyncComponent(
   () => import("./MarkdownPreview.vue"),
 );
+const route = useRoute();
 const title = ref("");
 const slug = ref("");
 const content = ref("");
@@ -68,7 +70,8 @@ async function copy() {
   </div>
   <section class="panel compose-panel">
     <div v-if="!allowed" class="notice">
-      创建分享需要授权。<RouterLink to="/login"
+      创建分享需要授权。<RouterLink
+        :to="{ path: '/login', query: { redirect: route.fullPath } }"
         >使用 API Key 登录</RouterLink
       >
     </div>

@@ -437,7 +437,7 @@ try {
   await keyPage.goto(origin + "/login");
   await keyPage.getByLabel("API Key", { exact: true }).fill(customKey);
   await keyPage.getByRole("button", { name: "登录", exact: true }).click();
-  await keyPage.waitForURL("**/manage/account");
+  await keyPage.waitForURL(origin + "/");
   await keyContext.close();
   await page.getByRole("button", { name: "新增密钥", exact: true }).click();
   await page.getByLabel("名称", { exact: true }).fill("重复密钥");
