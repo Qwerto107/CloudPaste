@@ -52,6 +52,8 @@ type App struct {
 	logger                *slog.Logger
 	started               time.Time
 	downloads             chan struct{}
+	downloadMu            sync.Mutex
+	downloadsByIP         map[string]int
 	requests              chan struct{}
 	passwordChecks        chan struct{}
 	passwordAttemptMu     sync.Mutex

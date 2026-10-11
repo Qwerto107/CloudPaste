@@ -300,12 +300,11 @@ func (a *App) deliver(w http.ResponseWriter, r *http.Request, d Driver, key stri
 	if info.Directory {
 		return badRequest("目录不支持下载")
 	}
-	select {
-	case a.downloads <- struct{}{}:
-		defer func() { <-a.downloads }()
-	default:
-		return &apiError{503, "BUSY", "下载并发已满，请稍后重试"}
+	release, err := a.beginDownload(r)
+	if err != nil {
+		return err
 	}
+	defer release()
 	w.Header().Set("Content-Type", info.MimeType)
 	w.Header().Set("Cache-Control", "private, no-store")
 	disposition := "inline"
@@ -328,6 +327,12 @@ func (a *App) deliver(w http.ResponseWriter, r *http.Request, d Driver, key stri
 	if stream.Body != nil {
 		defer stream.Body.Close()
 	}
+	response, err := newDownloadResponse(w, downloadWriteTimeout)
+	if err != nil {
+		return err
+	}
+	defer response.finish()
+	w = response
 	if seek, ok := stream.Body.(io.ReadSeeker); ok {
 		modified := time.Time{}
 		if info.Modified != nil {
