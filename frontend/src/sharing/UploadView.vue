@@ -11,6 +11,7 @@ const route = useRoute();
 const files = ref([]);
 const storages = ref([]);
 const storage = ref("");
+const storageLoading = ref(false);
 const hours = ref(Number(settings.share_default_expiry_hours ?? 24));
 const password = ref("");
 const remark = ref("");
@@ -26,6 +27,7 @@ const allowed = computed(() => hasPermission(2));
 onBeforeUnmount(() => controller?.abort());
 onMounted(async () => {
   if (!allowed.value) return;
+  storageLoading.value = true;
   try {
     const data = await request("/storage");
     storages.value = (Array.isArray(data) ? data : data?.items || []).filter(
@@ -40,7 +42,8 @@ onMounted(async () => {
       "";
   } catch (reason) {
     error.value = reason.message;
-
+  } finally {
+    storageLoading.value = false;
   }
 });
 function select(event) {
@@ -165,12 +168,32 @@ async function copy(value) {
         </ul>
         <div class="form-row">
           <label
-            >保存位置<select v-model="storage" required>
+            >保存位置<select
+              v-model="storage"
+              :disabled="storageLoading || !storages.length"
+              required
+            >
+              <option v-if="storageLoading" value="" disabled>
+                正在加载保存位置…
+              </option>
+              <option v-else-if="!storages.length" value="" disabled>
+                暂无可写的保存位置
+              </option>
               <option v-for="item in storages" :key="item.id" :value="item.id">
                 {{ item.name }} · {{ item.storage_type }}
               </option>
-            </select></label
-          >
+            </select>
+            <small
+              v-if="allowed && !storageLoading && !storages.length && !error"
+              class="muted"
+            >
+              没有可用的可写存储。
+              <RouterLink v-if="session.type === 'admin'" to="/admin/storage"
+                >前往存储管理</RouterLink
+              >
+              <span v-else>请联系管理员检查存储的只读设置和密钥授权。</span>
+            </small>
+          </label>
           <ExpirySelect v-model="hours" />
           <label
             >访问密码<input
