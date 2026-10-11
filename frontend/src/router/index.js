@@ -106,7 +106,20 @@ function managementHome() {
       : base + "/account";
 }
 // 导航先恢复身份，再按权限选择管理页，避免登录成功后被旧守卫重定向回来。
-router.beforeEach(async (to) => {
+router.beforeEach(async (to, from) => {
+  if (to.meta.adminArea && !from.meta.adminArea) {
+    const initialNavigation = from.matched.length === 0;
+    const adminPageLoaded =
+      window.location.pathname === "/admin" ||
+      window.location.pathname.startsWith("/admin/");
+    // 跨入管理员区域时交由服务器处理；直接加载管理员页面不重复刷新。
+    if (!initialNavigation || !adminPageLoaded) {
+      // 等待新文档接管，避免取消后退导航时回滚地址，也不提前显示目标页面。
+      return new Promise(() => {
+        window.location.assign(to.fullPath);
+      });
+    }
+  }
   await Promise.all([initializeSession(), loadSettings()]);
   const loggedIn = session.type !== "none";
   // 页面入口也按身份隔离：API Key 的登录和管理过程始终留在普通用户路由。
