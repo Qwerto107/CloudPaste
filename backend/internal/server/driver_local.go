@@ -71,6 +71,9 @@ func (d *localDriver) Stat(ctx context.Context, key string) (FileInfo, error) {
 	if !stat.IsDir() && !stat.Mode().IsRegular() {
 		return FileInfo{}, badRequest("只支持普通文件和目录")
 	}
+	if err = localCheckName(root, name, stat); err != nil {
+		return FileInfo{}, err
+	}
 	return fileInfo(path.Base(key), stat), nil
 }
 
@@ -168,6 +171,11 @@ func (d *localDriver) Open(ctx context.Context, key string, r *http.Request) (St
 	if !stat.Mode().IsRegular() {
 		_ = f.Close()
 		return Stream{}, badRequest("只能读取普通文件")
+	}
+	// 单文件元信息同样按大小写精确匹配，必须检查最终打开的文件名称。
+	if err = localCheckOpenedName(f, name); err != nil {
+		_ = f.Close()
+		return Stream{}, err
 	}
 	// 文件在检查后被换成链接或其他对象时，不读取也不返回任何内容。
 	after, err := root.Lstat(name)
