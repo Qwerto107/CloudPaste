@@ -37,6 +37,25 @@ const filter = ref("");
 const editing = ref(false);
 const editID = ref("");
 const values = reactive({});
+const keyExpiryInput = computed({
+  get() {
+    if (!values.expires_at) return "";
+    const date = new Date(values.expires_at);
+    if (Number.isNaN(date.getTime())) return "";
+    // 选择器显示本地时间，提交时转换为 UTC，避免有效期偏移。
+    const localTime = new Date(
+      date.getTime() - date.getTimezoneOffset() * 60000,
+    );
+    return localTime.toISOString().slice(0, 16);
+  },
+  set(value) {
+    if (!value) {
+      values.expires_at = null;
+      return;
+    }
+    values.expires_at = new Date(value).toISOString();
+  },
+});
 const newlyCreatedKey = ref("");
 const newKeyVisible = ref(false);
 const customKeyVisible = ref(false);
@@ -143,6 +162,8 @@ async function openEditor(item = null) {
         },
         item || {},
       );
+      // 接口可能返回 null，复选框始终使用独立数组保存存储授权。
+      values.storage_config_ids = [...(item?.storage_config_ids || [])];
       selectedPermissions.value = permissions
         .filter((entry) => (Number(item?.permissions || 0) & entry.bit) !== 0)
         .map((entry) => entry.bit);
@@ -556,25 +577,57 @@ onBeforeUnmount(hideKeys);
               />{{ entry.label }}</label
             >
           </fieldset>
-          <label
-            >允许使用的存储<select v-model="values.storage_config_ids" multiple>
-              <option
+          <fieldset :disabled="busy">
+            <legend>允许使用的存储</legend>
+            <div v-if="storageChoices.length" class="storage-options">
+              <label
                 v-for="item in storageChoices"
                 :key="item.id"
-                :value="item.id"
+                class="check"
+                :class="{
+                  selected: values.storage_config_ids.includes(item.id),
+                }"
               >
+                <input
+                  v-model="values.storage_config_ids"
+                  type="checkbox"
+                  :value="item.id"
+                />
                 {{ item.name }}
-              </option></select
-            ><small class="muted">不选表示允许使用全部公开存储。</small></label
-          ><label
-            >授权路径<input
-              v-model="values.basic_path"
-              placeholder="/" /></label
-          ><label
-            >有效期（ISO 时间，留空不过期）<input
-              v-model="values.expires_at"
-              placeholder="2027-01-01T00:00:00Z" /></label
-          ><label class="check"
+                <small class="muted">{{ item.storage_type }}</small>
+              </label>
+            </div>
+            <p v-else class="muted small">暂无存储，请先在存储管理中添加。</p>
+            <p class="muted small">
+              点击勾选或取消，不选表示允许使用全部公开存储。
+            </p>
+          </fieldset>
+          <label
+            >授权路径<input v-model="values.basic_path" placeholder="/"
+          /></label>
+          <div class="expiry-field">
+            <label for="key-expires-at">有效期</label>
+            <div class="copy-row">
+              <input
+                id="key-expires-at"
+                v-model="keyExpiryInput"
+                type="datetime-local"
+                :disabled="busy"
+                aria-describedby="key-expiry-help"
+              />
+              <button
+                type="button"
+                :disabled="busy || !values.expires_at"
+                @click="values.expires_at = null"
+              >
+                清空
+              </button>
+            </div>
+            <p id="key-expiry-help" class="muted small">
+              按本地时间选择，清空表示不过期。
+            </p>
+          </div>
+          <label class="check"
             ><input v-model="values.is_enable" type="checkbox" />启用密钥</label
           ></template
         >

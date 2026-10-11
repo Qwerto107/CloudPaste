@@ -795,8 +795,34 @@ fieldset {
   border: 0;
   min-width: 0;
 }
-select[multiple] {
-  min-height: 100px;
+.storage-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.6rem;
+}
+.storage-options .check {
+  padding: 0.75rem;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.storage-options .check:hover,
+.storage-options .selected {
+  background: var(--soft);
+  border-color: var(--accent);
+}
+.storage-options input {
+  flex-shrink: 0;
+}
+.storage-options small {
+  margin-left: auto;
+}
+.expiry-field {
+  margin-bottom: 1rem;
+}
+.expiry-field label {
+  margin-bottom: 0.45rem;
 }
 .custom-content:empty {
   display: none;
