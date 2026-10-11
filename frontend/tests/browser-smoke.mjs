@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
+const standalone = process.env.SHARING_TEST_STANDALONE === "1";
 const binary =
   process.env.SHARING_TEST_BINARY ||
   resolve(root, "backend/bin/sharing-backend.exe");
@@ -127,8 +128,13 @@ try {
     { name: "分享用户", permissions: 527, basic_path: "/" },
     admin,
   );
-  await new Promise((done) => frontend.listen(0, "127.0.0.1", done));
-  const origin = `http://127.0.0.1:${frontend.address().port}`;
+  // 合并版直接访问同一个 Go 进程的页面与 API，不能借用测试静态代理掩盖嵌入问题。
+  let origin = backend;
+  if (!standalone) {
+    await new Promise((done) => frontend.listen(0, "127.0.0.1", done));
+    origin = `http://127.0.0.1:${frontend.address().port}`;
+  }
+  console.log(`浏览器回归：${standalone ? "内嵌" : "分离"}前端与 API`);
   const installed = [
     process.env.SHARING_TEST_BROWSER,
     "C:/Program Files/Google/Chrome/Application/chrome.exe",
@@ -484,35 +490,11 @@ try {
   wav.writeUInt16LE(8, 34);
   wav.write("data", 36);
   wav.writeUInt32LE(8000, 40);
-  const webm = Buffer.from(
-    await page.evaluate(async () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = 32;
-      canvas.height = 32;
-      document.body.append(canvas);
-      const stream = canvas.captureStream(0);
-      const recorder = new MediaRecorder(stream, {
-        mimeType: "video/webm;codecs=vp8",
-      });
-      const chunks = [];
-      recorder.ondataavailable = (event) => chunks.push(event.data);
-      const stopped = new Promise((done) => (recorder.onstop = done));
-      recorder.start();
-      const interval = setInterval(() => {
-        const context = canvas.getContext("2d");
-        context.fillStyle = Math.random() > 0.5 ? "#126954" : "#ffffff";
-        context.fillRect(0, 0, 32, 32);
-        stream.getVideoTracks()[0].requestFrame();
-      }, 100);
-      await new Promise((done) => setTimeout(done, 600));
-      recorder.stop();
-      await stopped;
-      clearInterval(interval);
-      canvas.remove();
-      stream.getTracks().forEach((track) => track.stop());
-      return Array.from(new Uint8Array(await new Blob(chunks).arrayBuffer()));
-    }),
+  // 固定的 32×32 VP8 视频已独立验证可解码，避免无头录制偶发生成只有容器头的文件。
+  const webm = await readFile(
+    resolve(root, "frontend/tests/fixtures/preview.webm"),
   );
+  console.log("浏览器回归：安全与管理检查通过，验证媒体预览");
   for (const [name, type, bytes, selector] of [
     ["picture.png", "image/png", png, "img.image-preview"],
     ["sound.wav", "audio/wav", wav, "audio"],
@@ -544,6 +526,16 @@ try {
         (selector) => document.querySelector(selector)?.readyState >= 1,
         selector,
       );
+      if (selector === "video") {
+        await page.waitForFunction(() => {
+          const video = document.querySelector("video");
+          return (
+            video.readyState >= 2 &&
+            video.videoWidth === 32 &&
+            video.videoHeight === 32
+          );
+        });
+      }
     }
   }
   await page.goto(origin + "/admin/account");
@@ -741,6 +733,7 @@ try {
   console.log(
     JSON.stringify({
       result: "passed",
+      deployment: standalone ? "内嵌前端与 API" : "分离前端与 API",
       login: "自动跳转",
       upload: "中文原始上传、Range 与文本预览",
       administration: "文本、文件、设置和密钥",
@@ -750,8 +743,11 @@ try {
       theme: "跟随系统、切换记忆、存储禁用降级及四种屏宽",
     }),
   );
+} catch (error) {
+  // 先输出原始失败，浏览器清理异常不能掩盖具体失败用例。
+  console.error("浏览器回归失败：", error);
+  throw error;
 } finally {
-  if (browser) await browser.close();
   if (service && service.exitCode === null) {
     service.kill();
     await new Promise((done) => {
@@ -759,7 +755,20 @@ try {
       setTimeout(done, 3000);
     });
   }
-  await new Promise((done) => frontend.close(done));
+  // 后端先退出；浏览器异常时限定清理时间，避免 CI 永久等待关闭事件。
+  const cleanupTimeout = setTimeout(() => {
+    console.error("浏览器清理超过 10 秒，终止本次测试");
+    process.exit(1);
+  }, 10000);
+  try {
+    if (frontend.listening) {
+      frontend.closeAllConnections();
+      await new Promise((done) => frontend.close(done));
+    }
+    if (browser) await browser.close();
+  } finally {
+    clearTimeout(cleanupTimeout);
+  }
   // 仅清理本脚本创建且位于测试目录内的临时数据。
   if (temporary.startsWith(resolve(root, "backend/bin/sharing-test-")))
     await rm(temporary, { recursive: true, force: true });
