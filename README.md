@@ -74,8 +74,8 @@ mkdir -p files
 ```dotenv
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=请替换为至少12字节的强密码
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.5.0
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.5.0
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.5.1
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.5.1
 LOCAL_FILES_DIR=./files
 ```
 
@@ -90,7 +90,7 @@ docker compose --env-file backend/.env up -d --no-build
 2. 添加本地存储（根目录填 `/files`）或 S3 存储。
 3. 创建文本或上传文件，生成分享链接。需要多人使用时，创建 API Key 并按需授权。
 
-也可用 **一个容器运行前后端**。在 `backend/.env` 增加 `GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.5.0`，使用以下命令启动（入口仍为 `http://127.0.0.1:8081`）：
+也可用 **一个容器运行前后端**。在 `backend/.env` 增加 `GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.5.1`，使用以下命令启动（入口仍为 `http://127.0.0.1:8081`）：
 
 ```sh
 docker compose --env-file backend/.env -f docker-compose.standalone.yml pull

@@ -16,8 +16,8 @@ mkdir -p files
 ```dotenv
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=请替换为至少12字节的强密码
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.5.0
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.5.0
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.5.1
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.5.1
 LOCAL_FILES_DIR=./files
 BIND_ADDRESS=127.0.0.1
 HTTP_PORT=8081
@@ -40,7 +40,7 @@ docker compose --env-file backend/.env ps
 [docker-compose.standalone.yml](../docker-compose.standalone.yml) 使用同一个 Go 进程提供内嵌前端与 API，不依赖 Nginx。在上面的 `backend/.env` 中增加：
 
 ```dotenv
-GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.5.0
+GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.5.1
 ```
 
 启动命令：
