@@ -321,6 +321,13 @@ select:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+input:disabled,
+textarea:disabled,
+select:disabled {
+  background: var(--surface-subtle);
+  color: var(--muted);
+  cursor: not-allowed;
+}
 textarea {
   resize: vertical;
   line-height: 1.65;
@@ -409,11 +416,6 @@ textarea::placeholder {
   .form-row.share-main-fields {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-}
-.advanced-options {
-  border-top: 1px solid var(--line);
-  padding-top: 1rem;
-  margin-top: 1rem;
 }
 .actions {
   margin-top: 1.2rem;
@@ -785,6 +787,13 @@ fieldset {
   border-radius: 8px;
   margin-bottom: 1rem;
   padding: 1rem;
+}
+/* 原生 fieldset 统一禁用分享控件，登录链接和取消上传保持在外部。 */
+.share-fields {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  min-width: 0;
 }
 select[multiple] {
   min-height: 100px;

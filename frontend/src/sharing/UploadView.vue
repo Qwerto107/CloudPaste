@@ -14,7 +14,6 @@ const password = ref("");
 const remark = ref("");
 const maxViews = ref(0);
 const busy = ref(false);
-const advanced = ref(false);
 const progress = ref(0);
 const current = ref("");
 const results = ref([]);
@@ -39,9 +38,11 @@ onMounted(async () => {
       "";
   } catch (reason) {
     error.value = reason.message;
+
   }
 });
 function select(event) {
+  if (busy.value || !allowed.value) return;
   results.value = [];
   files.value = Array.from(event.target.files || [])
     .slice(0, 30)
@@ -56,6 +57,7 @@ function drop(event) {
   }
 }
 async function upload() {
+  if (busy.value || !allowed.value) return;
   busy.value = true;
   error.value = "";
   controller = new AbortController();
@@ -121,82 +123,74 @@ async function copy(value) {
       >
     </div>
     <form @submit.prevent="upload">
-      <label
-        class="drop-zone"
-        :class="{ disabled: busy || !allowed }"
-        @dragover.prevent
-        @drop.prevent="drop"
-        ><input
-          type="file"
-          multiple
-          aria-label="选择文件"
-          :disabled="busy || !allowed"
-          @change="select"
-        /><Icon name="upload" /><strong>选择文件，或拖到这里</strong
-        ><span class="muted"
-          >每次最多 30 个文件，单文件不超过
-          {{ settings.max_upload_size }} MiB</span
-        ></label
-      >
-      <ul v-if="files.length" class="file-queue">
-        <li
-          v-for="(entry, index) in files"
-          :key="entry.file"
-          class="file-upload-entry"
-        >
-          <div class="file-upload-heading">
-            <span class="file-name"
-              ><Icon name="file" />{{ entry.file.name }}</span
-            ><small>{{ (entry.file.size / 1048576).toFixed(2) }} MiB</small>
-          </div>
-          <ShareNameField
-            v-model="entry.slug"
-            :id="'file-share-name-' + index"
+      <fieldset class="share-fields" :disabled="busy || !allowed">
+        <label
+          class="drop-zone"
+          :class="{ disabled: busy || !allowed }"
+          @dragover.prevent
+          @drop.prevent="drop"
+          ><input
             type="file"
-            :disabled="busy"
-          />
-        </li>
-      </ul>
-      <div class="form-row">
-        <label
-          >保存位置<select v-model="storage" required>
-            <option v-for="item in storages" :key="item.id" :value="item.id">
-              {{ item.name }} · {{ item.storage_type }}
-            </option>
-          </select></label
+            multiple
+            aria-label="选择文件"
+            :disabled="busy || !allowed"
+            @change="select"
+          /><Icon name="upload" /><strong>选择文件，或拖到这里</strong
+          ><span class="muted"
+            >每次最多 30 个文件，单文件不超过
+            {{ settings.max_upload_size }} MiB</span
+          ></label
         >
-        <ExpirySelect v-model="hours" />
-        <label
-          >访问密码<input
-            v-model="password"
-            type="password"
-            placeholder="可选"
-            autocomplete="new-password"
-            maxlength="72"
-        /></label>
-        <label
-          >最多查看次数<input
-            v-model.number="maxViews"
-            type="number"
-            min="0"
-            step="1"
-            required
-          /><small class="muted">0 表示不限次数</small></label
-        >
-      </div>
-      <button
-        type="button"
-        class="quiet"
-        :aria-expanded="advanced"
-        @click="advanced = !advanced"
-      >
-        <Icon name="settings" />{{ advanced ? "收起" : "更多选项" }}
-      </button>
-      <div v-if="advanced" class="advanced-options">
+        <ul v-if="files.length" class="file-queue">
+          <li
+            v-for="(entry, index) in files"
+            :key="entry.file"
+            class="file-upload-entry"
+          >
+            <div class="file-upload-heading">
+              <span class="file-name"
+                ><Icon name="file" />{{ entry.file.name }}</span
+              ><small>{{ (entry.file.size / 1048576).toFixed(2) }} MiB</small>
+            </div>
+            <ShareNameField
+              v-model="entry.slug"
+              :id="'file-share-name-' + index"
+              type="file"
+              :disabled="busy"
+            />
+          </li>
+        </ul>
+        <div class="form-row">
+          <label
+            >保存位置<select v-model="storage" required>
+              <option v-for="item in storages" :key="item.id" :value="item.id">
+                {{ item.name }} · {{ item.storage_type }}
+              </option>
+            </select></label
+          >
+          <ExpirySelect v-model="hours" />
+          <label
+            >访问密码<input
+              v-model="password"
+              type="password"
+              placeholder="可选"
+              autocomplete="new-password"
+              maxlength="72"
+          /></label>
+          <label
+            >最多查看次数<input
+              v-model.number="maxViews"
+              type="number"
+              min="0"
+              step="1"
+              required
+            /><small class="muted">0 表示不限次数</small></label
+          >
+        </div>
         <label
           >备注<input v-model="remark" maxlength="4000" placeholder="可选"
         /></label>
-      </div>
+      </fieldset>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <div v-if="busy" class="upload-progress">
         <span

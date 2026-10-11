@@ -615,9 +615,8 @@ try {
   });
   assert.ok(await page.getByLabel("访问密码", { exact: true }).isVisible());
   await page.getByLabel("访问密码", { exact: true }).fill("temporary-password");
-  await page.getByRole("button", { name: "更多选项", exact: true }).click();
   await page.getByLabel("备注", { exact: true }).fill("测试备注");
-  await page.getByRole("button", { name: "收起", exact: true }).click();
+  assert.ok(await page.getByLabel("备注", { exact: true }).isVisible());
   assert.equal(
     await page.getByLabel("访问密码", { exact: true }).inputValue(),
     "temporary-password",

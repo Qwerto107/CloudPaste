@@ -22,6 +22,7 @@ const link = ref("");
 const copied = ref(false);
 const allowed = computed(() => hasPermission(1));
 async function share() {
+  if (busy.value || !allowed.value) return;
   busy.value = true;
   error.value = "";
   link.value = "";
@@ -67,76 +68,83 @@ async function copy() {
   </div>
   <section class="panel compose-panel">
     <div v-if="!allowed" class="notice">
-      创建分享需要授权。<RouterLink to="/login">使用 API Key 登录</RouterLink>
+      创建分享需要授权。<RouterLink to="/login"
+        >使用 API Key 登录</RouterLink
+      >
     </div>
     <form @submit.prevent="share">
-      <input
-        v-model="title"
-        class="title-input"
-        placeholder="标题（可选）"
-        maxlength="200"
-        aria-label="分享标题"
-      />
-      <div class="editor-heading compose-heading">
-        <div class="tabs" aria-label="编辑视图">
+      <fieldset class="share-fields" :disabled="busy || !allowed">
+        <input
+          v-model="title"
+          class="title-input"
+          placeholder="标题（可选）"
+          maxlength="200"
+          aria-label="分享标题"
+        />
+        <div class="editor-heading compose-heading">
+          <div class="tabs" aria-label="编辑视图">
+            <button
+              type="button"
+              :class="{ active: !preview }"
+              :aria-pressed="!preview"
+              @click="preview = false"
+            >
+              编辑
+            </button>
+            <button
+              type="button"
+              :class="{ active: preview }"
+              :aria-pressed="preview"
+              @click="preview = true"
+            >
+              预览
+            </button>
+          </div>
+          <span class="muted small">支持 Markdown</span>
+        </div>
+        <MarkdownPreview
+          v-if="preview"
+          :content="content"
+          class="editor-preview"
+        /><textarea
+          v-else
+          v-model="content"
+          class="text-editor"
+          placeholder="粘贴文字，或写一点 Markdown…"
+          required
+          aria-label="分享内容"
+        ></textarea>
+        <p class="editor-meta muted small">{{ content.length }} 个字符</p>
+        <ShareNameField v-model="slug" id="text-share-name" :disabled="busy" />
+        <div class="share-options">
+          <div class="form-row share-main-fields">
+            <ExpirySelect v-model="hours" />
+            <label
+              >最多查看次数<input
+                v-model.number="maxViews"
+                type="number"
+                min="0"
+                step="1"
+                required
+              /><small class="muted">0 表示不限次数</small></label
+            >
+            <label
+              >访问密码<input
+                v-model="password"
+                type="password"
+                placeholder="可选"
+                autocomplete="new-password"
+                maxlength="72"
+            /></label>
+          </div>
           <button
-            type="button"
-            :class="{ active: !preview }"
-            :aria-pressed="!preview"
-            @click="preview = false"
+            class="primary"
+            :disabled="busy || !allowed || !content.trim()"
           >
-            编辑
-          </button>
-          <button
-            type="button"
-            :class="{ active: preview }"
-            :aria-pressed="preview"
-            @click="preview = true"
-          >
-            预览
+            <Icon name="link" />{{ busy ? "正在创建…" : "创建分享" }}
           </button>
         </div>
-        <span class="muted small">支持 Markdown</span>
-      </div>
-      <MarkdownPreview
-        v-if="preview"
-        :content="content"
-        class="editor-preview"
-      /><textarea
-        v-else
-        v-model="content"
-        class="text-editor"
-        placeholder="粘贴文字，或写一点 Markdown…"
-        required
-        aria-label="分享内容"
-      ></textarea>
-      <p class="editor-meta muted small">{{ content.length }} 个字符</p>
-      <ShareNameField v-model="slug" id="text-share-name" :disabled="busy" />
-      <div class="share-options">
-        <div class="form-row share-main-fields">
-          <ExpirySelect v-model="hours" />
-          <label
-            >最多查看次数<input
-              v-model.number="maxViews"
-              type="number"
-              min="0"
-              step="1"
-              required
-            /><small class="muted">0 表示不限次数</small></label
-          >
-          <label
-            >访问密码<input
-              v-model="password"
-              type="password"
-              placeholder="可选"
-              autocomplete="new-password"
-              maxlength="72"
-          /></label>
-        </div>
-        <button class="primary" :disabled="busy || !allowed || !content.trim()">
-          <Icon name="link" />{{ busy ? "正在创建…" : "创建分享" }}
-        </button>
-      </div>
+      </fieldset>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
     </form>
   </section>
