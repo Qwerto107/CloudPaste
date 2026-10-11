@@ -16,6 +16,8 @@ lerna-debug.log*
 # Runtime data
 /files/
 /frontend/dist/
+# 合并版二进制与镜像使用的前端嵌入产物，由准备脚本生成。
+/backend/internal/webui/dist/
 pids
 *.pid
 *.seed

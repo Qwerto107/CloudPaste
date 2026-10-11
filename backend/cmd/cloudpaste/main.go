@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"cloudpaste/backend/internal/server"
+	"cloudpaste/backend/internal/webui"
 )
 
 func main() {
@@ -30,7 +31,7 @@ func main() {
 	}
 	defer app.Close()
 	httpServer := &http.Server{
-		Addr: cfg.ListenAddr, Handler: app.Handler(),
+		Addr: cfg.ListenAddr, Handler: webui.Handler(app.Handler()),
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second,
 		ReadTimeout:    30 * time.Second,
 		MaxHeaderBytes: 32 << 10,
