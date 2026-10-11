@@ -16,8 +16,8 @@ mkdir -p files
 ```dotenv
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=请替换为至少12字节的强密码
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.4.1
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.4.1
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.5.0
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.5.0
 LOCAL_FILES_DIR=./files
 BIND_ADDRESS=127.0.0.1
 HTTP_PORT=8081
@@ -35,6 +35,27 @@ docker compose --env-file backend/.env ps
 
 从源码构建时，注释两个 `GO_*_IMAGE` 变量，然后执行 `docker compose --env-file backend/.env up -d --build`。
 
+## 合并运行：一个容器提供前后端
+
+[docker-compose.standalone.yml](../docker-compose.standalone.yml) 使用同一个 Go 进程提供内嵌前端与 API，不依赖 Nginx。在上面的 `backend/.env` 中增加：
+
+```dotenv
+GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.5.0
+```
+
+启动命令：
+
+```sh
+docker compose --env-file backend/.env -f docker-compose.standalone.yml pull
+docker compose --env-file backend/.env -f docker-compose.standalone.yml up -d --no-build
+```
+
+页面入口仍为 `http://127.0.0.1:8081/admin/login`，容器内监听 `8787`。从源码构建时，注释 `GO_STANDALONE_IMAGE` 后执行 `docker compose --env-file backend/.env -f docker-compose.standalone.yml up -d --build`。
+
+两种模式使用相同项目名 `cloudpaste-go`、`go-data` 数据卷和 `/files` 挂载。已有分离部署切换前，先执行 `docker compose --env-file backend/.env down`；反向切换时，先执行 `docker compose --env-file backend/.env -f docker-compose.standalone.yml down`。保留原环境文件和项目名，不加 `-v`，不要让两种模式同时访问同一数据库。
+
+合并版默认不信任转发头；如果前面还有 HTTPS 代理，使用 `TRUSTED_PROXIES` 配置 Go 进程实际看到的可信代理地址。配置方法见下文。合并版无需配置 Nginx 的 `set_real_ip_from`。
+
 ## 端口与目录
 
 | 项目 | 默认值 | 说明 |
@@ -42,6 +63,7 @@ docker compose --env-file backend/.env ps
 | 前端宿主机入口 | `127.0.0.1:8081` | 由 `BIND_ADDRESS`、`HTTP_PORT` 配置 |
 | 前端容器端口 | `8080` | Nginx 提供页面和同源 API 转发 |
 | 后端容器端口 | `8787` | Compose 不单独公开宿主机端口 |
+| 合并版容器端口 | `8787` | 同时提供页面和 API，映射到宿主机 `HTTP_PORT` |
 | 数据目录 | `/data` | 挂载名为 `go-data` 的数据卷 |
 | 本地文件目录 | `/files` | 来自 `LOCAL_FILES_DIR`，宿主机目录必须存在 |
 | Compose 项目名 | `cloudpaste-go` | 更改项目名可能创建另一套数据卷 |
@@ -60,7 +82,7 @@ docker compose --env-file backend/.env ps
 | `MAX_DOWNLOADS` | `8` | 同时下载数量，范围 1–128 |
 | `GOMEMLIMIT` | `80MiB` | Go GC 软目标，不是进程内存硬限制 |
 
-Compose 另设后端 `128m`、前端 `64m` 容器内存限制。系统设置的上传大小只能降低环境硬上限。按实际负载使用 `docker stats` 观察内存、CPU 和 I/O。
+分离版 Compose 另设后端 `128m`、前端 `64m` 容器内存限制，合并版为单容器 `128m`。系统设置的上传大小只能降低环境硬上限。按实际负载使用 `docker stats` 观察内存、CPU 和 I/O。
 
 单个来源 IP 最多同时下载 2 个文件；当全局下载额度低于 4 时，单来源额度会进一步降低，为其他来源留出位置（全局额度为 1 时只能串行下载）。超出单来源额度返回 429，全局额度耗尽返回 503。下载每个 32 KiB 数据块的写入最多等待 30 秒，正常持续传输可超过 30 秒；停读连接超时后释放额度。使用反向代理时需按下文配置可信来源，避免多个用户共享代理 IP 的额度。
 
@@ -101,12 +123,14 @@ real_ip_recursive on;
 
 `/data` 包含 `cloudpaste-go.db`、SQLite WAL 文件、`encryption.key` 和上传暂存数据。备份前停止写入，保存完整数据目录与需要保留的文件存储；数据库和加密密钥应一起保存。
 
-升级时将两个镜像变量改为相同版本，再执行：
+分离版升级时将两个镜像变量改为相同版本，再执行：
 
 ```sh
 docker compose --env-file backend/.env pull
 docker compose --env-file backend/.env up -d --no-build
 ```
+
+合并版升级只需修改 `GO_STANDALONE_IMAGE` 的版本，并在上述两条命令中添加 `-f docker-compose.standalone.yml`。
 
 继续使用同一项目名、数据卷及文件路径。升级不需要重新初始化数据库；`docker compose down -v` 会删除命名数据卷。分享过期或删除记录只撤销访问，不会清除原文件。
 

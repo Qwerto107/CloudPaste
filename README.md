@@ -74,8 +74,8 @@ mkdir -p files
 ```dotenv
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=请替换为至少12字节的强密码
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.4.1
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.4.1
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.5.0
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.5.0
 LOCAL_FILES_DIR=./files
 ```
 
@@ -90,7 +90,14 @@ docker compose --env-file backend/.env up -d --no-build
 2. 添加本地存储（根目录填 `/files`）或 S3 存储。
 3. 创建文本或上传文件，生成分享链接。需要多人使用时，创建 API Key 并按需授权。
 
-公网部署、目录权限、资源限制与升级步骤见 [部署指南](docs/deployment.md)。独立服务器也可使用 [Linux 二进制](docs/binary.md)。
+也可用 **一个容器运行前后端**。在 `backend/.env` 增加 `GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.5.0`，使用以下命令启动（入口仍为 `http://127.0.0.1:8081`）：
+
+```sh
+docker compose --env-file backend/.env -f docker-compose.standalone.yml pull
+docker compose --env-file backend/.env -f docker-compose.standalone.yml up -d --no-build
+```
+
+两种方式共用数据卷；切换前先停止原服务。公网部署、目录权限、资源限制与升级步骤见 [部署指南](docs/deployment.md)。不使用 Docker 时，可下载内置完整界面的 [Linux 单文件程序](docs/binary.md)。
 
 ## 轻量，也有边界
 
@@ -108,7 +115,7 @@ docker compose --env-file backend/.env up -d --no-build
 | --- | --- |
 | 创建分享、密钥权限与系统设置 | [使用指南](docs/usage.md) |
 | Docker、反向代理、数据与升级 | [部署指南](docs/deployment.md) |
-| 独立运行后端 | [二进制部署](docs/binary.md) |
+| 单文件运行前后端、独立后端 | [二进制部署](docs/binary.md) |
 | 访客、API Key 和管理员接口 | [API 参考](docs/api.md) |
 | 本地运行、测试与图标维护 | [开发指南](docs/development.md) |
 | 多架构构建与 GHCR 发布 | [发布流程](docs/releasing.md) |

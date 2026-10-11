@@ -62,8 +62,8 @@ Edit `backend/.env` with your own strong password and matching image versions:
 ```dotenv
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=replace-with-your-own-strong-password
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.4.1
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.4.1
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.5.0
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.5.0
 LOCAL_FILES_DIR=./files
 ```
 
@@ -76,7 +76,14 @@ docker compose --env-file backend/.env up -d --no-build
 
 Open `http://127.0.0.1:8081/admin/login`, sign in and configure LOCAL storage with `/files` as its root, or add S3 storage. Create API Keys for other users, who sign in at `/login`.
 
-See the [deployment guide](deployment.md) for public access, directory permissions, resource limits and upgrades. [Linux binaries](binary.md) are also available for standalone hosting.
+For a **single container with both the frontend and backend**, add `GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.5.0` to `backend/.env` and run:
+
+```sh
+docker compose --env-file backend/.env -f docker-compose.standalone.yml pull
+docker compose --env-file backend/.env -f docker-compose.standalone.yml up -d --no-build
+```
+
+The entry point remains `http://127.0.0.1:8081`. Both modes share the data volume; stop the original services before switching. See the [deployment guide](deployment.md) for public access, directory permissions, resource limits and upgrades. [Linux standalone binaries](binary.md) include the complete web interface in one executable; API-only binaries remain available.
 
 ## Local assets, clear boundaries
 
@@ -92,7 +99,7 @@ Markdown blocks external images by default. Custom site HTML is sanitized. The m
 | --- | --- |
 | Sharing, permissions and settings | [Usage](usage.md) |
 | Docker, data and upgrades | [Deployment](deployment.md) |
-| Standalone backend | [Binaries](binary.md) |
+| Single executable or API-only backend | [Binaries](binary.md) |
 | Guest, API Key and administrator endpoints | [API reference](api.md) |
 | Local development and checks | [Development](development.md) |
 | Multi-platform images and release assets | [Publishing](releasing.md) |
