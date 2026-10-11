@@ -15,6 +15,7 @@ type Config struct {
 	MaxDownloads                                                        int
 	MaxUploads                                                          int
 	MaxUploadBytes, MaxStagedBytes                                      int64
+	TrustedProxies                                                      *trustedProxySet
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -73,6 +74,10 @@ func ConfigFromEnv() (Config, error) {
 		}
 	}
 	var err error
+	c.TrustedProxies, err = parseTrustedProxies(os.Getenv("TRUSTED_PROXIES"))
+	if err != nil {
+		return c, err
+	}
 	c.DataDir, err = filepath.Abs(c.DataDir)
 	return c, err
 }

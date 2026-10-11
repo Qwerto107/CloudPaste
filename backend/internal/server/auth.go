@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -44,11 +43,8 @@ func (a *App) checkPassword(hash, password string) error {
 }
 
 func (a *App) allowPasswordAttempt(r *http.Request) bool {
-	// 不信任客户端传来的 X-Forwarded-For，防止伪造地址绕过限流。
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		ip = r.RemoteAddr
-	}
+	// 只有明确受信的代理可以提供来源地址，直连客户端不能用转发头绕过限流。
+	ip := a.clientIP(r)
 	a.passwordAttemptMu.Lock()
 	defer a.passwordAttemptMu.Unlock()
 	// 使用后端已判定的入口范围，不接受客户端指定管理限流类别。

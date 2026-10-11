@@ -16,6 +16,8 @@ services:
       MAX_UPLOADS: ${MAX_UPLOADS:-2}
       MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-100}
       MAX_STAGED_SIZE_MB: ${MAX_STAGED_SIZE_MB:-1024}
+      # 仅信任内部 DNS 对应的前端服务，不依赖固定 Docker 子网。
+      TRUSTED_PROXIES: frontend
       GOMEMLIMIT: ${GOMEMLIMIT:-80MiB}
     volumes:
       # 保留既有 Go 项目名和数据卷名，升级目录结构时继续使用原数据。
