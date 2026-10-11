@@ -17,10 +17,19 @@ export function apiURL(endpoint, publicRequest = false) {
       : "";
   return `${base}/api${scope}${endpoint}`;
 }
+export function apiKeyAuthorization(key) {
+  // 可见 ASCII 保持原有格式，其他字符按 UTF-8 编码，保留原始空白。
+  if (/^[!-~]+$/.test(key)) return `ApiKey ${key}`;
+  const bytes = new TextEncoder().encode(key);
+  const encoded = btoa(
+    Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""),
+  );
+  return `ApiKeyBase64 ${encoded}`;
+}
 export function authorization() {
-  return session.token
-    ? `${session.type === "admin" ? "Bearer" : "ApiKey"} ${session.token}`
-    : "";
+  if (!session.token) return "";
+  if (session.type === "admin") return `Bearer ${session.token}`;
+  return apiKeyAuthorization(session.token);
 }
 
 export async function request(

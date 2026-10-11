@@ -3,6 +3,7 @@ import {
   computed,
   defineAsyncComponent,
   onMounted,
+  onBeforeUnmount,
   reactive,
   ref,
   watch,
@@ -37,6 +38,11 @@ const editing = ref(false);
 const editID = ref("");
 const values = reactive({});
 const newlyCreatedKey = ref("");
+const newKeyVisible = ref(false);
+const customKeyVisible = ref(false);
+const revealedKeys = ref({});
+const revealingKeyID = ref("");
+let keyController;
 const previewText = ref(null);
 const storageChoices = ref([]);
 const permissions = [
@@ -65,6 +71,7 @@ const endpoint = computed(
 );
 
 async function load() {
+  hideKeys();
   busy.value = true;
   error.value = "";
   editing.value = false;
@@ -97,6 +104,7 @@ async function openEditor(item = null) {
   error.value = "";
   success.value = "";
   newlyCreatedKey.value = "";
+  customKeyVisible.value = false;
   for (const key of Object.keys(values)) delete values[key];
   editID.value = item?.id || "";
   try {
@@ -311,6 +319,40 @@ async function copyKey() {
     error.value = "复制失败，请手动复制";
   }
 }
+function hideKeys() {
+  // 刷新或离开页面时清理明文，并取消尚未完成的显示请求。
+  keyController?.abort();
+  keyController = null;
+  revealedKeys.value = {};
+  revealingKeyID.value = "";
+  newKeyVisible.value = false;
+  customKeyVisible.value = false;
+}
+async function toggleKey(item) {
+  if (revealedKeys.value[item.id]) {
+    delete revealedKeys.value[item.id];
+    return;
+  }
+  const active = new AbortController();
+  keyController = active;
+  revealingKeyID.value = item.id;
+  error.value = "";
+  try {
+    const data = await request(
+      `/admin/api-keys/${encodeURIComponent(item.id)}/reveal`,
+      { signal: active.signal },
+    );
+    if (keyController === active) revealedKeys.value[item.id] = data.key;
+  } catch (reason) {
+    if (keyController === active && reason.name !== "AbortError")
+      error.value = reason.message;
+  } finally {
+    if (keyController === active) {
+      revealingKeyID.value = "";
+      keyController = null;
+    }
+  }
+}
 watch(panel, () => {
   page.value = 1;
   filter.value = "";
@@ -319,6 +361,7 @@ watch(panel, () => {
   load();
 });
 onMounted(load);
+onBeforeUnmount(hideKeys);
 </script>
 <template>
   <div class="management-heading">
@@ -332,15 +375,24 @@ onMounted(load);
   <p v-if="success" class="success" role="status">{{ success }}</p>
   <section v-if="newlyCreatedKey" class="panel result">
     <h2>保存新密钥</h2>
-    <p class="muted">完整密钥仅显示这一次，请妥善保存。</p>
+    <p class="muted">请妥善保存密钥，也可在下方列表中切换显示。</p>
     <div class="copy-row">
-      <input :value="newlyCreatedKey" readonly /><button @click="copyKey">
-        复制
+      <input
+        :value="newlyCreatedKey"
+        :type="newKeyVisible ? 'text' : 'password'"
+        aria-label="新密钥"
+        readonly
+      />
+      <button
+        :aria-pressed="newKeyVisible"
+        @click="newKeyVisible = !newKeyVisible"
+      >
+        <span v-if="newKeyVisible">隐藏密钥</span>
+        <span v-else>显示密钥</span>
       </button>
+      <button @click="copyKey">复制</button>
     </div>
-    <button class="quiet" @click="newlyCreatedKey = ''">
-      我已保存，隐藏密钥
-    </button>
+    <button class="quiet" @click="newlyCreatedKey = ''">关闭</button>
   </section>
   <section v-if="panel === 'account'" class="panel">
     <h2>{{ session.name || "当前账号" }}</h2>
@@ -470,21 +522,30 @@ onMounted(load);
           ><label
             >名称<input v-model="values.name" required maxlength="100"
           /></label>
-          <label v-if="!editID"
-            >自定义密钥<input
-              v-model="values.custom_key"
-              type="password"
-              autocomplete="new-password"
-              minlength="24"
-              maxlength="128"
-              pattern="[!-~]{24,128}"
-              placeholder="留空自动生成"
-              aria-describedby="custom-key-hint"
-            /><small id="custom-key-hint" class="muted"
-              >可选，24–128
-              位英文字母、数字或半角符号，不含空格。建议使用随机组合。</small
-            ></label
-          >
+          <div v-if="!editID">
+            <label for="custom-key">自定义密钥</label>
+            <div class="copy-row">
+              <input
+                id="custom-key"
+                v-model="values.custom_key"
+                :type="customKeyVisible ? 'text' : 'password'"
+                autocomplete="new-password"
+                placeholder="留空自动生成"
+                aria-describedby="custom-key-hint"
+              />
+              <button
+                type="button"
+                :aria-pressed="customKeyVisible"
+                @click="customKeyVisible = !customKeyVisible"
+              >
+                <span v-if="customKeyVisible">隐藏密钥</span>
+                <span v-else>显示密钥</span>
+              </button>
+            </div>
+            <small id="custom-key-hint" class="muted">
+              可选，不限制长度和字符，留空自动生成。建议使用随机组合。
+            </small>
+          </div>
           <fieldset>
             <legend>权限</legend>
             <label v-for="entry in permissions" :key="entry.bit" class="check"
@@ -610,9 +671,12 @@ onMounted(load);
                   item.title || item.filename || item.name || item.slug
                 }}</strong
                 ><small v-if="item.slug" class="muted">{{ item.slug }}</small
-                ><small v-if="panel === 'keys'" class="muted">{{
-                  item.key
-                }}</small>
+                ><small v-if="panel === 'keys'" class="key-value">
+                  <template v-if="revealedKeys[item.id]">{{
+                    revealedKeys[item.id]
+                  }}</template>
+                  <template v-else>{{ item.key }}</template>
+                </small>
               </td>
               <td v-if="panel === 'storage'">
                 {{ item.storage_type }}
@@ -647,6 +711,16 @@ onMounted(load);
               </td>
               <td>
                 <div class="row-actions">
+                  <button
+                    v-if="panel === 'keys'"
+                    :disabled="!!revealingKeyID"
+                    :aria-pressed="!!revealedKeys[item.id]"
+                    @click="toggleKey(item)"
+                  >
+                    <span v-if="revealingKeyID === item.id">正在读取…</span>
+                    <span v-else-if="revealedKeys[item.id]">隐藏密钥</span>
+                    <span v-else>显示密钥</span>
+                  </button>
                   <a
                     v-if="item.slug"
                     :href="

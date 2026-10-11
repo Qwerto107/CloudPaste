@@ -7,10 +7,12 @@
 | 身份 | 入口 | 认证 |
 | --- | --- | --- |
 | 未登录访客 | 公开 `/api/*` 分享及站点信息 | 公开分享仍校验密码、过期、次数及读取票据 |
-| API Key 用户 | 普通 `/api/*` | `Authorization: ApiKey <密钥>` |
+| API Key 用户 | 普通 `/api/*` | `Authorization: ApiKey <密钥>` 或 `Authorization: ApiKeyBase64 <UTF-8 密钥的 Base64>` |
 | 管理员 | `/api/admin/*` | `Authorization: Bearer <会话令牌>` |
 
 目前没有普通用户注册体系。API Key 必须启用且未过期，并满足权限、路径范围和存储 ACL；非管理员内容管理还检查归属。
+
+密钥含中文、空格或控制字符时，使用 `ApiKeyBase64` 格式，先将完整密钥按 UTF-8 转为字节，再使用标准 Base64 编码，保留首尾空白。前端自动处理编码；原有可见 ASCII 密钥仍可使用 `ApiKey` 格式。
 
 前端页面也按身份分离：API Key 登录页为 `/login`，管理页为 `/manage/*`；管理员登录页为 `/admin/login`，管理页为 `/admin/*`。页面路由与下表 API 路径不同，外部反向代理的管理员 API 访问控制仍需覆盖 `/api/admin/*`。
 
@@ -87,6 +89,7 @@
 | GET | `/api/admin/test/admin-token` | 检查管理员会话 |
 | GET / POST | `/api/admin/api-keys` | 列表 / 创建 API Key |
 | PUT / DELETE | `/api/admin/api-keys/{id}` | 修改 / 删除 API Key |
+| GET | `/api/admin/api-keys/{id}/reveal` | 管理员读取完整密钥，返回 `data.key`，响应禁止缓存 |
 | GET / PUT | `/api/admin/api-keys/{id}/storage-acl` | 查询 / 修改存储 ACL |
 | POST | `/api/admin/storage` | 创建存储 |
 | PUT / DELETE | `/api/admin/storage/{id}` | 修改 / 删除存储 |
@@ -167,6 +170,6 @@ curl --fail-with-body -X PUT 'http://127.0.0.1:8081/api/fs/upload?path=/local' \
 }
 ```
 
-`custom_key` 省略或空字符串时自动生成；后端要求非空自定义值长度为 24–128 字节，前端进一步限制为不含空格的可见 ASCII 字符，便于放入认证请求头。重复值创建失败。`527 = 1 + 2 + 4 + 8 + 512` 表示文本与文件分享、管理自己记录及上传权限；按需要减少权限。空存储列表仍受存储公开标记和其他授权检查约束。
+`custom_key` 省略或空字符串时自动生成；非空自定义值不限制长度和字符，不裁剪首尾空白。通用请求体、HTTP 请求头及反向代理的大小上限仍适用。重复值创建失败。列表只返回固定掩码，管理员点击显示按钮时才读取完整密钥，隐藏或刷新后清理页面中的明文。`527 = 1 + 2 + 4 + 8 + 512` 表示文本与文件分享、管理自己记录及上传权限；按需要减少权限。空存储列表仍受存储公开标记和其他授权检查约束。
 
 创建响应的 `data.key` 为完整密钥，列表只返回脱敏密钥。`PUT /api/admin/api-keys/{id}` 编辑名称、权限和有效期，不更换已有密钥；需要换密钥时创建新 Key 后停用或删除旧 Key。API Key 用户不能管理密钥。

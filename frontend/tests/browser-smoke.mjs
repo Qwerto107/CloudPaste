@@ -423,7 +423,7 @@ try {
   await keyInput.fill("too-short");
   assert.equal(
     await keyInput.evaluate((input) => input.checkValidity()),
-    false,
+    true,
   );
   await keyInput.fill(customKey);
   await page.getByLabel("创建文本分享", { exact: true }).check();

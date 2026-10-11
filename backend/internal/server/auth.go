@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -106,6 +107,14 @@ func (a *App) authenticate(r *http.Request) (*Principal, error) {
 	}
 	if scheme == "apikey" {
 		return a.apiKeyPrincipal(r, value)
+	}
+	if scheme == "apikeybase64" {
+		// 编码传输保留中文、空格和控制字符，避免请求头改变原始密钥。
+		key, err := base64.StdEncoding.Strict().DecodeString(value)
+		if err != nil || len(key) == 0 {
+			return nil, &apiError{401, "UNAUTHORIZED", "认证信息无效"}
+		}
+		return a.apiKeyPrincipal(r, string(key))
 	}
 	return nil, &apiError{401, "UNAUTHORIZED", "认证信息无效或已过期"}
 }
@@ -230,6 +239,7 @@ func (a *App) registerAuth(mux *apiMux) {
 		return nil
 	}))
 	mux.HandleFunc("GET /api/admin/api-keys", a.protected(0, true, a.listKeys))
+	mux.HandleFunc("GET /api/admin/api-keys/{id}/reveal", a.protected(0, true, a.revealKey))
 	mux.HandleFunc("POST /api/admin/api-keys", a.protected(0, true, a.createKey))
 	mux.HandleFunc("PUT /api/admin/api-keys/{id}", a.protected(0, true, a.updateKey))
 	mux.HandleFunc("DELETE /api/admin/api-keys/{id}", a.protected(0, true, func(w http.ResponseWriter, r *http.Request) error {
@@ -381,35 +391,41 @@ func validateKey(k *APIKey) error {
 	return validateExpiry(k.ExpiresAt, 0)
 }
 func (a *App) listKeys(w http.ResponseWriter, r *http.Request) error {
-	rows, err := a.db.QueryContext(r.Context(), "SELECT data,key_encrypted FROM api_keys ORDER BY id")
+	rows, err := a.db.QueryContext(r.Context(), "SELECT data FROM api_keys ORDER BY id")
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	items := []APIKey{}
 	for rows.Next() {
-		var raw, encrypted string
+		var raw string
 		var k APIKey
-		if err = rows.Scan(&raw, &encrypted); err != nil {
+		if err = rows.Scan(&raw); err != nil {
 			return err
 		}
 		if err = json.Unmarshal([]byte(raw), &k); err != nil {
 			return err
 		}
-		key, err := a.decrypt(encrypted)
-		if err != nil {
-			return err
-		}
+		// 固定掩码不会泄露短密钥，也不按字节截断中文字符。
 		k.Key = "********"
-		if len(key) > 4 {
-			k.Key += key[len(key)-4:]
-		}
 		items = append(items, k)
 	}
 	if err = rows.Err(); err != nil {
 		return err
 	}
 	a.write(w, 200, items, "获取成功")
+	return nil
+}
+func (a *App) revealKey(w http.ResponseWriter, r *http.Request) error {
+	k, err := a.keyByID(r)
+	if err != nil {
+		return err
+	}
+	key, err := a.decrypt(k.EncryptedKey)
+	if err != nil {
+		return err
+	}
+	a.write(w, 200, map[string]string{"key": key}, "获取成功")
 	return nil
 }
 func (a *App) createKey(w http.ResponseWriter, r *http.Request) error {
@@ -434,9 +450,6 @@ func (a *App) createKey(w http.ResponseWriter, r *http.Request) error {
 	key := body.CustomKey
 	if key == "" {
 		key = randomID()
-	}
-	if len(key) < 24 || len(key) > 128 {
-		return badRequest("自定义密钥必须为 24-128 字节")
 	}
 	k.KeyHash = secretHash(key)
 	a.mutationMu.Lock()

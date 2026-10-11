@@ -737,6 +737,11 @@ td small {
   color: var(--muted);
   margin-top: 0.4rem;
 }
+td .key-value {
+  max-width: 32rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .row-actions {
   display: flex;
   gap: 0.45rem;

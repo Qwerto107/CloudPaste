@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
-import { request, backendBase } from "./api.js";
+import { request, backendBase, apiKeyAuthorization } from "./api.js";
 import { saveSession } from "./session.js";
 const router = useRouter();
 const route = useRoute();
@@ -38,7 +38,7 @@ async function login() {
     } else {
       // 验证使用当前输入的 Key，不继承旧管理员会话。
       const response = await fetch(backendBase + "/api/test/api-key", {
-        headers: { Authorization: `ApiKey ${apiKey.value}` },
+        headers: { Authorization: apiKeyAuthorization(apiKey.value) },
         cache: "no-store",
         signal: AbortSignal.timeout(30000),
       });
