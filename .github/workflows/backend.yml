@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_images:
-        description: "检查通过后将双架构镜像发布到 GHCR"
+        description: "仅 main：检查通过后将双架构镜像发布到 GHCR"
         type: boolean
         default: false
   pull_request:
@@ -56,6 +56,22 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # 官方 v6
         with:
           persist-credentials: false
+          # 发布时需要完整 main 历史，才能验证标签提交已合并到主分支。
+          fetch-depth: 0
+      - name: 检查发布必须来自 main
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.publish_images) ||
+          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+        run: |
+          # 普通分支和 PR 仍可测试；只有发布操作需要校验主分支来源。
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" != refs/heads/main ]]; then
+            echo '::error::手动发布镜像必须选择 main 分支。'
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+            echo '::error::发布提交尚未合并到 main，请先合并并推送主分支。'
+            exit 1
+          fi
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # 官方 v6
         with:
           go-version: 1.27.2
