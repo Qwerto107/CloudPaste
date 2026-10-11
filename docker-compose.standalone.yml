@@ -1,0 +1,49 @@
+# 与分离部署沿用同一数据卷；切换模式前先停止原服务，不要同时运行两种模式。
+name: cloudpaste-go
+
+services:
+  standalone:
+    build:
+      context: .
+      dockerfile: docker/standalone/Dockerfile
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    image: ${GO_STANDALONE_IMAGE:-cloudpaste-standalone:local}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-8081}:8787"
+    environment:
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 backend/.env 中设置至少12字节的管理员密码}
+      DATA_DIR: /data
+      PORT: 8787
+      MAX_DOWNLOADS: ${MAX_DOWNLOADS:-8}
+      MAX_UPLOADS: ${MAX_UPLOADS:-2}
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-100}
+      MAX_STAGED_SIZE_MB: ${MAX_STAGED_SIZE_MB:-1024}
+      # 直接提供页面与 API；仅在前面配置可信 HTTPS 代理时填写其明确地址。
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      GOMEMLIMIT: ${GOMEMLIMIT:-80MiB}
+    volumes:
+      - go-data:/data
+      - type: bind
+        source: ${LOCAL_FILES_DIR:-./files}
+        target: /files
+        read_only: ${LOCAL_FILES_READ_ONLY:-false}
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    pids_limit: 128
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+
+volumes:
+  go-data:

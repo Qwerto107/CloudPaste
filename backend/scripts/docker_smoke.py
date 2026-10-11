@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -45,7 +46,10 @@ def main():
         content, _ = request("GET", "/")
         assert b"<html" in content
         content, _ = request("GET", "/config.js")
-        assert b"window.location.origin" in content
+        # 分离镜像使用运行时同源配置，内嵌页面使用空地址表示当前站点。
+        assert b"window.location.origin" in content or re.search(rb'backendUrl\s*:\s*([\"\'])\1', content)
+        content, _ = request("GET", "/admin/login")
+        assert b"<html" in content
     login = api("POST", "/api/admin/login", {"username": "admin", "password": os.environ["ADMIN_PASSWORD"]})
     auth = "Bearer " + login["token"]
 

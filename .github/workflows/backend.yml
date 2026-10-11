@@ -13,7 +13,10 @@ on:
       - backend/**
       - frontend/**
       - docker/frontend/**
+      - docker/standalone/**
+      - scripts/**
       - docker-compose.yml
+      - docker-compose.standalone.yml
       - .dockerignore
       - .gitattributes
       - .github/workflows/backend.yml
@@ -21,13 +24,16 @@ on:
     branches:
       - '**'
     tags:
-      - 'go-v*'
+      - 'v*'
     paths:
       - docs/binary.md
       - backend/**
       - frontend/**
       - docker/frontend/**
+      - docker/standalone/**
+      - scripts/**
       - docker-compose.yml
+      - docker-compose.standalone.yml
       - .dockerignore
       - .gitattributes
       - .github/workflows/backend.yml
@@ -35,7 +41,7 @@ on:
 permissions:
   contents: read
 
-# 发布任务排队执行，避免中途取消导致两个镜像或发行附件不完整。
+# 发布任务排队执行，避免中途取消导致镜像或发行附件不完整。
 concurrency:
   group: cloudpaste-go-${{ github.ref }}
   cancel-in-progress: false
@@ -57,8 +63,8 @@ jobs:
       - name: 检查格式、竞态与静态问题
         run: |
           # 标签只作为数据读取；先校验，再允许后续发布任务运行。
-          if [[ "$GITHUB_REF" == refs/tags/go-v* ]]; then
-            [[ "$GITHUB_REF_NAME" =~ ^go-v[0-9]+\.[0-9]+\.[0-9]+(-[[:alnum:]][[:alnum:].-]*)?$ ]]
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[[:alnum:]][[:alnum:].-]*)?$ ]]
             [[ ${#GITHUB_REF_NAME} -le 100 ]]
           fi
           test -z "$(gofmt -l cmd internal)"
@@ -100,10 +106,31 @@ jobs:
           npm run build
           npx playwright install --with-deps chromium
           npm run test:e2e
+      - name: 准备并检查内嵌前端
+        run: |
+          node --test scripts/prepare-webui.test.mjs
+          node scripts/prepare-webui.mjs
+          cd backend
+          go test -tags with_frontend ./... -count=1 -timeout=300s
+          go vet -tags with_frontend ./...
+          go build -tags with_frontend -o bin/sharing-standalone ./cmd/cloudpaste
+      - name: 检查一体化二进制的真实浏览器流程
+        working-directory: frontend
+        env:
+          SHARING_TEST_STANDALONE: '1'
+          SHARING_TEST_BINARY: ${{ github.workspace }}/backend/bin/sharing-standalone
+        run: npm run test:e2e
+      - name: 保存已验证的静态资源供二进制构建复用
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # 官方 v7
+        with:
+          name: cloudpaste-webui-dist
+          path: backend/internal/webui/dist
+          if-no-files-found: error
+          retention-days: 7
 
   binaries:
     name: Linux ${{ matrix.arch }} 二进制
-    needs: go
+    needs: [go, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -121,41 +148,58 @@ jobs:
         with:
           go-version: 1.27.2
           cache-dependency-path: backend/go.sum
+      - name: 取得同一提交已验证的前端产物
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # 官方 v8
+        with:
+          name: cloudpaste-webui-dist
+          path: backend/internal/webui/dist
       - name: 构建、打包并计算校验值
         env:
           GOOS: linux
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: '0'
         run: |
-          target="cloudpaste-go-linux-${GOARCH}"
-          mkdir -p "bin/release/$target"
-          go build -trimpath -ldflags='-s -w' -o "bin/release/$target/cloudpaste" ./cmd/cloudpaste
-          chmod 0755 "bin/release/$target/cloudpaste"
-          # 压缩包携带可独立阅读的二进制启动说明。
-          cp ../docs/binary.md "bin/release/$target/README.md"
-          cp ../LICENSE "bin/release/$target/LICENSE"
-          # tar 保留可执行权限，外层 Actions 附件不会改变二进制的权限。
-          # 固定时间和所有者，重跑同一提交时不会因打包时间改变校验值。
           epoch="$(git show -s --format=%ct HEAD)"
-          tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner -czf "bin/release/$target.tar.gz" -C bin/release "$target"
-          cd bin/release
-          sha256sum "$target.tar.gz" > "$target.tar.gz.sha256"
+          # 保留仅后端附件，同时提供包含页面的一体化二进制。
+          for mode in go standalone; do
+            target="cloudpaste-${mode}-linux-${GOARCH}"
+            tags=()
+            if [[ "$mode" == standalone ]]; then tags=(-tags with_frontend); fi
+            mkdir -p "bin/release/$target"
+            go build "${tags[@]}" -trimpath -ldflags='-s -w' -o "bin/release/$target/cloudpaste" ./cmd/cloudpaste
+            chmod 0755 "bin/release/$target/cloudpaste"
+            # 压缩包携带可独立阅读的启动说明，保留权限并固定时间与所有者。
+            cp ../docs/binary.md "bin/release/$target/README.md"
+            cp ../LICENSE "bin/release/$target/LICENSE"
+            tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner -czf "bin/release/$target.tar.gz" -C bin/release "$target"
+            (cd bin/release && sha256sum "$target.tar.gz" > "$target.tar.gz.sha256")
+          done
       - name: 上传可下载的二进制及校验文件
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # 官方 v7
         with:
-          name: cloudpaste-go-linux-${{ matrix.arch }}
+          name: cloudpaste-linux-${{ matrix.arch }}
           path: backend/bin/release/*.tar.gz*
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
 
   docker:
+    name: Docker ${{ matrix.mode }} 部署回归
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: split
+            compose: docker-compose.yml
+          - mode: standalone
+            compose: docker-compose.standalone.yml
     env:
       # 仅用于每次新建的 CI 数据卷，不对应真实部署凭证。
       ADMIN_PASSWORD: CI-only-password-12345
       LOCAL_FILES_DIR: ./.go-smoke-files
+      COMPOSE_FILE: ${{ matrix.compose }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # 官方 v6
         with:
@@ -167,23 +211,23 @@ jobs:
           sudo chown -R 65532:65532 .go-smoke-files
       - name: 检查 Compose 配置并启动镜像
         run: |
-          docker compose -f docker-compose.yml config --quiet
-          docker compose -f docker-compose.yml up -d --build --wait --wait-timeout 120
+          docker compose config --quiet
+          docker compose up -d --build --wait --wait-timeout 120
       - name: 检查前后端与核心安全约束
         run: python3 backend/scripts/docker_smoke.py
       - name: 输出失败日志
         if: failure()
-        run: docker compose -f docker-compose.yml logs --tail=100
+        run: docker compose logs --tail=100
       - name: 清理本次 CI 容器与临时数据卷
         if: always()
-        run: docker compose -f docker-compose.yml down -v
+        run: docker compose down -v
 
   images:
     name: 发布 ${{ matrix.component }} 双架构镜像
     needs: [go, frontend, binaries, docker]
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.publish_images) ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/go-v'))
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -199,6 +243,9 @@ jobs:
           - component: frontend
             context: .
             dockerfile: ./docker/frontend/Dockerfile
+          - component: standalone
+            context: .
+            dockerfile: ./docker/standalone/Dockerfile
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # 官方 v6
         with:
@@ -213,8 +260,8 @@ jobs:
           # 手动构建只发布提交号；正式版本标签才更新版本号及 latest。
           version=""
           stable=false
-          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/go-v* ]]; then
-            version="${GITHUB_REF_NAME#go-v}"
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
             if [[ "$version" != *-* ]]; then stable=true; fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -256,7 +303,7 @@ jobs:
   release:
     name: 发布版本二进制附件
     needs: [binaries, images]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/go-v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -264,7 +311,7 @@ jobs:
       - name: 下载本次运行的二进制附件
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # 官方 v8
         with:
-          pattern: cloudpaste-go-linux-*
+          pattern: cloudpaste-linux-*
           merge-multiple: true
           path: release-assets
       - name: 校验附件并发布 GitHub Release
@@ -273,16 +320,24 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           cd release-assets
+          # 两种模式和两个架构都必须齐全，避免只发布部分成功的产物。
+          for mode in go standalone; do
+            for arch in amd64 arm64; do
+              test -s "cloudpaste-${mode}-linux-${arch}.tar.gz"
+              test -s "cloudpaste-${mode}-linux-${arch}.tar.gz.sha256"
+            done
+          done
           sha256sum -c ./*.sha256
           tag="$GITHUB_REF_NAME"
-          version="${tag#go-v}"
+          version="${tag#v}"
           repository="${GITHUB_REPOSITORY,,}"
           prerelease=false
           if [[ "$version" == *-* ]]; then prerelease=true; fi
-          printf '%s\n\n' '提供 Linux amd64、arm64 二进制及 SHA-256 校验文件。' > release-notes.md
+          printf '%s\n\n' '提供 Linux amd64、arm64 二进制及 SHA-256 校验文件。cloudpaste-standalone 包含前端页面与 API，单个进程即可运行；cloudpaste-go 保留仅后端模式，供独立前端部署。' > release-notes.md
           printf '源码提交：%s\n\n' "$GITHUB_SHA" >> release-notes.md
           printf '后端镜像：ghcr.io/%s-backend:%s\n' "$repository" "$version" >> release-notes.md
           printf '前端镜像：ghcr.io/%s-frontend:%s\n' "$repository" "$version" >> release-notes.md
+          printf '一体化镜像：ghcr.io/%s-standalone:%s\n' "$repository" "$version" >> release-notes.md
           # 先创建草稿，全部附件上传成功后再公开；重跑只补缺失附件。
           if ! gh release view "$tag" --json tagName > /dev/null 2>&1; then
             gh release create "$tag" --verify-tag --draft --title "$tag" --notes-file release-notes.md
@@ -295,6 +350,6 @@ jobs:
           done
           # 校验真正保存到 Release 的附件，避免中断重跑后出现附件与校验文件不匹配。
           mkdir verified-assets
-          gh release download "$tag" --dir verified-assets --pattern 'cloudpaste-go-linux-*'
+          gh release download "$tag" --dir verified-assets --pattern 'cloudpaste-*-linux-*'
           (cd verified-assets && sha256sum -c ./*.sha256)
           gh release edit "$tag" --draft=false --prerelease="$prerelease"

@@ -10,6 +10,8 @@
 data
 sql_data
 bin
+# 独立后端镜像不需要本地生成的前端嵌入文件。
+internal/webui/dist
 logs
 *.log
 *.db
