@@ -168,7 +168,10 @@ watch(panel, load, { immediate: true });
             v-for="item in card.items"
             :key="item.key"
             class="setting-row"
-            :class="{ 'setting-row-wide': item.type === 'textarea' }"
+            :class="{
+              'setting-row-wide':
+                item.type === 'textarea' || field(item).multiline,
+            }"
           >
             <div class="setting-description">
               <label :for="'setting-' + item.key" :id="'label-' + item.key"
@@ -190,7 +193,11 @@ watch(panel, load, { immediate: true });
                 }}
                 {{ field(item).unit }}</span
               >
-              <template v-else-if="item.type === 'bool'">
+              <label
+                v-else-if="item.type === 'bool'"
+                class="setting-toggle"
+                :for="'setting-' + item.key"
+              >
                 <span class="switch-state" aria-hidden="true">{{
                   values[item.key] ? "已开启" : "已关闭"
                 }}</span>
@@ -202,12 +209,14 @@ watch(panel, load, { immediate: true });
                   role="switch"
                   :aria-describedby="'help-' + item.key"
                 />
-              </template>
+              </label>
               <textarea
-                v-else-if="item.type === 'textarea'"
+                v-else-if="item.type === 'textarea' || field(item).multiline"
                 :id="'setting-' + item.key"
                 v-model="values[item.key]"
-                rows="4"
+                :rows="field(item).rows || 4"
+                :class="{ 'setting-code': field(item).code }"
+                :spellcheck="!field(item).code && !field(item).multiline"
                 :placeholder="field(item).placeholder"
                 :aria-describedby="'help-' + item.key"
               ></textarea>
@@ -224,6 +233,8 @@ watch(panel, load, { immediate: true });
                   :max="field(item).max"
                   :step="item.type === 'number' ? 1 : undefined"
                   :required="item.type === 'number'"
+                  :inputmode="item.type === 'number' ? 'numeric' : undefined"
+                  autocomplete="off"
                   :placeholder="field(item).placeholder"
                   :aria-describedby="'help-' + item.key"
                 />
