@@ -6,7 +6,8 @@ export function sanitizeHTML(value, allowExternalImages = false) {
     RETURN_DOM: true,
     USE_PROFILES: { html: true },
     FORBID_TAGS: ["style", "iframe", "form", "input", "video", "audio"],
-    FORBID_ATTR: ["style", "srcset", "ping"],
+    // 表格的旧式 background 属性也会加载图片，统一移除，避免绕过 img 的同源检查。
+    FORBID_ATTR: ["style", "srcset", "ping", "background"],
   });
   for (const image of body.querySelectorAll("img")) {
     try {

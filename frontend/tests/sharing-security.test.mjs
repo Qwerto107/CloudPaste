@@ -108,3 +108,25 @@ test("自定义站点 HTML 使用相同安全过滤，不接受内联脚本、�
   assert.equal(body.querySelector("form,input,img,[style]"), null);
   assert.equal(body.querySelector("a").rel, "noopener noreferrer");
 });
+test("Markdown 和自定义 HTML 均移除表格背景，正常文本与图片授权仍有效", () => {
+  const content =
+    '<table background="https://tracker.example/table"><tr><th background="https://tracker.example/header">表头</th><td background="https://tracker.example/cell">正文</td></tr></table><p>普通文本</p><img src="/local.png"><img src="https://images.example/allowed.png">';
+  // 开启站外图片只放行 img，旧式表格背景在两条渲染路径下始终被移除。
+  for (const render of [renderMarkdown, sanitizeHTML]) {
+    for (const allowExternalImages of [false, true]) {
+      const html = render(content, allowExternalImages);
+      const body = new JSDOM(html).window.document;
+      assert.equal(body.querySelector("[background]"), null);
+      assert.equal(html.includes("tracker.example"), false);
+      assert.equal(body.querySelector("th").textContent, "表头");
+      assert.equal(body.querySelector("td").textContent, "正文");
+      assert.equal(body.querySelector("p").textContent, "普通文本");
+      assert.equal(body.querySelector('img[src="/local.png"]') !== null, true);
+      assert.equal(
+        body.querySelector('img[src="https://images.example/allowed.png"]') !==
+          null,
+        allowExternalImages,
+      );
+    }
+  }
+});

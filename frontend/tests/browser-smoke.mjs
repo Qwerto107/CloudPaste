@@ -148,6 +148,10 @@ try {
   const external = [];
   const downloads = [];
   const errors = [];
+  const backgroundHTML =
+    '<table background="https://tracker.example/table"><tr><th background="https://tracker.example/header">表头</th><td background="https://tracker.example/cell">正文</td></tr></table>';
+  // 即使过滤回归，也只记录并中止测试追踪请求，避免浏览器真正访问站外服务。
+  await page.route("https://tracker.example/**", (route) => route.abort());
   page.on("request", (request) => {
     downloads.push(request.url());
     if (!request.url().startsWith(origin)) external.push(request.url());
@@ -212,7 +216,8 @@ try {
   await page
     .getByLabel("分享内容")
     .fill(
-      '# 本站预览\n中文内容\n<img src="https://tracker.example/test" onerror="window.compromised=true">',
+      '# 本站预览\n中文内容\n<img src="https://tracker.example/test" onerror="window.compromised=true">\n\n' +
+        backgroundHTML,
     );
   await page.getByLabel(/自定义链接名称/).fill("../invalid");
   assert.equal(
@@ -251,6 +256,9 @@ try {
   await page.goto(textURL);
   await page.getByRole("heading", { name: "本站预览" }).waitFor();
   assert.equal(await page.evaluate(() => window.compromised), undefined);
+  assert.equal(await page.locator(".markdown-body [background]").count(), 0);
+  assert.equal(await page.locator(".markdown-body td").textContent(), "正文");
+  assert.deepEqual(external, []);
   await page.goto(origin + "/upload");
   await page.locator('input[type="file"]').setInputFiles({
     name: "中文预览.txt",
@@ -360,7 +368,7 @@ try {
   await page.locator("summary").click();
   await page
     .getByLabel("页面顶部 HTML", { exact: true })
-    .fill("<strong>本地测试说明</strong>");
+    .fill("<strong>本地测试说明</strong>" + backgroundHTML);
   await page.getByLabel(/^站点标题/).fill("临时分享站");
   await page.getByRole("button", { name: "保存设置" }).click();
   await page.getByText("设置已保存", { exact: true }).waitFor();
@@ -368,8 +376,11 @@ try {
   await page.locator("summary").click();
   assert.equal(
     await page.getByLabel("页面顶部 HTML", { exact: true }).inputValue(),
-    "<strong>本地测试说明</strong>",
+    "<strong>本地测试说明</strong>" + backgroundHTML,
   );
+  assert.equal(await page.locator(".custom-content [background]").count(), 0);
+  assert.equal(await page.locator(".custom-content td").textContent(), "正文");
+  assert.deepEqual(external, []);
   await page.getByLabel("页面顶部 HTML", { exact: true }).fill("");
   await page.getByRole("button", { name: "保存设置" }).click();
   await page.getByText("设置已保存", { exact: true }).waitFor();
