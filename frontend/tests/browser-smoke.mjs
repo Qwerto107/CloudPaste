@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { resolve, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { randomBytes } from "node:crypto";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const standalone = process.env.SHARING_TEST_STANDALONE === "1";
@@ -20,7 +21,7 @@ const temporary = await mkdtemp(resolve(root, "backend/bin/sharing-test-"));
 const filesDirectory = resolve(temporary, "files");
 await mkdir(filesDirectory);
 const password = "isolated-sharing-test-password";
-let service, browser;
+let service, browser, page;
 // 使用独立临时库和端口，测试不会连接用户部署或读取已有数据。
 const reservation = createServer();
 await new Promise((done) => reservation.listen(0, "127.0.0.1", done));
@@ -48,9 +49,11 @@ const frontend = createServer(async (request, response) => {
       return;
     }
     const pathname = new URL(request.url, "http://localhost").pathname;
+    // 分离测试服务与生产代理一致，为每次页面响应生成独立样式 nonce。
+    const nonce = randomBytes(18).toString("base64");
     response.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: http:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+      `default-src 'self'; script-src 'self'; style-src 'self' 'nonce-${nonce}'; img-src 'self' https: http:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
     );
     let target = resolve(staticRoot, "." + pathname);
     if (
@@ -64,7 +67,14 @@ const frontend = createServer(async (request, response) => {
       "Content-Type",
       mime[extname(target)] || "application/octet-stream",
     );
-    response.end(await readFile(target));
+    const content = await readFile(target);
+    response.end(
+      extname(target) === ".html"
+        ? content
+            .toString("utf8")
+            .replaceAll("__CLOUDPASTE_STYLE_NONCE__", nonce)
+        : content,
+    );
   } catch (error) {
     response.writeHead(500);
     response.end(error.message);
@@ -150,7 +160,7 @@ try {
   });
   context.setDefaultTimeout(15000);
   context.setDefaultNavigationTimeout(15000);
-  const page = await context.newPage();
+  page = await context.newPage();
   const external = [];
   const downloads = [];
   const errors = [];
@@ -192,7 +202,7 @@ try {
   await page.getByRole("link", { name: "文本分享", exact: true }).click();
   await page.getByLabel("分享标题").fill("浏览器分享验证");
   await page
-    .getByLabel("分享内容")
+    .getByLabel("Markdown 内容")
     .fill(
       "# 临时笔记\n\n把需要分享的内容留在这里。\n\n- 支持文本与 Markdown\n- 为链接设置有效期\n- 添加访问密码，按需分享",
     );
@@ -211,16 +221,16 @@ try {
   });
   await page.getByRole("button", { name: "预览", exact: true }).click();
   await page.getByRole("heading", { name: "临时笔记", exact: true }).waitFor();
-  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  await page.getByRole("button", { name: "预览", exact: true }).click();
   assert.ok(
-    (await page.getByLabel("分享内容").inputValue()).includes("临时笔记"),
+    (await page.getByLabel("Markdown 内容").textContent()).includes("临时笔记"),
   );
   await page.reload();
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
   // 刷新不保存草稿，重新填写用于后续真实分享验证。
   await page.getByLabel("分享标题").fill("浏览器分享验证");
   await page
-    .getByLabel("分享内容")
+    .getByLabel("Markdown 内容")
     .fill(
       '# 本站预览\n中文内容\n<img src="https://tracker.example/test" onerror="window.compromised=true">\n\n' +
         backgroundHTML,
@@ -236,9 +246,8 @@ try {
   // 查看上限无需展开；分钟有效期写入真实记录，防止只改了下拉文案。
   assert.ok(await page.getByLabel(/最多查看次数/).isVisible());
   await page.getByLabel(/最多查看次数/).fill("20");
-  await page
-    .getByLabel("有效期", { exact: true })
-    .selectOption({ label: "5 分钟" });
+  await page.getByLabel("有效期", { exact: true }).click();
+  await page.getByText("5 分钟", { exact: true }).click();
   const textCreated = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/admin/paste") &&
@@ -255,7 +264,7 @@ try {
   const textURL = await sharedText.inputValue();
   assert.ok(textURL.endsWith("/paste/mint-text-demo"));
   await page.goto(origin + "/");
-  await page.getByLabel("分享内容").fill("不能覆盖原分享");
+  await page.getByLabel("Markdown 内容").fill("不能覆盖原分享");
   await page.getByLabel(/自定义链接名称/).fill("mint-text-demo");
   await page.getByRole("button", { name: "创建分享", exact: true }).click();
   await page.getByText("链接后缀已被占用", { exact: true }).waitFor();
@@ -274,9 +283,8 @@ try {
   await page.getByLabel(/自定义链接名称/).fill("mint-file-demo");
   assert.ok(await page.getByLabel(/最多查看次数/).isVisible());
   await page.getByLabel(/最多查看次数/).fill("20");
-  await page
-    .getByLabel("有效期", { exact: true })
-    .selectOption({ label: "10 分钟" });
+  await page.getByLabel("有效期", { exact: true }).click();
+  await page.getByText("10 分钟", { exact: true }).click();
   const fileCreated = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/admin/share/upload") &&
@@ -311,8 +319,11 @@ try {
   await page.goto(origin + "/admin/settings/global");
   await page.getByLabel(/新分享默认有效期/).fill("2");
   await page.getByText("有未保存的修改", { exact: true }).waitFor();
-  page.once("dialog", (dialog) => dialog.dismiss());
   await page.getByRole("link", { name: "文件预览", exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "取消", exact: true })
+    .click();
   assert.ok(page.url().endsWith("/admin/settings/global"));
   await page.getByRole("button", { name: "撤销修改", exact: true }).click();
   assert.equal(await page.getByLabel(/新分享默认有效期/).inputValue(), "24");
@@ -421,10 +432,7 @@ try {
   await page.getByLabel("名称", { exact: true }).fill("自定义测试密钥");
   const keyInput = page.getByLabel(/自定义密钥/);
   await keyInput.fill("too-short");
-  assert.equal(
-    await keyInput.evaluate((input) => input.checkValidity()),
-    true,
-  );
+  assert.equal(await keyInput.evaluate((input) => input.checkValidity()), true);
   await keyInput.fill(customKey);
   await page.getByLabel("创建文本分享", { exact: true }).check();
   await page.getByRole("button", { name: "保存", exact: true }).click();
@@ -587,11 +595,9 @@ try {
     0,
   );
   await page.goto(origin + "/upload");
-  await page
-    .getByRole("option", { name: /本地测试存储/ })
-    .waitFor({ state: "attached" });
+  await page.getByText("本地测试存储 · LOCAL", { exact: true }).waitFor();
   await page.goto(origin + "/");
-  await page.getByLabel("分享内容").waitFor();
+  await page.getByLabel("Markdown 内容").waitFor();
   // 小屏可操作性检查：导航可见且页面不产生整体横向滚动。
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
@@ -613,15 +619,16 @@ try {
     mimeType: "text/plain",
     buffer: Buffer.from("旅途中的一些记录"),
   });
-  assert.ok(await page.getByLabel("访问密码", { exact: true }).isVisible());
-  await page.getByLabel("访问密码", { exact: true }).fill("temporary-password");
-  await page.getByLabel("备注", { exact: true }).fill("测试备注");
-  assert.ok(await page.getByLabel("备注", { exact: true }).isVisible());
+  await page.getByLabel(/^访问密码/).waitFor();
+  assert.ok(await page.getByLabel(/^访问密码/).isVisible());
+  await page.getByLabel(/^访问密码/).fill("temporary-password");
+  await page.getByLabel(/^备注/).fill("测试备注");
+  assert.ok(await page.getByLabel(/^备注/).isVisible());
   assert.equal(
-    await page.getByLabel("访问密码", { exact: true }).inputValue(),
+    await page.getByLabel(/^访问密码/).inputValue(),
     "temporary-password",
   );
-  assert.ok(await page.getByLabel("访问密码", { exact: true }).isVisible());
+  assert.ok(await page.getByLabel(/^访问密码/).isVisible());
   await page.screenshot({
     path: resolve(root, "backend/bin/mint-mobile-light.png"),
     fullPage: true,
@@ -653,7 +660,10 @@ try {
     "light",
   );
   await privateContext.close();
-  // API Key 在普通接口中批量创建自定义链接；同批重名在上传前拦截。
+  // API Key 批量上传生成一个合集，链接重名时只重试生成链接。
+  await page
+    .getByRole("button", { name: "移除 旅行笔记.txt", exact: true })
+    .click();
   await page.locator('input[type="file"]').setInputFiles([
     {
       name: "batch-one.txt",
@@ -666,49 +676,87 @@ try {
       buffer: Buffer.from("two"),
     },
   ]);
-  await page
-    .getByLabel(/自定义链接名称/)
-    .nth(0)
-    .fill("batch-one");
-  await page
-    .getByLabel(/自定义链接名称/)
-    .nth(1)
-    .fill("batch-one");
+  // 待上传项可单独移除；清空原生选择框后，同一文件仍可再次选择。
+  assert.equal(await page.locator(".file-upload-entry").count(), 2);
+  assert.equal(await page.locator('input[type="file"]').inputValue(), "");
+  await page.getByRole("button", { name: "移除 batch-one.txt" }).click();
+  assert.equal(await page.locator(".file-upload-entry").count(), 1);
+  assert.equal(
+    await page.getByText("batch-one.txt", { exact: true }).count(),
+    0,
+  );
+  // 再次选择文件追加到队列，不能覆盖仍在列表中的 batch-two.txt。
+  await page.locator('input[type="file"]').setInputFiles([
+    {
+      name: "batch-one.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("one"),
+    },
+  ]);
+  assert.equal(await page.locator(".file-upload-entry").count(), 2);
+  assert.equal(
+    await page.getByText("batch-two.txt", { exact: true }).count(),
+    1,
+  );
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.screenshot({
+    path: resolve(root, "backend/bin/upload-queue-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: resolve(root, "backend/bin/upload-queue-mobile.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByLabel(/自定义链接名称/).fill("mint-file-demo");
+  await page.getByLabel(/合集名称/).fill("批量文件合集");
   const uploadsBefore = userRequests.filter((url) =>
     url.endsWith("/api/share/upload"),
   ).length;
   await page.getByRole("button", { name: "上传并创建分享" }).click();
-  await page
-    .getByText("多个文件不能使用相同的链接名称，请分别填写或留空自动生成。", {
-      exact: true,
-    })
-    .waitFor();
+  await page.getByText("链接后缀已被占用", { exact: true }).waitFor();
   assert.equal(
     userRequests.filter((url) => url.endsWith("/api/share/upload")).length,
-    uploadsBefore,
+    uploadsBefore + 2,
   );
-  // 后一个文件使用已占用名称时，保留前一个文件的成功链接，修改后可单独重试。
-  await page
-    .getByLabel(/自定义链接名称/)
-    .nth(1)
-    .fill("mint-file-demo");
-  await page.getByRole("button", { name: "上传并创建分享" }).click();
-  await page.getByText("链接后缀已被占用", { exact: true }).waitFor();
-  assert.equal(await page.locator(".share-result input").count(), 1);
-  assert.equal(await page.getByLabel(/自定义链接名称/).count(), 1);
-  await page.getByLabel(/自定义链接名称/).fill("batch-two");
-  await page.getByRole("button", { name: "上传并创建分享" }).click();
+  assert.equal(await page.locator(".share-result input").count(), 0);
+  await page.getByLabel(/自定义链接名称/).fill("batch-collection");
+  await page.getByRole("button", { name: "生成合集链接" }).click();
   await page.waitForFunction(
-    () => document.querySelectorAll(".share-result input").length === 2,
+    () => document.querySelectorAll(".share-result input").length === 1,
   );
-  assert.deepEqual(
-    await page
-      .locator(".share-result input")
-      .evaluateAll((inputs) =>
-        inputs.map((input) => new URL(input.value).pathname),
-      ),
-    ["/file/batch-one", "/file/batch-two"],
+  assert.equal(
+    userRequests.filter((url) => url.endsWith("/api/share/upload")).length,
+    uploadsBefore + 2,
   );
+  const collectionURL = await page.locator(".share-result input").inputValue();
+  assert.ok(collectionURL.endsWith("/file/batch-collection"));
+  await page.goto(collectionURL);
+  await page.getByLabel(/^访问密码/).fill("temporary-password");
+  await page.getByRole("button", { name: "打开分享" }).click();
+  await page
+    .getByRole("heading", { name: "批量文件合集", exact: true })
+    .waitFor();
+  assert.equal(await page.locator(".collection-files li").count(), 2);
+  await page
+    .getByRole("button", { name: "预览 batch-one.txt", exact: true })
+    .click();
+  await page.locator(".plain-preview").filter({ hasText: "one" }).waitFor();
+  const collectionDownload = await page
+    .getByRole("link", { name: "下载 batch-two.txt", exact: true })
+    .getAttribute("href");
+  assert.equal(await (await fetch(collectionDownload)).text(), "two");
+  const archiveURL = await page
+    .getByRole("link", { name: "打包下载 ZIP", exact: true })
+    .getAttribute("href");
+  const archiveResponse = await fetch(archiveURL);
+  assert.equal(archiveResponse.status, 200);
+  const archive = Buffer.from(await archiveResponse.arrayBuffer());
+  // 核对 ZIP 文件头与完整的结束目录，避免把中断的文件误判为成功。
+  assert.equal(archive.readUInt32LE(0), 0x04034b50);
+  assert.equal(archive.readUInt32LE(archive.length - 22), 0x06054b50);
+  assert.equal(archive.readUInt16LE(archive.length - 12), 2);
   assert.ok(
     !userRequests.some((url) =>
       new URL(url).pathname.startsWith("/api/admin/"),
@@ -745,6 +793,15 @@ try {
 } catch (error) {
   // 先输出原始失败，浏览器清理异常不能掩盖具体失败用例。
   console.error("浏览器回归失败：", error);
+  if (page) {
+    // 保存失败页面供定位控件、弹窗或布局问题，不替代实际断言。
+    await page
+      .screenshot({
+        path: resolve(root, "backend/bin/browser-smoke-failed.png"),
+        fullPage: true,
+      })
+      .catch(() => {});
+  }
   throw error;
 } finally {
   if (service && service.exitCode === null) {

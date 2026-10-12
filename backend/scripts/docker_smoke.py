@@ -121,11 +121,11 @@ def main():
     verified = api("POST", "/api/share/verify/" + share["slug"], {"password": "CI-file-password"})
     content, _ = request("GET", verified["previewUrl"])
     assert content == b"0123456789"
-    request("POST", "/api/share/verify/" + share["slug"], {"password": "CI-file-password"}, status=410)
+    request("POST", "/api/share/verify/" + share["slug"], {"password": "CI-file-password"}, status=404)
 
     paste = api("POST", "/api/paste", {"content": "CI Markdown", "max_views": 1}, auth, 201)
     assert api("GET", "/api/paste/" + paste["slug"])["content"] == "CI Markdown"
-    request("GET", "/api/paste/" + paste["slug"], status=410)
+    request("GET", "/api/paste/" + paste["slug"], status=404)
     api("POST", "/api/admin/logout", auth=auth)
     request("GET", link, status=403)
     print("上传、分片、中文表单、分享与访问控制验证通过")
