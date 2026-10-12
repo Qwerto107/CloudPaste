@@ -1,5 +1,17 @@
 <script setup>
-import { computed, ref, reactive, watch, onBeforeUnmount } from "vue";
+import {
+  computed,
+  ref,
+  reactive,
+  watch,
+  onBeforeUnmount,
+  defineAsyncComponent,
+} from "vue";
+import { useConfirmation } from "./ui/confirm.js";
+const confirmAction = useConfirmation();
+const MarkdownEditor = defineAsyncComponent(
+  () => import("./MarkdownEditor.vue"),
+);
 import { useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
 import { request } from "./api.js";
 import { loadSettings } from "./settings.js";
@@ -105,10 +117,11 @@ async function save() {
   }
 }
 // 切换页签或离开页面前提醒未保存修改；保存中暂不允许切换，防止状态错位。
-function canLeave() {
+async function canLeave() {
   return (
     !saving.value &&
-    (!dirty.value || window.confirm("有未保存的修改，确定放弃并离开吗？"))
+    (!dirty.value ||
+      (await confirmAction("有未保存的修改，确定放弃并离开吗？")))
   );
 }
 onBeforeRouteLeave(canLeave);
@@ -141,9 +154,9 @@ watch(panel, load, { immediate: true });
   </nav>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
   <div v-if="loading" class="panel empty" role="status">正在加载设置…</div>
-  <button v-else-if="!definitions.length" @click="load">重新加载</button>
+  <UiButton v-else-if="!definitions.length" @click="load">重新加载</UiButton>
   <form v-else class="settings-form" @submit.prevent="save">
-    <fieldset class="settings-fields" :disabled="saving">
+    <UiFieldset class="settings-fields" :disabled="saving">
       <component
         :is="card.advanced ? 'details' : 'section'"
         v-for="card in cards"
@@ -201,7 +214,7 @@ watch(panel, load, { immediate: true });
                 <span class="switch-state" aria-hidden="true">{{
                   values[item.key] ? "已开启" : "已关闭"
                 }}</span>
-                <input
+                <UiCheckbox
                   :id="'setting-' + item.key"
                   v-model="values[item.key]"
                   class="setting-switch"
@@ -210,7 +223,18 @@ watch(panel, load, { immediate: true });
                   :aria-describedby="'help-' + item.key"
                 />
               </label>
-              <textarea
+              <MarkdownEditor
+                v-else-if="
+                  [
+                    'site_announcement_content',
+                    'site_footer_markdown',
+                  ].includes(item.key)
+                "
+                v-model="values[item.key]"
+                :disabled="saving || loading"
+              />
+              <UiInput
+                type="textarea"
                 v-else-if="item.type === 'textarea' || field(item).multiline"
                 :id="'setting-' + item.key"
                 v-model="values[item.key]"
@@ -219,13 +243,13 @@ watch(panel, load, { immediate: true });
                 :spellcheck="!field(item).code && !field(item).multiline"
                 :placeholder="field(item).placeholder"
                 :aria-describedby="'help-' + item.key"
-              ></textarea>
+              ></UiInput>
               <div
                 v-else
                 class="setting-input"
                 :class="{ 'with-unit': field(item).unit }"
               >
-                <input
+                <UiInput
                   :id="'setting-' + item.key"
                   v-model="values[item.key]"
                   :type="item.type === 'number' ? 'number' : 'text'"
@@ -246,7 +270,7 @@ watch(panel, load, { immediate: true });
           </div>
         </div>
       </component>
-    </fieldset>
+    </UiFieldset>
     <div class="settings-savebar">
       <span role="status" :class="dirty ? 'unsaved-state' : 'muted'">{{
         saving
@@ -256,11 +280,11 @@ watch(panel, load, { immediate: true });
             : success || "所有修改已保存"
       }}</span>
       <div>
-        <button type="button" :disabled="!dirty || saving" @click="reset">
-          撤销修改</button
-        ><button class="primary" :disabled="!dirty || saving">
+        <UiButton type="button" :disabled="!dirty || saving" @click="reset">
+          撤销修改</UiButton
+        ><UiButton class="primary" :disabled="!dirty || saving">
           {{ saving ? "正在保存…" : "保存设置" }}
-        </button>
+        </UiButton>
       </div>
     </div>
   </form>

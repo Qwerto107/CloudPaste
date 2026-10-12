@@ -1,14 +1,32 @@
 <script setup>
-import { computed } from "vue";
-import { renderMarkdown } from "./render.js";
+import { useId } from "vue";
+import { MdPreview, config } from "md-editor-v3";
+import "md-editor-v3/lib/preview.css";
+import { sanitizeHTML } from "./sanitize.js";
+import { useTheme } from "./ui/theme.js";
 import { settings } from "./settings.js";
 const props = defineProps({ content: { type: String, default: "" } });
-// Markdown 必须先清理 HTML；不执行脚本、事件属性或嵌入外部页面。
-const html = computed(() =>
-  renderMarkdown(
-    props.content,
-    settings.preview_allow_external_images === "true",
-  ),
-);
+const dark = useTheme();
+const previewId = `markdown-preview-${useId()}`;
+config({ markdownItConfig: (md) => md.set({ html: true, breaks: true }) });
+// 新预览组件仍清理最终 HTML，不执行脚本、事件属性或嵌入外部页面。
+function clean(html) {
+  return sanitizeHTML(html, settings.preview_allow_external_images === "true");
+}
 </script>
-<template><div class="markdown-body" v-html="html"></div></template>
+<template>
+  <MdPreview
+    :id="previewId"
+    class="markdown-body"
+    :model-value="content"
+    :theme="dark ? 'dark' : 'light'"
+    language="zh-CN"
+    preview-theme="github"
+    :sanitize="clean"
+    no-mermaid
+    no-katex
+    no-echarts
+    no-highlight
+    no-img-zoom-in
+  />
+</template>
