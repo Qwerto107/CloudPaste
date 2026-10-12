@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
       alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
     },
     define: {
-      __APP_VERSION__: JSON.stringify("0.5.1"),
+      __APP_VERSION__: JSON.stringify("0.6.1"),
       __APP_ENV__: JSON.stringify(env.VITE_APP_ENV || "production"),
       __BACKEND_URL__: JSON.stringify(env.VITE_BACKEND_URL || ""),
     },
