@@ -10,6 +10,11 @@ import {
 import { useRoute } from "vue-router";
 import { request, contentURL } from "./api.js";
 import { settings } from "./settings.js";
+import {
+  readShareAccess,
+  saveShareAccess,
+  clearShareAccess,
+} from "./share-access.js";
 const MarkdownPreview = defineAsyncComponent(
   () => import("./MarkdownPreview.vue"),
 );
@@ -19,16 +24,23 @@ const password = ref("");
 const needsPassword = ref(false);
 const busy = ref(false);
 const error = ref("");
+const unavailableMessage = "分享已失效或不存在";
 const text = ref("");
 const truncated = ref(false);
 const markdown = ref(true);
+const selectedFile = ref(null);
+const previewLoading = ref(false);
 let controller;
 const isFile = computed(() => route.meta.fileShare === true);
+const isCollection = computed(() => Boolean(record.value?.files?.length));
+const previewRecord = computed(() => selectedFile.value || record.value);
 const url = computed(() =>
-  record.value?.contentUrl ? contentURL(record.value.contentUrl) : "",
+  previewRecord.value?.contentUrl
+    ? contentURL(previewRecord.value.contentUrl)
+    : "",
 );
 const extension = computed(() =>
-  (record.value?.filename || "").split(".").pop().toLowerCase(),
+  (previewRecord.value?.filename || "").split(".").pop().toLowerCase(),
 );
 function matches(key, fallback) {
   return String(settings[key] ?? fallback)
@@ -37,6 +49,7 @@ function matches(key, fallback) {
     .includes(extension.value);
 }
 const kind = computed(() => {
+  if (isCollection.value && !selectedFile.value) return "collection";
   if (!isFile.value) return "text";
   if (
     matches(
@@ -54,8 +67,11 @@ const kind = computed(() => {
 });
 async function readText(value, signal) {
   const response = await fetch(value, { cache: "no-store", signal });
-  if (!response.ok)
-    throw new Error(`文件读取失败（${response.status}），链接可能已过期`);
+  if (!response.ok) {
+    const reason = new Error("文件读取失败，请稍后重试");
+    reason.status = response.status;
+    throw reason;
+  }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let size = 0;
@@ -84,15 +100,33 @@ async function readText(value, signal) {
   }
   return output;
 }
+function showError(reason) {
+  const unavailable = [404, 410].includes(reason.status);
+  if ([401, 403, 404, 410].includes(reason.status))
+    clearShareAccess(isFile.value ? "file" : "text", String(route.params.slug));
+  if (unavailable) {
+    // 验证期间分享也可能失效，关闭密码框和旧内容，统一显示失效提示。
+    needsPassword.value = false;
+    password.value = "";
+    record.value = null;
+    selectedFile.value = null;
+    text.value = "";
+  }
+  error.value = unavailable ? unavailableMessage : reason.message;
+}
 async function load(verify = false) {
   controller?.abort();
   controller = new AbortController();
   busy.value = true;
   error.value = "";
   record.value = null;
+  selectedFile.value = null;
+  previewLoading.value = false;
   text.value = "";
   truncated.value = false;
   const active = controller;
+  const accessType = isFile.value ? "file" : "text";
+  const accessSlug = String(route.params.slug);
   if (!verify) needsPassword.value = false;
   try {
     const slug = encodeURIComponent(route.params.slug);
@@ -103,13 +137,19 @@ async function load(verify = false) {
       public: true,
       method: verify ? "POST" : "GET",
       body: verify ? { password: password.value } : undefined,
+      shareToken: verify ? "" : readShareAccess(accessType, accessSlug),
       signal: active.signal,
     });
     if (active !== controller) return;
     needsPassword.value = Boolean(
       data.requires_password || data.requiresPassword,
     );
-    if (needsPassword.value) return;
+    if (needsPassword.value) {
+      clearShareAccess(accessType, accessSlug);
+      return;
+    }
+    saveShareAccess(accessType, accessSlug, data);
+    password.value = "";
     record.value = data;
     // 普通文本文件默认显示原文，只有 Markdown 文件才加载 Markdown 解析器。
     markdown.value =
@@ -117,13 +157,42 @@ async function load(verify = false) {
     if (!isFile.value) text.value = data.content || "";
     else if (kind.value === "text")
       text.value = await readText(url.value, active.signal);
-    password.value = "";
   } catch (reason) {
-    if (active === controller && reason.name !== "AbortError")
-      error.value = reason.message;
+    if (active === controller && reason.name !== "AbortError") {
+      showError(reason);
+    }
   } finally {
     if (active === controller) busy.value = false;
   }
+}
+// 合集中的预览和下载复用同一查看票据，不为每个文件重新消耗查看次数。
+async function openFile(file) {
+  controller?.abort();
+  const active = new AbortController();
+  controller = active;
+  selectedFile.value = file;
+  text.value = "";
+  truncated.value = false;
+  error.value = "";
+  markdown.value = ["md", "markdown"].includes(extension.value);
+  previewLoading.value = true;
+  try {
+    if (kind.value === "text")
+      text.value = await readText(url.value, active.signal);
+  } catch (reason) {
+    if (controller === active && reason.name !== "AbortError")
+      showError(reason);
+  } finally {
+    if (controller === active) previewLoading.value = false;
+  }
+}
+function closePreview() {
+  controller?.abort();
+  controller = null;
+  selectedFile.value = null;
+  previewLoading.value = false;
+  text.value = "";
+  error.value = "";
 }
 async function copy() {
   try {
@@ -145,14 +214,14 @@ onBeforeUnmount(() => controller?.abort());
     <h1>这个分享需要密码</h1>
     <form @submit.prevent="load(true)">
       <label
-        >访问密码<input
+        >访问密码<UiInput
           v-model="password"
           type="password"
           required
           autocomplete="off"
       /></label>
       <p v-if="error" class="error">{{ error }}</p>
-      <button class="primary">打开分享</button>
+      <UiButton class="primary">打开分享</UiButton>
     </form>
   </section>
   <template v-else-if="record"
@@ -171,59 +240,106 @@ onBeforeUnmount(() => controller?.abort());
     </div>
     <section class="panel">
       <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <template v-if="kind === 'text'"
-        ><div class="editor-heading">
-          <div class="tabs">
-            <button :class="{ active: markdown }" @click="markdown = true">
-              Markdown</button
-            ><button :class="{ active: !markdown }" @click="markdown = false">
-              原文
-            </button>
-          </div>
-          <button @click="copy">复制文本</button>
+      <template v-if="isCollection">
+        <div class="collection-toolbar">
+          <strong>{{ record.files.length }} 个文件</strong>
+          <a
+            class="button primary"
+            :href="contentURL(record.archiveUrl)"
+            referrerpolicy="no-referrer"
+            >打包下载 ZIP</a
+          >
         </div>
-        <MarkdownPreview v-if="markdown" :content="text" />
-        <pre v-else class="plain-preview">{{ text }}</pre>
-        <p v-if="truncated" class="notice">
-          仅预览前
-          {{ settings.preview_max_text_kb || 512 }} KiB，下载可获取完整文件。
-        </p></template
-      >
-      <img
-        v-else-if="kind === 'image'"
-        :src="url"
-        :alt="record.filename"
-        class="image-preview"
-        referrerpolicy="no-referrer"
-      />
-      <video
-        v-else-if="kind === 'video'"
-        :src="url"
-        controls
-        playsinline
-        preload="none"
-        class="video-preview"
-      ></video>
-      <audio
-        v-else-if="kind === 'audio'"
-        :src="url"
-        controls
-        preload="none"
-        class="audio-preview"
-      ></audio>
-      <div v-else class="empty">
-        <h2>{{ record.filename }}</h2>
-        <p class="muted">此文件不提供在线预览，可以直接下载。</p>
-      </div>
-      <div v-if="isFile" class="actions">
-        <span class="muted small">浏览器原生播放，格式支持取决于浏览器。</span
-        ><a
-          class="button primary"
-          :href="contentURL(record.downloadUrl)"
-          referrerpolicy="no-referrer"
-          >下载文件</a
+        <ul class="collection-files">
+          <li
+            v-for="file in record.files"
+            :key="file.id"
+            :class="{ active: selectedFile?.id === file.id }"
+          >
+            <UiButton
+              type="button"
+              class="collection-file-name"
+              @click="openFile(file)"
+              :aria-label="'预览 ' + file.filename"
+            >
+              {{ file.filename }}
+            </UiButton>
+            <small class="muted"
+              >{{ (file.size / 1048576).toFixed(2) }} MiB</small
+            >
+            <a
+              class="button"
+              :href="contentURL(file.downloadUrl)"
+              referrerpolicy="no-referrer"
+              :aria-label="'下载 ' + file.filename"
+              >下载</a
+            >
+          </li>
+        </ul>
+        <div v-if="selectedFile" class="collection-preview-heading">
+          <h2>{{ selectedFile.filename }}</h2>
+          <UiButton type="button" @click="closePreview">收起预览</UiButton>
+        </div>
+      </template>
+      <div v-if="previewLoading" class="empty">正在读取文件…</div>
+      <template v-else-if="!isCollection || selectedFile">
+        <template v-if="kind === 'text'"
+          ><div class="editor-heading">
+            <div class="tabs">
+              <UiButton :class="{ active: markdown }" @click="markdown = true">
+                Markdown</UiButton
+              ><UiButton
+                :class="{ active: !markdown }"
+                @click="markdown = false"
+              >
+                原文
+              </UiButton>
+            </div>
+            <UiButton @click="copy">复制文本</UiButton>
+          </div>
+          <MarkdownPreview v-if="markdown" :content="text" />
+          <pre v-else class="plain-preview">{{ text }}</pre>
+          <p v-if="truncated" class="notice">
+            仅预览前
+            {{ settings.preview_max_text_kb || 512 }} KiB，下载可获取完整文件。
+          </p></template
         >
-      </div>
+        <img
+          v-else-if="kind === 'image'"
+          :src="url"
+          :alt="previewRecord.filename"
+          class="image-preview"
+          referrerpolicy="no-referrer"
+        />
+        <video
+          v-else-if="kind === 'video'"
+          :src="url"
+          controls
+          playsinline
+          preload="none"
+          class="video-preview"
+        ></video>
+        <audio
+          v-else-if="kind === 'audio'"
+          :src="url"
+          controls
+          preload="none"
+          class="audio-preview"
+        ></audio>
+        <div v-else class="empty">
+          <h2>{{ previewRecord.filename }}</h2>
+          <p class="muted">此文件不提供在线预览，可以直接下载。</p>
+        </div>
+        <div v-if="isFile" class="actions">
+          <span class="muted small">浏览器原生播放，格式支持取决于浏览器。</span
+          ><a
+            class="button primary"
+            :href="contentURL(previewRecord.downloadUrl)"
+            referrerpolicy="no-referrer"
+            >下载文件</a
+          >
+        </div>
+      </template>
     </section></template
   >
   <section v-else class="panel empty">
