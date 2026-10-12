@@ -6,6 +6,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   return {
     plugins: [vue()],
+    // 部署服务器为每次 HTML 响应替换标记，仅授权本页组件生成的样式。
+    html: { cspNonce: "__CLOUDPASTE_STYLE_NONCE__" },
     resolve: {
       alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
     },

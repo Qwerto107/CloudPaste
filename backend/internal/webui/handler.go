@@ -2,11 +2,15 @@
 package webui
 
 import (
+	"bytes"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"io"
 	"io/fs"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 )
 
@@ -52,6 +56,31 @@ func newHandler(api http.Handler, files fs.FS) http.Handler {
 		if err != nil || info.IsDir() {
 			// 不调用目录文件服务器，避免目录列举及目录索引自动暴露。
 			http.NotFound(w, r)
+			return
+		}
+		if name == "index.html" {
+			// 每次页面响应使用独立 nonce，仅允许可信组件生成的样式，不放宽脚本策略。
+			var random [18]byte
+			if _, err := rand.Read(random[:]); err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+			nonce := base64.RawStdEncoding.EncodeToString(random[:])
+			html, err := io.ReadAll(io.LimitReader(file, 1<<20))
+			if err != nil {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+			html = bytes.ReplaceAll(html, []byte("__CLOUDPASTE_STYLE_NONCE__"), []byte(nonce))
+			w.Header().Set("Content-Security-Policy", strings.Replace(pageCSP, "style-src 'self'", "style-src 'self' 'nonce-"+nonce+"'", 1))
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			// 替换 nonce 后重新计算长度，GET 与 HEAD 都提供正确的资源元信息。
+			w.Header().Set("Content-Length", strconv.Itoa(len(html)))
+			// HTML 不返回 304 或局部内容，避免旧页面 nonce 与新响应策略不一致。
+			w.WriteHeader(http.StatusOK)
+			if r.Method != http.MethodHead {
+				_, _ = w.Write(html)
+			}
 			return
 		}
 		content, ok := file.(io.ReadSeeker)

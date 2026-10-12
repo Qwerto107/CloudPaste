@@ -4,12 +4,38 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
 )
 
 const testPage = "<!doctype html><html><body>CloudPaste</body></html>"
+
+// 样式标记必须逐次生成并与响应策略一致，不能放开任意内联脚本或样式。
+func TestPageStyleNonceMatchesHTML(t *testing.T) {
+	files := testFiles()
+	files["index.html"].Data = []byte(`<html><head><meta property="csp-nonce" nonce="__CLOUDPASTE_STYLE_NONCE__"></head></html>`)
+	handler := newHandler(http.NotFoundHandler(), files)
+	previous := ""
+	for range 2 {
+		request := httptest.NewRequest(http.MethodGet, "/admin", nil)
+		request.Header.Set("If-Modified-Since", "Mon, 01 Jan 2099 00:00:00 GMT")
+		request.Header.Set("Range", "bytes=0-10")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		policy := response.Header().Get("Content-Security-Policy")
+		_, rest, found := strings.Cut(policy, "'nonce-")
+		nonce, _, closed := strings.Cut(rest, "'")
+		if !found || !closed || nonce == "" || nonce == previous || strings.Contains(policy, "unsafe-inline") {
+			t.Fatalf("页面 nonce 策略错误: %s", policy)
+		}
+		if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "__CLOUDPASTE_STYLE_NONCE__") || !strings.Contains(response.Body.String(), `nonce="`+nonce+`"`) || response.Header().Get("Content-Length") != strconv.Itoa(response.Body.Len()) {
+			t.Fatalf("页面与响应策略不一致: headers=%v body=%s", response.Header(), response.Body.String())
+		}
+		previous = nonce
+	}
+}
 
 func testFiles() fstest.MapFS {
 	return fstest.MapFS{
