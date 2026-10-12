@@ -10,6 +10,8 @@ import (
 
 var validSlug = regexp.MustCompile(`^[A-Za-z0-9_-]{1,100}$`)
 
+func pasteVersion(p Paste) string { return secretHash(p.ID + ":" + p.Password + ":" + p.UpdatedAt) }
+
 func expired(expires *string) bool {
 	if expires == nil || *expires == "" {
 		return false
@@ -131,7 +133,9 @@ func (a *App) publicPaste(w http.ResponseWriter, r *http.Request) error {
 		}
 		password = body.Password
 	}
-	if p.Password != "" {
+	access := a.readShareAccess(r, "paste-access", p.Slug, p.ID, pasteVersion(p))
+	hasAccess := p.Password != "" && access.Expires > 0
+	if p.Password != "" && !hasAccess {
 		if password == "" {
 			if strings.HasPrefix(r.URL.Path, "/api/raw/") {
 				return forbidden()
@@ -147,13 +151,13 @@ func (a *App) publicPaste(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	// 锁内重新读取，防止并发访问在最后一次查看时越过限制。
-	verifiedPassword := p.Password
+	verifiedVersion := pasteVersion(p)
 	a.mutationMu.Lock()
 	if err := a.resource(r.Context(), "pastes", "slug", p.Slug, &p); err != nil {
 		a.mutationMu.Unlock()
 		return err
 	}
-	if p.Password != verifiedPassword {
+	if pasteVersion(p) != verifiedVersion || (hasAccess && access.Expires <= time.Now().Unix()) {
 		a.mutationMu.Unlock()
 		return forbidden()
 	}
@@ -165,6 +169,7 @@ func (a *App) publicPaste(w http.ResponseWriter, r *http.Request) error {
 		a.mutationMu.Unlock()
 		return &apiError{410, "PASTE_GONE", "文本分享已过期或达到最大查看次数"}
 	}
+	// 解锁凭证只免除密码验证，每次成功打开或刷新仍消耗查看额度。
 	p.Views++
 	err := a.saveResource(r.Context(), "pastes", p.ID, p.Slug, p.Owner, p)
 	a.mutationMu.Unlock()
@@ -180,6 +185,12 @@ func (a *App) publicPaste(w http.ResponseWriter, r *http.Request) error {
 	view := pasteView(p, true)
 	view["requiresPassword"] = false
 	view["isLastView"] = p.MaxViews > 0 && p.Views == p.MaxViews
+	if p.Password != "" {
+		if !hasAccess {
+			access = Ticket{Purpose: "paste-access", Path: p.Slug, Subject: p.ID, Version: pasteVersion(p), Expires: time.Now().Add(shareAccessDuration).Unix()}
+		}
+		a.addShareAccess(view, access)
+	}
 	a.write(w, 200, view, "获取文本成功")
 	return nil
 }

@@ -29,6 +29,8 @@ func shareView(s Share) map[string]any {
 	delete(v, "meta_version")
 	delete(v, "file_path")
 	delete(v, "storage_key")
+	// 子文件的来源与密码快照仅留在服务端，公开列表只返回展示信息。
+	delete(v, "files")
 	v["has_password"] = s.Password != ""
 	v["requires_password"] = s.Password != ""
 	v["shareUrl"] = "/file/" + s.Slug
@@ -40,6 +42,15 @@ func shareView(s Share) map[string]any {
 	v["previewUrl"] = nil
 	v["downloadUrl"] = nil
 	v["linkType"] = "proxy"
+	if len(s.Files) > 0 {
+		items := make([]map[string]any, 0, len(s.Files))
+		for _, file := range s.Files {
+			items = append(items, map[string]any{"id": file.ID, "filename": file.Filename, "size": file.Size, "mimetype": file.MimeType})
+		}
+		v["files"] = items
+		v["type"] = "collection"
+		v["typeName"] = "文件合集"
+	}
 	return v
 }
 
@@ -208,8 +219,7 @@ func (a *App) revalidateShare(r *http.Request, previous Share) (Share, error) {
 	if err := shareGone(current); err != nil {
 		return current, err
 	}
-	_, _, err := a.shareDriver(r, current)
-	return current, err
+	return current, a.validateShareSources(r, current)
 }
 
 func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
@@ -220,7 +230,9 @@ func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
 	if err := shareGone(s); err != nil {
 		return err
 	}
-	if s.Password != "" {
+	access := a.readShareAccess(r, "share-access", s.Slug, s.ID, shareVersion(s))
+	hasAccess := s.Password != "" && access.Expires > 0
+	if s.Password != "" && !hasAccess {
 		if r.Method == "GET" {
 			a.write(w, 200, map[string]any{"slug": s.Slug, "requires_password": true}, "需要密码验证")
 			return nil
@@ -239,8 +251,15 @@ func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
 	if s.MaxViews > 0 && s.Views >= s.MaxViews {
 		return &apiError{410, "SHARE_GONE", "文件分享已达到最大查看次数"}
 	}
-	if _, _, _, err := a.shareSource(r, s); err != nil {
-		return err
+	if len(s.Files) > 0 {
+		// 打开合集只复核来源权限；每个文件在实际读取时再查询存储。
+		if err := a.validateShareSources(r, s); err != nil {
+			return err
+		}
+	} else {
+		if _, _, _, err := a.shareSource(r, s); err != nil {
+			return err
+		}
 	}
 	// 锁只覆盖当前授权复核和次数更新，不覆盖存储查询或响应写入。
 	current, err := func() (Share, error) {
@@ -250,9 +269,13 @@ func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return current, err
 		}
+		if hasAccess && access.Expires <= time.Now().Unix() {
+			return current, forbidden()
+		}
 		if current.MaxViews > 0 && current.Views >= current.MaxViews {
 			return current, &apiError{410, "SHARE_GONE", "文件分享已达到最大查看次数"}
 		}
+		// 解锁凭证只免除密码验证，每次成功打开或刷新仍消耗查看额度。
 		current.Views++
 		err = a.saveResource(r.Context(), "shares", current.ID, current.Slug, current.Owner, current)
 		return current, err
@@ -262,7 +285,12 @@ func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
 	}
 	s = current
 	// 一次查看签发短期读取票据，视频分段请求不会反复消耗查看次数。
-	token := a.ticket(Ticket{Purpose: "share", Path: s.Slug, Subject: s.ID, Version: shareVersion(s), Expires: time.Now().Add(10 * time.Minute).Unix()})
+	leaseExpires := time.Now().Add(shareAccessDuration).Unix()
+	if hasAccess {
+		// 刷新不能延长凭证寿命，下载链接也受同一访问期限约束。
+		leaseExpires = access.Expires
+	}
+	token := a.ticket(Ticket{Purpose: "share", Path: s.Slug, Subject: s.ID, Version: shareVersion(s), Expires: leaseExpires})
 	link := "/api/s/" + s.Slug + "/" + url.PathEscape(s.Filename) + "?token=" + url.QueryEscape(token)
 	v := shareView(s)
 	v["requires_password"] = false
@@ -270,6 +298,24 @@ func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
 	v["downloadUrl"] = link + "&download=true"
 	v["contentUrl"] = link
 	v["isLastView"] = s.MaxViews > 0 && s.Views == s.MaxViews
+	if s.Password != "" {
+		if !hasAccess {
+			access = Ticket{Purpose: "share-access", Path: s.Slug, Subject: s.ID, Version: shareVersion(s), Expires: leaseExpires}
+		}
+		a.addShareAccess(v, access)
+	}
+	if len(s.Files) > 0 {
+		items := v["files"].([]map[string]any)
+		for _, item := range items {
+			fileLink := "/api/s/" + s.Slug + "?file=" + url.QueryEscape(item["id"].(string)) + "&token=" + url.QueryEscape(token)
+			item["contentUrl"] = fileLink
+			item["downloadUrl"] = fileLink + "&download=true"
+		}
+		v["archiveUrl"] = "/api/s/" + s.Slug + "?archive=true&token=" + url.QueryEscape(token)
+		delete(v, "contentUrl")
+		v["previewUrl"] = nil
+		v["downloadUrl"] = nil
+	}
 	a.write(w, 200, v, "获取文件成功")
 	return nil
 }
@@ -299,6 +345,9 @@ func (a *App) shareContent(w http.ResponseWriter, r *http.Request) error {
 	}
 	if _, err := a.shareContentAccess(r, s); err != nil {
 		return err
+	}
+	if len(s.Files) > 0 {
+		return a.collectionContent(w, r, s)
 	}
 	info, d, key, err := a.shareSource(r, s)
 	if err != nil {

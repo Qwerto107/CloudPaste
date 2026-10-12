@@ -238,7 +238,7 @@ func (a *App) Handler() http.Handler {
 			if origin == r.Header.Get("Origin") && origin != "" && origin != "*" {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Add("Vary", "Origin")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Content-Range, Range, X-Custom-Auth-Key, X-FS-Path-Token, X-FS-Path-Tokens, X-FS-Filename, X-FS-Options, X-Share-Filename, X-Share-Options")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Content-Range, Range, X-Custom-Auth-Key, X-FS-Path-Token, X-FS-Path-Tokens, X-FS-Filename, X-FS-Options, X-Share-Filename, X-Share-Options, X-Share-Access")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS")
 				w.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Range, ETag, Accept-Ranges, Content-Disposition")
 			}
@@ -269,6 +269,10 @@ func (a *App) Handler() http.Handler {
 		}
 		defer func() {
 			if value := recover(); value != nil {
+				// 流式下载中断交给 net/http 关闭连接，不能继续写入错误 JSON。
+				if value == http.ErrAbortHandler {
+					panic(value)
+				}
 				a.logger.Error("请求发生异常", "path", r.URL.Path, "error", fmt.Sprint(value))
 				a.fail(w, &apiError{500, "INTERNAL_ERROR", "服务器内部错误"})
 			}

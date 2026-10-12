@@ -34,11 +34,19 @@ export function authorization() {
 
 export async function request(
   endpoint,
-  { method = "GET", body, public: publicRequest = false, signal } = {},
+  {
+    method = "GET",
+    body,
+    public: publicRequest = false,
+    signal,
+    shareToken,
+  } = {},
 ) {
   const headers = { "Content-Type": "application/json" };
   if (!publicRequest && authorization())
     headers.Authorization = authorization();
+  // 临时分享凭证仅用于公开分享接口，不与管理员或 API Key 身份混用。
+  if (publicRequest && shareToken) headers["X-Share-Access"] = shareToken;
   const response = await fetch(apiURL(endpoint, publicRequest), {
     method,
     headers,

@@ -88,3 +88,77 @@ test("认证过期清除本地身份，403 不破坏有效身份", async () => {
   await assert.rejects(request("/files"), /会话过期/);
   assert.equal(session.type, "none");
 });
+
+test("公开分享使用独立解锁凭证，不附带登录身份或把凭证放入 URL", async () => {
+  saveSession({ type: "admin", token: "test-admin", permissions: 15 });
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, "https://share.example/api/paste/protected");
+    assert.equal(options.headers.Authorization, undefined);
+    assert.equal(options.headers["X-Share-Access"], "temporary-grant");
+    return new Response(
+      JSON.stringify({ success: true, data: { content: "hello" } }),
+    );
+  };
+  await request("/paste/protected", {
+    public: true,
+    shareToken: "temporary-grant",
+  });
+});
+
+test("分享凭证按类型和链接隔离，只保存 token 与期限，过期或损坏后清除", async () => {
+  const storage = new Map();
+  window.sessionStorage = {
+    getItem: (key) => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+    removeItem: (key) => storage.delete(key),
+  };
+  const { readShareAccess, saveShareAccess, clearShareAccess } =
+    await import("../src/sharing/share-access.js");
+  saveShareAccess("text", "same", {
+    access_token: "text-token",
+    access_expires_at: new Date(Date.now() + 60000).toISOString(),
+    password: "must-not-store",
+    content: "private",
+  });
+  saveShareAccess("file", "same", {
+    access_token: "file-token",
+    access_expires_at: new Date(Date.now() + 60000).toISOString(),
+  });
+  assert.equal(readShareAccess("text", "same"), "text-token");
+  assert.equal(readShareAccess("file", "same"), "file-token");
+  assert.equal(readShareAccess("text", "another"), "");
+  for (const stored of storage.values())
+    assert.deepEqual(Object.keys(JSON.parse(stored)).sort(), [
+      "expires",
+      "token",
+    ]);
+  clearShareAccess("file", "same");
+  assert.equal(readShareAccess("file", "same"), "");
+  const textKey = [...storage.keys()][0];
+  storage.set(
+    textKey,
+    JSON.stringify({ token: "expired", expires: Date.now() - 1 }),
+  );
+  assert.equal(readShareAccess("text", "same"), "");
+  assert.equal(storage.has(textKey), false);
+  storage.set(textKey, "invalid-json");
+  assert.equal(readShareAccess("text", "same"), "");
+  window.sessionStorage = {
+    getItem() {
+      throw new Error("blocked");
+    },
+    setItem() {
+      throw new Error("blocked");
+    },
+    removeItem() {
+      throw new Error("blocked");
+    },
+  };
+  assert.equal(readShareAccess("text", "same"), "");
+  assert.doesNotThrow(() =>
+    saveShareAccess("text", "same", {
+      access_token: "token",
+      access_expires_at: new Date(Date.now() + 60000).toISOString(),
+    }),
+  );
+});
