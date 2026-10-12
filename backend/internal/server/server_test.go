@@ -186,7 +186,7 @@ func TestSourceChangeRevokesLinksAndShares(t *testing.T) {
 	share := dataMap(t, f.request(t, "POST", "/api/fs/create-share", f.admin, map[string]any{"path": "/disk/file.txt"}, nil, 201))
 	f.request(t, "PUT", "/api/mount/"+mountID, f.admin, map[string]any{"root_path": "/replacement"}, nil, 200)
 	f.request(t, "GET", link, "", nil, nil, 403)
-	f.request(t, "GET", "/api/share/get/"+share["slug"].(string), "", nil, nil, 410)
+	f.request(t, "GET", "/api/share/get/"+share["slug"].(string), "", nil, nil, 404)
 	w := f.request(t, "GET", "/api/fs/content?path=/disk/file.txt", f.admin, nil, nil, 200)
 	if w.Body.String() != "replacement" {
 		t.Fatal("new mount root was not applied")
@@ -218,7 +218,7 @@ func TestDirectoryPasswordCoversAllFileEntries(t *testing.T) {
 	f.request(t, "PUT", "/api/fs-meta/"+meta["id"].(string), f.admin, map[string]any{"password": "replacement-password"}, nil, 200)
 	f.request(t, "GET", link, "", nil, nil, 403)
 	f.request(t, "GET", "/api/fs/content?path=/disk/locked/file.txt", auth, nil, headers, 403)
-	f.request(t, "GET", "/api/share/get/"+share["slug"].(string), "", nil, nil, 410)
+	f.request(t, "GET", "/api/share/get/"+share["slug"].(string), "", nil, nil, 404)
 }
 
 func TestSharePasswordAndLastViewLease(t *testing.T) {
@@ -238,7 +238,7 @@ func TestSharePasswordAndLastViewLease(t *testing.T) {
 	link := verified["previewUrl"].(string)
 	f.request(t, "GET", link, "", nil, map[string]string{"Range": "bytes=0-3"}, 206)
 	f.request(t, "GET", link, "", nil, map[string]string{"Range": "bytes=4-7"}, 206)
-	f.request(t, "POST", "/api/share/verify/"+slug, "", map[string]any{"password": "share-password"}, nil, 410)
+	f.request(t, "POST", "/api/share/verify/"+slug, "", map[string]any{"password": "share-password"}, nil, 404)
 	f.request(t, "PUT", "/api/files/"+s["id"].(string), f.admin, map[string]any{"password": "new-share-password"}, nil, 200)
 	f.request(t, "GET", link, "", nil, nil, 403)
 	f.request(t, "DELETE", "/api/files/batch-delete", f.admin, map[string]any{"ids": []string{s["id"].(string)}, "delete_mode": "both"}, nil, 501)
@@ -272,7 +272,7 @@ func TestPastePasswordOwnershipAndConcurrentViews(t *testing.T) {
 			f.handler.ServeHTTP(w, r)
 			if w.Code == 200 {
 				successes.Add(1)
-			} else if w.Code != 410 {
+			} else if w.Code != 404 {
 				t.Errorf("unexpected concurrent status: %d %s", w.Code, w.Body.String())
 			}
 		})

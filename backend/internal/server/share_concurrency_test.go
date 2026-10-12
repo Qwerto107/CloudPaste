@@ -137,7 +137,7 @@ func TestShareStateChangesDuringStorageQueryRejectRead(t *testing.T) {
 				w := <-shareDone
 				expected := 403
 				if change == "source" {
-					expected = 410
+					expected = 404
 				}
 				if change == "deleted" {
 					expected = 404
@@ -165,7 +165,7 @@ func TestConcurrentPublicShareHonorsLastView(t *testing.T) {
 					w := <-asyncVisitorRead(f, prefix+share["slug"].(string))
 					if w.Code == 200 {
 						successes.Add(1)
-					} else if w.Code != 410 {
+					} else if w.Code != 404 {
 						t.Errorf("unexpected share status=%d body=%s", w.Code, w.Body.String())
 					}
 				})

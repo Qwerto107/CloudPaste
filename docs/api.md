@@ -1,6 +1,6 @@
 # API 参考
 
-本文对应 CloudPaste 的 HTTP API。管理员前缀为 `/api/admin`，普通用户使用 `/api`。外部 Nginx 的 IP 白名单或 mTLS 由部署者配置，后端本身不验证这些网络策略。返回 [文档中心](README.md)。
+本文对应 CloudPaste 的 HTTP API。管理员前缀为 `/api/admin`，普通用户使用 `/api`。返回 [文档中心](README.md)。
 
 ## 身份与入口
 
@@ -144,6 +144,10 @@ curl --fail-with-body -X PUT 'http://127.0.0.1:8081/api/fs/upload?path=/local' \
 分享上传使用 `PUT /api/share/upload`，管理员使用 `/api/admin/share/upload`。`X-Share-Filename` 是 URL 编码文件名；`X-Share-Options` 是 UTF-8 JSON 的标准 Base64，包含 `storage_config_id`、`expires_in`（小时，可用小数，例如 `0.5` 为 30 分钟）、`password`、`remark`、`max_views`、可选 `path` 和 `slug`；请求体是原始文件。
 
 新文本省略 `expires_at`、新文件省略 `expires_in` 时使用站点默认有效期。文本显式 `expires_at:null`、文件 `expires_in:0` 表示不过期。过期分享和删除分享记录不自动删除存储文件。
+
+带密码的文本、文件或合集验证成功后，响应包含 `access_token` 和 `access_expires_at`。后续读取分享时通过 `X-Share-Access` 请求头携带凭证，10 分钟内免除重复输入密码，但每次成功打开或刷新分享仍计入查看次数，达到上限后拒绝访问，刷新不延长凭证期限。文件预览、下载和视频分段复用当次查看的读取票据，不额外计数。凭证绑定分享类型、记录、链接和版本；修改密码、删除或过期后失效，文件来源与创建者权限仍会复核。前端仅在当前标签页的 `sessionStorage` 保存临时凭证，不保存明文密码。
+
+公开分享入口对不存在、已过期或达到查看上限统一返回 HTTP `404`、`code="NOT_FOUND"` 和 `message="分享已失效或不存在"`，不再提示输入密码。验证密码前和计数前均检查失效状态；管理入口保留具体原因。文件读取票据在当次查看期限内继续有效，不因该次查看用尽额度而中断预览或下载。
 
 挂载、目录密码和分片接口用于程序化访问及路径授权；这些接口不对应前端导航入口。
 

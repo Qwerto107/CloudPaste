@@ -230,6 +230,10 @@ func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
 	if err := shareGone(s); err != nil {
 		return err
 	}
+	// 查看上限在密码提示前检查，失效分享不再要求输入密码。
+	if s.MaxViews > 0 && s.Views >= s.MaxViews {
+		return &apiError{410, "SHARE_GONE", "文件分享已达到最大查看次数"}
+	}
 	access := a.readShareAccess(r, "share-access", s.Slug, s.ID, shareVersion(s))
 	hasAccess := s.Password != "" && access.Expires > 0
 	if s.Password != "" && !hasAccess {
@@ -247,9 +251,6 @@ func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
 		if err := a.checkPassword(s.Password, body.Password); err != nil {
 			return err
 		}
-	}
-	if s.MaxViews > 0 && s.Views >= s.MaxViews {
-		return &apiError{410, "SHARE_GONE", "文件分享已达到最大查看次数"}
 	}
 	if len(s.Files) > 0 {
 		// 打开合集只复核来源权限；每个文件在实际读取时再查询存储。

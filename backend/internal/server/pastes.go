@@ -34,9 +34,9 @@ func validateExpiry(expires *string, maxViews int) error {
 
 func (a *App) registerPastes(mux *apiMux) {
 	mux.HandleFunc("POST /api/paste", a.protected(TextShare, false, a.createPaste))
-	mux.HandleFunc("GET /api/paste/{slug}", a.handle(a.publicPaste))
-	mux.HandleFunc("POST /api/paste/{slug}", a.handle(a.publicPaste))
-	mux.HandleFunc("GET /api/raw/{slug}", a.handle(a.publicPaste))
+	mux.HandleFunc("GET /api/paste/{slug}", a.handleShare(a.publicPaste))
+	mux.HandleFunc("POST /api/paste/{slug}", a.handleShare(a.publicPaste))
+	mux.HandleFunc("GET /api/raw/{slug}", a.handleShare(a.publicPaste))
 	mux.HandleFunc("GET /api/pastes", a.protected(TextManage, false, a.listPastes))
 	mux.HandleFunc("GET /api/pastes/{id}", a.protected(TextManage, false, a.pasteDetail))
 	mux.HandleFunc("PUT /api/pastes/{slug}", a.protected(TextManage, false, a.updatePaste))
@@ -122,8 +122,9 @@ func (a *App) publicPaste(w http.ResponseWriter, r *http.Request) error {
 	if p.Public != 1 && (actor == nil || (!actor.Admin && actor.Owner() != p.Owner)) {
 		return notFound()
 	}
-	if expired(p.ExpiresAt) {
-		return &apiError{410, "PASTE_GONE", "文本分享已过期"}
+	// 先检查有效期和查看上限，失效分享无需再验证密码。
+	if expired(p.ExpiresAt) || (p.MaxViews > 0 && p.Views >= p.MaxViews) {
+		return &apiError{410, "PASTE_GONE", "文本分享已过期或达到最大查看次数"}
 	}
 	password := r.URL.Query().Get("password")
 	if r.Method == "POST" {

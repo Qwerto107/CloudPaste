@@ -140,7 +140,7 @@ func TestUploadShareFormOrderUnicodeAndUnmappedStorage(t *testing.T) {
 	if got := f.request(t, "GET", link, "", nil, nil, 200).Body.String(); got != "secret upload" {
 		t.Fatal(got)
 	}
-	f.request(t, "POST", "/api/share/verify/"+slug, "", map[string]any{"password": "分享密码"}, nil, 410)
+	f.request(t, "POST", "/api/share/verify/"+slug, "", map[string]any{"password": "分享密码"}, nil, 404)
 	f.request(t, "PUT", "/api/admin/api-keys/"+keyID, f.admin, map[string]any{"is_enable": false}, nil, 200)
 	f.request(t, "GET", link, "", nil, nil, 403)
 	// 上传页面可直接选择未挂载的存储，但受限路径账号不能绕过挂载边界。
