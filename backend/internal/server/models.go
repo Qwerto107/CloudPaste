@@ -134,6 +134,8 @@ type FsMeta struct {
 }
 
 type Share struct {
+	// 合集保存文件来源快照，沿用同一分享的密码、有效期和查看次数。
+	Files         []Share `json:"files,omitempty"`
 	StorageID     string  `json:"storage_config_id,omitempty"`
 	StorageKey    string  `json:"storage_key,omitempty"`
 	SourceVersion string  `json:"source_version"`

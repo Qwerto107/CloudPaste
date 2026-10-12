@@ -18,6 +18,7 @@ func (a *App) registerFiles(mux *apiMux) {
 	mux.HandleFunc("GET /api/fs/download", a.protected(MountView, false, a.fileContent))
 	mux.HandleFunc("GET /api/fs/file-link", a.protected(MountView, false, a.fileLink))
 	mux.HandleFunc("POST /api/fs/create-share", a.protected(FileShare|MountView, false, a.createShare))
+	mux.HandleFunc("POST /api/share/collection", a.protected(FileShare, false, a.createCollection))
 	mux.HandleFunc("GET /api/p/{path...}", a.handle(a.signedContent))
 	mux.HandleFunc("GET /api/share/get/{slug}", a.handle(a.publicShare))
 	mux.HandleFunc("POST /api/share/verify/{slug}", a.handle(a.publicShare))
