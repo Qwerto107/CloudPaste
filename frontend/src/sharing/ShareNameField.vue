@@ -16,10 +16,10 @@ const pattern = "[A-Za-z0-9_\\-]{1,100}";
     >
     <div class="share-name-input">
       <span aria-hidden="true">/{{ type }}/</span>
-      <input
+      <UiInput
         :id="id"
-        :value="modelValue"
-        @input="$emit('update:modelValue', $event.target.value)"
+        :model-value="modelValue"
+        @update:model-value="$emit('update:modelValue', $event)"
         :disabled="disabled"
         :pattern="pattern"
         maxlength="100"

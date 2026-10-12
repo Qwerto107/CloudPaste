@@ -96,27 +96,27 @@ async function login() {
     <form @submit.prevent="login">
       <template v-if="mode === 'admin'"
         ><label
-          >账号<input
+          >账号<UiInput
             v-model="username"
             autocomplete="username"
             required /></label
         ><label
-          >密码<input
+          >密码<UiInput
             v-model="password"
             type="password"
             autocomplete="current-password"
             required /></label></template
       ><label v-else
-        >API Key<input
+        >API Key<UiInput
           v-model="apiKey"
           type="password"
           autocomplete="off"
           required
       /></label>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <button class="primary wide" :disabled="busy">
+      <UiButton class="primary wide" :disabled="busy">
         {{ busy ? "正在登录…" : "登录" }}
-      </button>
+      </UiButton>
     </form>
     <p class="login-alternative">
       <RouterLink v-if="mode === 'apikey'" to="/admin/login"

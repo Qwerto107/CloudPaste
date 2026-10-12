@@ -6,7 +6,17 @@ import {
   onBeforeUnmount,
   ref,
   watch,
+  provide,
 } from "vue";
+import {
+  NConfigProvider,
+  NDialogProvider,
+  darkTheme,
+  zhCN,
+  dateZhCN,
+} from "naive-ui";
+import { styleMountTarget } from "./sharing/ui/context.js";
+import { themeKey } from "./sharing/ui/theme.js";
 import { useRouter, useRoute } from "vue-router";
 import { sanitizeHTML } from "./sharing/sanitize.js";
 import { settings } from "./sharing/settings.js";
@@ -30,6 +40,27 @@ const error = ref("");
 const announcement = ref(false);
 // 首次主题由头部同源脚本提前设置，避免暗色页面刷新时闪白。
 const dark = ref(document.documentElement.dataset.theme === "dark");
+provide(themeKey, dark);
+const uiTheme = computed(() => ({
+  common: {
+    primaryColor: dark.value ? "#87d9b8" : "#126954",
+    primaryColorHover: dark.value ? "#a6e7cc" : "#0b5442",
+    primaryColorPressed: dark.value ? "#71cba6" : "#084935",
+    primaryColorSuppl: dark.value ? "#87d9b8" : "#126954",
+    bodyColor: dark.value ? "#101a17" : "#f3f8f6",
+    cardColor: dark.value ? "#18251f" : "#ffffff",
+    borderColor: dark.value ? "#32473d" : "#dce7e2",
+    textColorBase: dark.value ? "#e2eee8" : "#20332e",
+    borderRadius: "8px",
+    heightMedium: "40px",
+    heightSmall: "32px",
+    fontFamily: 'system-ui, "Segoe UI", "Microsoft YaHei", sans-serif',
+  },
+  Button: {
+    textColorPrimary: dark.value ? "#102a1f" : "#ffffff",
+    textColorHoverPrimary: dark.value ? "#102a1f" : "#ffffff",
+  },
+}));
 function applyTheme() {
   document.documentElement.dataset.theme = dark.value ? "dark" : "light";
   try {
@@ -80,81 +111,102 @@ async function logout() {
 }
 </script>
 <template>
-  <header class="site-header">
-    <RouterLink class="brand" to="/"
-      ><span class="brand-icon"><Icon name="cloud" /></span
-      ><span class="brand-name">{{
-        settings.site_title || "CloudPaste"
-      }}</span></RouterLink
-    >
-    <nav aria-label="主导航">
-      <RouterLink v-if="settings.site_home_editor_enabled !== 'false'" to="/"
-        ><Icon name="text" />文本分享</RouterLink
-      ><RouterLink
-        v-if="settings.site_upload_page_enabled !== 'false'"
-        to="/upload"
-        ><Icon name="folder" />文件分享</RouterLink
-      ><RouterLink :to="accountTarget"
-        ><Icon name="grid" />{{
-          session.type === "none" ? "登录" : "管理"
-        }}</RouterLink
-      >
-    </nav>
-    <div class="header-actions">
-      <span
-        v-if="session.type !== 'none'"
-        class="account-chip"
-        :title="session.name"
-        ><span class="avatar">{{
-          (session.name || "U").slice(0, 1).toUpperCase()
-        }}</span
-        ><span class="account-name">{{ session.name || "用户" }}</span></span
-      >
-      <button
-        v-if="settings.site_announcement_enabled === 'true'"
-        class="quiet"
-        aria-label="站点公告"
-        :aria-expanded="announcement"
-        @click="announcement = !announcement"
-      >
-        <Icon name="bell" /></button
-      ><button
-        class="quiet theme-toggle"
-        :aria-label="dark ? '切换到浅色模式' : '切换到暗色模式'"
-        :title="dark ? '切换到浅色模式' : '切换到暗色模式'"
-        @click="dark = !dark"
-      >
-        <Icon :name="dark ? 'sun' : 'moon'" /></button
-      ><button
-        v-if="session.type !== 'none'"
-        class="quiet"
-        aria-label="退出"
-        title="退出"
-        @click="logout"
-      >
-        <Icon name="logout" />
-      </button>
-    </div>
-  </header>
-  <main class="site-main">
-    <p v-if="error" class="error" role="alert">
-      {{ error }} <button class="quiet" @click="error = ''">关闭</button>
-    </p>
-    <div class="custom-content" v-html="head"></div>
-    <section
-      v-if="announcement && settings.site_announcement_enabled === 'true'"
-      class="panel"
-    >
-      <h2>站点公告</h2>
-      <MarkdownPreview :content="settings.site_announcement_content || ''" />
-    </section>
-    <RouterView />
-    <div class="custom-content" v-html="body"></div>
-  </main>
-  <footer class="site-footer">
-    <MarkdownPreview
-      v-if="settings.site_footer_markdown"
-      :content="settings.site_footer_markdown"
-    /><span v-else>CloudPaste · 临时文本与文件分享</span>
-  </footer>
+  <NConfigProvider
+    class="app-theme"
+    :theme="dark ? darkTheme : null"
+    :theme-overrides="uiTheme"
+    :locale="zhCN"
+    :date-locale="dateZhCN"
+    :style-mount-target="styleMountTarget"
+    preflight-style-disabled
+  >
+    <NDialogProvider>
+      <header class="site-header">
+        <RouterLink class="brand" to="/"
+          ><span class="brand-icon"><Icon name="cloud" /></span
+          ><span class="brand-name">{{
+            settings.site_title || "CloudPaste"
+          }}</span></RouterLink
+        >
+        <nav aria-label="主导航">
+          <RouterLink
+            v-if="settings.site_home_editor_enabled !== 'false'"
+            to="/"
+            ><Icon name="text" />文本分享</RouterLink
+          ><RouterLink
+            v-if="settings.site_upload_page_enabled !== 'false'"
+            to="/upload"
+            ><Icon name="folder" />文件分享</RouterLink
+          ><RouterLink :to="accountTarget"
+            ><Icon name="grid" />{{
+              session.type === "none" ? "登录" : "管理"
+            }}</RouterLink
+          >
+        </nav>
+        <div class="header-actions">
+          <span
+            v-if="session.type !== 'none'"
+            class="account-chip"
+            :title="session.name"
+            ><span class="avatar">{{
+              (session.name || "U").slice(0, 1).toUpperCase()
+            }}</span
+            ><span class="account-name">{{
+              session.name || "用户"
+            }}</span></span
+          >
+          <UiButton
+            v-if="settings.site_announcement_enabled === 'true'"
+            class="quiet icon-button"
+            icon="bell"
+            aria-label="站点公告"
+            :aria-expanded="announcement"
+            @click="announcement = !announcement"
+          >
+          </UiButton>
+          <UiButton
+            class="quiet icon-button theme-toggle"
+            :icon="dark ? 'sun' : 'moon'"
+            :aria-label="dark ? '切换到浅色模式' : '切换到暗色模式'"
+            :title="dark ? '切换到浅色模式' : '切换到暗色模式'"
+            @click="dark = !dark"
+          >
+          </UiButton>
+          <UiButton
+            v-if="session.type !== 'none'"
+            class="quiet icon-button"
+            icon="logout"
+            aria-label="退出"
+            title="退出"
+            @click="logout"
+          >
+          </UiButton>
+        </div>
+      </header>
+      <main class="site-main">
+        <p v-if="error" class="error" role="alert">
+          {{ error }}
+          <UiButton class="quiet" @click="error = ''">关闭</UiButton>
+        </p>
+        <div class="custom-content" v-html="head"></div>
+        <section
+          v-if="announcement && settings.site_announcement_enabled === 'true'"
+          class="panel"
+        >
+          <h2>站点公告</h2>
+          <MarkdownPreview
+            :content="settings.site_announcement_content || ''"
+          />
+        </section>
+        <RouterView />
+        <div class="custom-content" v-html="body"></div>
+      </main>
+      <footer class="site-footer">
+        <MarkdownPreview
+          v-if="settings.site_footer_markdown"
+          :content="settings.site_footer_markdown"
+        /><span v-else>CloudPaste · 临时文本与文件分享</span>
+      </footer>
+    </NDialogProvider>
+  </NConfigProvider>
 </template>

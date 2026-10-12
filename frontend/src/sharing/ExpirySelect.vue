@@ -30,13 +30,13 @@ const hasDefault = computed(() =>
 
 <template>
   <label
-    >有效期<select v-model.number="hours" aria-label="有效期">
+    >有效期<UiSelect v-model.number="hours" aria-label="有效期">
       <option v-if="!hasDefault" :value="defaultHours">
         站点默认（{{ defaultHours }} 小时）
       </option>
       <option v-for="[value, label] in options" :key="value" :value="value">
         {{ label }}
       </option>
-    </select></label
+    </UiSelect></label
   >
 </template>
