@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <title>CloudPaste 链云</title>
+  <title>CloudPaste</title>
   <!-- 简化云轮廓与交扣链环，透明背景适配浏览器标签栏。 -->
   <style>
     :root { color: #087f68; }
