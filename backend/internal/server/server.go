@@ -66,6 +66,7 @@ type App struct {
 	uploadMu              sync.Mutex
 	rawReserved           int64
 	uploadDir             string
+	transfers             *transferHub
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
@@ -83,6 +84,9 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	}
 	if cfg.MaxStagedBytes <= 0 {
 		cfg.MaxStagedBytes = 1 << 30
+	}
+	if cfg.TransferMaxFileBytes <= 0 {
+		cfg.TransferMaxFileBytes = 10 << 30
 	}
 	db, err := openDatabase(cfg.DataDir)
 	if err != nil {
@@ -116,9 +120,17 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 			a.uploadLimit.Store(value << 20)
 		}
 	}
+	a.transfers = newTransferHub(a)
+	if err = a.restoreTransferSettings(); err != nil {
+		_ = a.Close()
+		return nil, err
+	}
 	return a, nil
 }
 func (a *App) Close() error {
+	if a.transfers != nil {
+		a.transfers.close()
+	}
 	a.clientsMu.Lock()
 	for _, entry := range a.storageClients {
 		_ = entry.Driver.Close()
@@ -221,6 +233,7 @@ func (a *App) Handler() http.Handler {
 	a.registerMeta(mux)
 	a.registerSystem(mux)
 	a.registerUploads(mux)
+	a.registerTransfers(mux)
 	mux.HandleFunc("/", a.handle(func(w http.ResponseWriter, r *http.Request) error {
 		// 不支持的上传协议及其他写文件操作明确失败，不产生伪成功。
 		if strings.Contains(r.URL.Path, "upload") || strings.Contains(r.URL.Path, "multipart") || strings.Contains(r.URL.Path, "presign") || strings.Contains(r.URL.Path, "commit") {
@@ -260,6 +273,11 @@ func (a *App) Handler() http.Handler {
 			return
 		}
 		r = r.WithContext(context.WithValue(r.Context(), adminScopeKey{}, adminScope))
+		// 长连接和实时文件使用自己的有界额度，不能长期占用普通 API 的 16 个槽。
+		if a.transferStreamRequest(r) {
+			mux.ServeHTTP(w, r)
+			return
+		}
 		select {
 		case a.requests <- struct{}{}:
 			defer func() { <-a.requests }()

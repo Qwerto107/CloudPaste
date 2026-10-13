@@ -16,10 +16,34 @@ type Config struct {
 	MaxUploads                                                          int
 	MaxUploadBytes, MaxStagedBytes                                      int64
 	TrustedProxies                                                      *trustedProxySet
+	TransferDisabled                                                    bool
+	TransferMaxFileBytes, TransferBytesPerSecond                        int64
+	TransferSTUN                                                        string
 }
 
 func ConfigFromEnv() (Config, error) {
 	c := Config{ListenAddr: ":8787", DataDir: "./data", AdminUsername: "admin", MaxDownloads: 8}
+	c.TransferDisabled = os.Getenv("TRANSFER_ENABLED") == "false"
+	c.TransferMaxFileBytes = 10 << 30
+	c.TransferBytesPerSecond = 64 << 20
+	for name, target := range map[string]*int64{"TRANSFER_MAX_FILE_MB": &c.TransferMaxFileBytes, "TRANSFER_RATE_MB": &c.TransferBytesPerSecond} {
+		if value := os.Getenv(name); value != "" {
+			n, err := strconv.ParseInt(value, 10, 64)
+			minimum := int64(1)
+			if name == "TRANSFER_RATE_MB" {
+				minimum = 0
+			}
+			if err != nil || n < minimum || n > 10240 {
+				return c, errors.New(name + " 超出允许范围（速率可为 0，最大 10240）")
+			}
+			*target = n << 20
+		}
+	}
+	// 不默认向第三方发送网络地址；跨网络直连可由部署者指定 STUN。
+	c.TransferSTUN = strings.TrimSpace(os.Getenv("TRANSFER_STUN"))
+	if c.TransferSTUN != "" && (!strings.HasPrefix(c.TransferSTUN, "stun:") || len(c.TransferSTUN) > 256 || strings.ContainsAny(c.TransferSTUN, "\r\n\t /")) {
+		return c, errors.New("TRANSFER_STUN 必须为 stun:主机:端口")
+	}
 	if v := os.Getenv("PORT"); v != "" {
 		port, err := strconv.Atoi(v)
 		if err != nil || port < 1 || port > 65535 {

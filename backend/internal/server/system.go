@@ -31,6 +31,9 @@ var defaultSettings = []setting{
 	{"preview_video_types", "mp4,webm,ogv,mov", "text", 2, 0, "视频预览扩展名（浏览器原生播放）"},
 	{"preview_audio_types", "mp3,wav,ogg,flac,m4a,aac,opus", "text", 2, 0, "音频预览扩展名（浏览器原生播放）"},
 	{"preview_allow_external_images", "false", "bool", 2, 0, "允许 Markdown 加载站外图片（默认关闭）"},
+	{"transfer_rate_mb", "64", "number", 3, 0, "全站中继速率（MiB/s，0 表示不限速）"},
+	{"transfer_max_relays", "4", "number", 3, 0, "中继并发请求数（1–16，分段下载各占一路）"},
+	{"transfer_max_file_mb", "10240", "number", 3, 0, "互传单文件上限（MiB，不超过环境配置）"},
 	{"site_title", "CloudPaste", "text", 4, 0, "站点标题"},
 	{"site_favicon_url", "", "text", 4, 0, "站点图标 URL"},
 	{"site_footer_markdown", "", "textarea", 4, 0, "站点页脚"},
@@ -90,7 +93,7 @@ func (a *App) registerSystem(mux *apiMux) {
 	mux.HandleFunc("GET /api/admin/settings", a.protected(0, true, a.settings))
 	mux.HandleFunc("GET /api/admin/settings/groups", a.protected(0, true, func(w http.ResponseWriter, r *http.Request) error {
 		groups := []map[string]any{}
-		for id, name := range map[int]string{1: "全局设置", 2: "预览设置", 4: "站点设置"} {
+		for id, name := range map[int]string{1: "全局设置", 2: "预览设置", 3: "设备互传", 4: "站点设置"} {
 			count, readOnly := 0, 0
 			for _, s := range defaultSettings {
 				if s.Group == id {
@@ -158,12 +161,16 @@ func (a *App) loadSettings(r *http.Request) ([]setting, error) {
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
+	transferValues := a.transferSettingValues()
 	for i := range items {
 		if v, ok := values[items[i].Key]; ok && items[i].Flags != 2 {
 			items[i].Value = v
 		}
 		if items[i].Key == "max_upload_size" {
 			items[i].Value = strconv.FormatInt(a.maxUploadBytes()/(1<<20), 10)
+		}
+		if value, ok := transferValues[items[i].Key]; ok {
+			items[i].Value = value
 		}
 
 	}
@@ -177,7 +184,7 @@ func (a *App) settings(w http.ResponseWriter, r *http.Request) error {
 	group := r.URL.Query().Get("group")
 	if group != "" {
 		id, err := strconv.Atoi(group)
-		if err != nil || (id != 1 && id != 2 && id != 4) {
+		if err != nil || (id != 1 && id != 2 && id != 3 && id != 4) {
 			return badRequest("分组编号无效")
 		}
 		filtered := []setting{}
@@ -198,7 +205,7 @@ func (a *App) settings(w http.ResponseWriter, r *http.Request) error {
 }
 func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 	group, err := strconv.Atoi(r.PathValue("group"))
-	if err != nil || (group != 1 && group != 2 && group != 4) {
+	if err != nil || (group != 1 && group != 2 && group != 3 && group != 4) {
 		return badRequest("分组编号无效")
 	}
 	var body map[string]json.RawMessage
@@ -251,6 +258,9 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 			if key == "preview_max_text_kb" {
 				minimum, maximum = 16, 2048
 			}
+			if definition.Group == 3 {
+				minimum, maximum = a.transferSettingRange(key)
+			}
 			if err != nil || number < minimum || number > maximum {
 				return badRequest("数值超出允许范围")
 			}
@@ -289,6 +299,9 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 		if value, ok := values["max_upload_size"]; ok {
 			limit, _ := strconv.ParseInt(value, 10, 64)
 			a.uploadLimit.Store(limit << 20)
+		}
+		if group == 3 {
+			a.applyTransferSettings(values)
 		}
 		return nil
 	}()
