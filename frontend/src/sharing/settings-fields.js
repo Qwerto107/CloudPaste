@@ -1,5 +1,26 @@
 // 展示信息与后端配置键分开维护；服务端仍负责权限和最终数值校验。
 export const fields = {
+  transfer_rate_mb: {
+    label: "中继总速率上限",
+    help: "所有中继文件共享此带宽，0 表示不限速。保存后立即生效，不影响点对点直连。",
+    unit: "MiB/s",
+    min: 0,
+    max: 10240,
+  },
+  transfer_max_relays: {
+    label: "中继并发请求数",
+    help: "全站同时中继的请求数量，范围 1–16；下载工具的每个分段各占一路。降低后不会中断现有传输，仅限制新请求。",
+    unit: "个",
+    min: 1,
+    max: 16,
+  },
+  transfer_max_file_mb: {
+    label: "互传单文件上限",
+    help: "新建配对连接使用此上限，不能超过服务器配置的硬上限；不影响普通文件分享。",
+    unit: "MiB",
+    min: 1,
+    max: 10240,
+  },
   max_upload_size: {
     label: "单文件上传上限",
     help: "限制每个文件的大小，不能超过服务器配置的上限。",
@@ -109,6 +130,15 @@ export const fields = {
   },
 };
 export const sections = {
+  transfer: [
+    {
+      title: "传输保护",
+      icon: "transfer",
+      description:
+        "按服务器带宽和负载调整，设置会保存并在重启后恢复。不限速时仍保留背压、固定缓冲和并发保护。",
+      keys: ["transfer_rate_mb", "transfer_max_relays", "transfer_max_file_mb"],
+    },
+  ],
   global: [
     {
       title: "分享与上传",

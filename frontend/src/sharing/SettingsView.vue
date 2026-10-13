@@ -20,10 +20,11 @@ import Icon from "./Icon.vue";
 
 const route = useRoute();
 const panel = computed(() => route.meta.panel);
-const groups = { global: 1, preview: 2, site: 4 };
+const groups = { global: 1, preview: 2, transfer: 3, site: 4 };
 const tabs = [
   { key: "global", label: "常规", icon: "settings" },
   { key: "preview", label: "文件预览", icon: "file" },
+  { key: "transfer", label: "设备互传", icon: "transfer" },
   { key: "site", label: "站点外观", icon: "cloud" },
 ];
 const definitions = ref([]);

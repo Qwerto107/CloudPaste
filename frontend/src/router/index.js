@@ -8,6 +8,12 @@ import { loadSettings, settings } from "../sharing/settings.js";
 const management = () => import("../sharing/AdminView.vue");
 const routes = [
   {
+    path: "/transfer",
+    name: "Transfer",
+    component: () => import("../sharing/TransferView.vue"),
+    meta: { title: "设备互传" },
+  },
+  {
     path: "/",
     name: "Home",
     component: () => import("../sharing/HomeView.vue"),
@@ -62,6 +68,7 @@ const routes = [
         ["account", "account", "账号管理", -1],
         ["settings/global", "global", "常规设置", 0],
         ["settings/preview", "preview", "文件预览设置", 0],
+        ["settings/transfer", "transfer", "设备互传设置", 0],
         ["settings/site", "site", "站点外观设置", 0],
       ].map(([path, panel, title, permission]) => ({
         path,

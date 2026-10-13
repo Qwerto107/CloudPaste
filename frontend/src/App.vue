@@ -32,7 +32,7 @@ const accountTarget = computed(() => {
   if (session.type === "admin") return "/admin";
   if (session.type === "apikey") return "/manage";
   // 分享页的顶部登录入口也保留原路径，包括查询参数和锚点。
-  if (route.name === "Home" || route.name === "Upload")
+  if (["Home", "Upload", "Transfer"].includes(route.name))
     return { path: "/login", query: { redirect: route.fullPath } };
   return "/login";
 });
@@ -137,6 +137,7 @@ async function logout() {
             v-if="settings.site_upload_page_enabled !== 'false'"
             to="/upload"
             ><Icon name="folder" />文件分享</RouterLink
+          ><RouterLink to="/transfer"><Icon name="transfer" />设备互传</RouterLink
           ><RouterLink :to="accountTarget"
             ><Icon name="grid" />{{
               session.type === "none" ? "登录" : "管理"

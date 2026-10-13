@@ -16,7 +16,10 @@ export default defineConfig(({ mode }) => {
       __APP_ENV__: JSON.stringify(env.VITE_APP_ENV || "production"),
       __BACKEND_URL__: JSON.stringify(env.VITE_BACKEND_URL || ""),
     },
-    server: { port: 3000, proxy: { "/api": "http://127.0.0.1:8787" } },
+    server: {
+      port: 3000,
+      proxy: { "/api": { target: "http://127.0.0.1:8787", ws: true } },
+    },
     build: {
       target: "es2022",
       minify: "terser",
