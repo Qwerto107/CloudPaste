@@ -1237,6 +1237,8 @@ summary.settings-card-heading::-webkit-details-marker {
 @media (max-width: 720px) {
   .settings-tabs {
     gap: 0;
+    /* 分类增加后允许自然换行，避免窄屏文字和图标撑出页面。 */
+    flex-wrap: wrap;
   }
   .settings-tabs a {
     flex: 1;
