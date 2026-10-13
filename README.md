@@ -75,8 +75,8 @@ mkdir -p files
 ```dotenv
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=请替换为至少12字节的强密码
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.6.1
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.6.1
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.7.0
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.7.0
 LOCAL_FILES_DIR=./files
 ```
 
@@ -91,7 +91,7 @@ docker compose --env-file backend/.env up -d --no-build
 2. 添加本地存储（根目录填 `/files`）或 S3 存储。
 3. 创建文本或上传文件，生成分享链接。需要多人使用时，创建 API Key 并按需授权。
 
-也可用 **一个容器运行前后端**。在 `backend/.env` 增加 `GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.6.1`，使用以下命令启动（入口仍为 `http://127.0.0.1:8081`）：
+也可用 **一个容器运行前后端**。在 `backend/.env` 增加 `GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.7.0`，使用以下命令启动（入口仍为 `http://127.0.0.1:8081`）：
 
 ```sh
 docker compose --env-file backend/.env -f docker-compose.standalone.yml pull
@@ -104,7 +104,7 @@ docker compose --env-file backend/.env -f docker-compose.standalone.yml up -d --
 
 - **本地资源**：前端为纯静态页面，脚本、样式、图标由本站提供；Markdown 按需加载。
 - **流式上传**：后端暂存并校验文件，再写入本地或 S3；不将完整文件缓存在内存中。
-- **实时互传**：沿用网站端口，内置中继不暂存文件；电脑与手机统一使用浏览器原生下载，接收方开始下载后才上传。双方需保持在线，详见 [设备互传](docs/usage.md#设备互传)。此功能为源码新增，尚未包含在上述 `0.6.1` 镜像中。
+- **实时互传**：输入配对码互发文字、图片和文件，支持 WebRTC 点对点与同端口实时中继；中继可直接下载或交给外部下载工具，不暂存文件。双方需保持在线，详见 [设备互传](docs/usage.md#设备互传)。
 - **身份分离**：API Key 用户从 `/login` 登录，管理员从 `/admin/login` 登录；管理页面与 API 按身份划分。
 - **可控访问**：管理员 API 使用 `/api/admin/*`，可在外部反向代理配置 IP 白名单或 mTLS。
 - **内容过滤**：Markdown 默认不加载站外图片，自定义 HTML 经过安全过滤。

@@ -45,8 +45,11 @@ Screenshots show the current application with demonstration content.
 | Storage | Local directories and S3, connection tests, defaults and access controls |
 | API Keys | Generated or custom values, separate sharing and management permissions |
 | Administration | Share records, storage, keys, admin account and site settings |
+| Device transfers | Pairing codes, text and pasted images, WebRTC file transfers and streaming relay downloads through the website port |
 
 New shares expire after 24 hours by default. Expiring or deleting a share revokes access without deleting the stored file. Editing a filename changes its display name only.
+
+Open `/transfer` to connect two devices. Relay downloads support the browser and external download tools such as AB Download Manager through the same link. Both pages must remain online; the server does not cache files. WebRTC downloads are available when the receiving browser supports saving directly to disk.
 
 ## Docker quick start
 
@@ -62,8 +65,8 @@ Edit `backend/.env` with your own strong password and matching image versions:
 ```dotenv
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=replace-with-your-own-strong-password
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.6.1
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.6.1
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.7.0
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.7.0
 LOCAL_FILES_DIR=./files
 ```
 
@@ -76,7 +79,7 @@ docker compose --env-file backend/.env up -d --no-build
 
 Open `http://127.0.0.1:8081/admin/login`, sign in and configure LOCAL storage with `/files` as its root, or add S3 storage. Create API Keys for other users, who sign in at `/login`.
 
-For a **single container with both the frontend and backend**, add `GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.6.1` to `backend/.env` and run:
+For a **single container with both the frontend and backend**, add `GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.7.0` to `backend/.env` and run:
 
 ```sh
 docker compose --env-file backend/.env -f docker-compose.standalone.yml pull

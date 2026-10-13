@@ -16,8 +16,8 @@ mkdir -p files
 ```dotenv
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=请替换为至少12字节的强密码
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.6.1
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.6.1
+GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.7.0
+GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.7.0
 LOCAL_FILES_DIR=./files
 BIND_ADDRESS=127.0.0.1
 HTTP_PORT=8081
@@ -40,7 +40,7 @@ docker compose --env-file backend/.env ps
 [docker-compose.standalone.yml](../docker-compose.standalone.yml) 使用同一个 Go 进程提供内嵌前端与 API，不依赖 Nginx。在上面的 `backend/.env` 中增加：
 
 ```dotenv
-GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.6.1
+GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.7.0
 ```
 
 启动命令：
@@ -90,7 +90,7 @@ Windows 的 LOCAL 存储只接受与磁盘实际名称一致的路径，拒绝�
 
 ## 设备互传与实时中继
 
-单文件程序和合并容器已包含配对、WebSocket 消息与 HTTP 实时中继，全部沿用网站端口，无需开放其他服务端口或部署 TURN。直连由两端浏览器尝试建立；网络不允许直连时选择中继。新增功能需要从源码构建，尚未包含在本文示例的 `0.6.1` 镜像中。
+单文件程序和合并容器已包含配对、WebSocket 消息与 HTTP 实时中继，全部沿用网站端口，无需开放其他服务端口或部署 TURN。直连由两端浏览器尝试建立；网络不允许直连时选择中继。自建防火墙或浏览器网络策略仍可能限制 WebRTC 的动态连接，中继可通过现有网站入口使用。
 
 | 环境变量 | 默认值 | 含义 |
 | --- | --- | --- |
