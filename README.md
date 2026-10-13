@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="frontend/public/chain-cloud.svg" width="76" height="76" alt="CloudPaste 链云">
+<img src="frontend/public/chain-cloud.svg" width="76" height="76" alt="CloudPaste">
 
 # CloudPaste
 
@@ -20,9 +20,9 @@
 
 清爽薄荷配色，支持 Markdown 编辑、多文件合集分享与设备互传。浅色、暗色自由切换，手机与桌面都能顺手使用。
 
-![CloudPaste 当前界面截图拼版：Markdown 编辑、移动端多文件合集与设备互传](docs/assets/product-showcase.png)
+![CloudPaste 产品效果图：Markdown 编辑、移动端多文件合集与设备互传](docs/assets/product-showcase.png)
 
-*由当前真实界面截图拼成，展示 Markdown 编辑、移动端多文件合集与设备互传。*
+*产品界面效果图，展示 Markdown 编辑、移动端多文件合集与设备互传。实际界面见下方截图。*
 
 <details>
 <summary><strong>查看完整截图：编辑、上传、互传、管理与设置</strong></summary>

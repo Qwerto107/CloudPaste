@@ -18,9 +18,9 @@ Self-hosted text and file sharing, with custom links, expiration, passwords and 
 
 ## A focused sharing experience
 
-![CloudPaste screenshot collage: Markdown editing, mobile file collections and device transfers](assets/product-showcase.png)
+![CloudPaste product showcase: Markdown editing, mobile file collections and device transfers](assets/product-showcase.png)
 
-*A collage of current application screenshots showing Markdown editing, mobile file collections and device transfers.*
+*Illustrative product showcase featuring Markdown editing, mobile file collections and device transfers. Actual application screenshots are shown below.*
 
 <details>
 <summary><strong>View full screenshots: editing, uploads, transfers, management and settings</strong></summary>
