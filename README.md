@@ -18,29 +18,33 @@
 
 ## 界面一览
 
-清爽薄荷配色，专注编辑与分享。浅色、暗色自由切换，手机与桌面都能顺手使用。
+清爽薄荷配色，支持 Markdown 编辑、多文件合集分享与设备互传。浅色、暗色自由切换，手机与桌面都能顺手使用。
 
-![CloudPaste 清爽薄荷产品效果图：桌面分享、管理列表与手机界面](docs/assets/product-showcase.png)
+![CloudPaste 当前界面截图拼版：Markdown 编辑、移动端多文件合集与设备互传](docs/assets/product-showcase.png)
 
-*产品界面效果图，展示桌面分享、管理列表与移动端的整体设计。*
+*由当前真实界面截图拼成，展示 Markdown 编辑、移动端多文件合集与设备互传。*
 
 <details>
-<summary><strong>查看实际界面截图：浅色、暗色、移动端与系统设置</strong></summary>
+<summary><strong>查看完整截图：编辑、上传、互传、管理与设置</strong></summary>
 
-![CloudPaste 文本分享：浅色界面](docs/assets/share-light.png)
+![文本分享：浅色 Markdown 编辑器与访问控制](docs/assets/share-light.png)
 
 <table>
   <tr>
     <th width="70%">暗色模式</th>
-    <th width="30%">移动端文件分享</th>
+    <th width="30%">移动端多文件合集</th>
   </tr>
   <tr>
-    <td valign="top"><img src="docs/assets/share-dark.png" alt="暗色文本分享界面"></td>
-    <td valign="top"><img src="docs/assets/upload-mobile.png" alt="移动端文件分享界面"></td>
+    <td valign="top"><img src="docs/assets/share-dark.png" alt="暗色模式下的 Markdown 编辑与分享"></td>
+    <td valign="top"><img src="docs/assets/upload-mobile.png" alt="移动端上传多个文件，共用一个合集链接"></td>
   </tr>
 </table>
 
-![系统设置：分组配置与清晰说明](docs/assets/settings.png)
+![设备互传：连接后双向发送文字、图片与文件](docs/assets/transfer.png)
+
+![分享管理：有效状态与统一操作](docs/assets/management.png)
+
+![系统设置：分类配置与清晰说明](docs/assets/settings.png)
 
 *以上截图使用演示内容。*
 

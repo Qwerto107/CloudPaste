@@ -18,21 +18,27 @@ Self-hosted text and file sharing, with custom links, expiration, passwords and 
 
 ## A focused sharing experience
 
-![CloudPaste mint product mockup: desktop sharing, management and mobile upload](assets/product-showcase.png)
+![CloudPaste screenshot collage: Markdown editing, mobile file collections and device transfers](assets/product-showcase.png)
 
-*Product design mockup showing the desktop and mobile experience.*
+*A collage of current application screenshots showing Markdown editing, mobile file collections and device transfers.*
 
 <details>
-<summary><strong>View actual application screenshots</strong></summary>
+<summary><strong>View full screenshots: editing, uploads, transfers, management and settings</strong></summary>
 
-![Text sharing in light mode](assets/share-light.png)
+![Text sharing: Markdown editor and access controls in light mode](assets/share-light.png)
 
 <table>
-  <tr><th width="70%">Dark mode</th><th width="30%">Mobile upload</th></tr>
-  <tr><td valign="top"><img src="assets/share-dark.png" alt="Dark text editor"></td><td valign="top"><img src="assets/upload-mobile.png" alt="Mobile file sharing"></td></tr>
+  <tr><th width="70%">Dark mode</th><th width="30%">Mobile file collections</th></tr>
+  <tr><td valign="top"><img src="assets/share-dark.png" alt="Markdown editing and sharing in dark mode"></td><td valign="top"><img src="assets/upload-mobile.png" alt="Upload multiple files on mobile and share them with one collection link"></td></tr>
 </table>
 
-Screenshots show the current application with demonstration content.
+![Device transfers: exchange text, images and files between connected devices](assets/transfer.png)
+
+![Share management: validity status and consistent actions](assets/management.png)
+
+![System settings: grouped options with clear descriptions](assets/settings.png)
+
+*All screenshots use demonstration content.*
 
 </details>
 
