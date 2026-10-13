@@ -910,12 +910,13 @@ td .key-value {
   flex-wrap: wrap;
   align-items: center;
 }
-.row-actions button {
-  padding: 0.3rem 0.5rem;
+/* 链接按钮与普通按钮采用相同内边距，避免同一行出现两种操作样式。 */
+.row-actions .ui-button {
+  padding: 0 10px;
   font-size: 0.8rem;
 }
-.row-actions a {
-  font-size: 0.8rem;
+.row-actions a.ui-button:hover {
+  text-decoration: none;
 }
 .badge {
   padding: 0.15rem 0.4rem;
@@ -923,6 +924,31 @@ td .key-value {
   border-radius: 20px;
   color: var(--accent);
   font-size: 0.75rem;
+}
+/* 分享状态用文字和颜色共同表达，不依赖单一颜色区分是否可用。 */
+.share-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.share-status.valid {
+  color: var(--success);
+  background: var(--success-bg);
+}
+.share-status.invalid {
+  color: var(--error);
+  background: var(--error-bg);
+}
+.share-status.private {
+  color: var(--muted);
+  background: var(--surface-subtle);
+}
+.share-status-cell small {
+  max-width: 10rem;
 }
 .pagination {
   display: flex;

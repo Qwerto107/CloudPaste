@@ -35,6 +35,8 @@ const title = computed(
 const items = ref([]);
 const total = ref(0);
 const page = ref(1);
+const statusTime = ref(Date.now());
+let statusTimer;
 const busy = ref(false);
 const error = ref("");
 const success = ref("");
@@ -58,6 +60,36 @@ const permissions = [
 ];
 const selectedPermissions = ref([]);
 const originalMaxViews = ref(0);
+const shareStates = {
+  valid: { label: "有效", reason: "", kind: "valid" },
+  expired: { label: "已失效", reason: "已过期", kind: "invalid" },
+  exhausted: { label: "已失效", reason: "查看次数已用完", kind: "invalid" },
+  private: {
+    label: "未公开",
+    reason: "仅所有者或管理员可访问",
+    kind: "private",
+  },
+  malformed: { label: "已失效", reason: "有效期无效", kind: "invalid" },
+};
+function shareState(item) {
+  // 与分享访问规则一致：到期或达到查看上限即失效，访问密码不影响有效性。
+  if (item.expires_at) {
+    const expiry = Date.parse(item.expires_at);
+    if (!Number.isFinite(expiry)) return shareStates.malformed;
+    if (expiry <= statusTime.value) return shareStates.expired;
+  }
+  if (
+    Number(item.max_views) > 0 &&
+    Number(item.views) >= Number(item.max_views)
+  )
+    return shareStates.exhausted;
+  if (
+    panel.value === "texts" &&
+    (item.is_public === 0 || item.is_public === false)
+  )
+    return shareStates.private;
+  return shareStates.valid;
+}
 const visible = computed(() =>
   items.value.filter((item) =>
     String(item.title || item.filename || item.name || item.slug || "")
@@ -76,6 +108,7 @@ const endpoint = computed(
 );
 
 async function load() {
+  statusTime.value = Date.now();
   hideKeys();
   busy.value = true;
   error.value = "";
@@ -367,8 +400,17 @@ watch(panel, () => {
   newlyCreatedKey.value = "";
   load();
 });
-onMounted(load);
-onBeforeUnmount(hideKeys);
+onMounted(() => {
+  load();
+  // 页面停留期间也更新到期状态，不额外请求接口；查看次数随列表刷新更新。
+  statusTimer = setInterval(() => {
+    statusTime.value = Date.now();
+  }, 1000);
+});
+onBeforeUnmount(() => {
+  clearInterval(statusTimer);
+  hideKeys();
+});
 </script>
 <template>
   <div class="management-heading">
@@ -727,6 +769,7 @@ onBeforeUnmount(hideKeys);
           <thead>
             <tr>
               <th>名称</th>
+              <th v-if="panel === 'texts' || panel === 'files'">状态</th>
               <th>
                 {{
                   panel === "storage"
@@ -752,6 +795,17 @@ onBeforeUnmount(hideKeys);
                   }}</template>
                   <template v-else>{{ item.key }}</template>
                 </small>
+              </td>
+              <td
+                v-if="panel === 'texts' || panel === 'files'"
+                class="share-status-cell"
+              >
+                <span class="share-status" :class="shareState(item).kind">{{
+                  shareState(item).label
+                }}</span>
+                <small v-if="shareState(item).reason" class="muted">{{
+                  shareState(item).reason
+                }}</small>
               </td>
               <td v-if="panel === 'storage'">
                 {{ item.storage_type }}
@@ -788,6 +842,7 @@ onBeforeUnmount(hideKeys);
                 <div class="row-actions">
                   <UiButton
                     v-if="panel === 'keys'"
+                    size="small"
                     :disabled="!!revealingKeyID"
                     :aria-pressed="!!revealedKeys[item.id]"
                     @click="toggleKey(item)"
@@ -796,16 +851,21 @@ onBeforeUnmount(hideKeys);
                     <span v-else-if="revealedKeys[item.id]">隐藏密钥</span>
                     <span v-else>显示密钥</span>
                   </UiButton>
-                  <a
+                  <!-- 链接保留新窗口打开语义，与同行操作使用相同的小尺寸按钮。 -->
+                  <UiButton
                     v-if="item.slug"
+                    tag="a"
+                    type="button"
+                    size="small"
                     :href="
                       shareURL(panel === 'texts' ? 'paste' : 'file', item.slug)
                     "
                     target="_blank"
                     rel="noopener noreferrer"
-                    >打开分享</a
+                    >打开分享</UiButton
                   ><UiButton
                     v-if="panel === 'texts'"
+                    size="small"
                     @click="textPreview(item)"
                   >
                     预览</UiButton
@@ -815,6 +875,7 @@ onBeforeUnmount(hideKeys);
                       ['LOCAL', 'S3'].includes(item.storage_type)
                     "
                     @click="openEditor(item)"
+                    size="small"
                   >
                     编辑</UiButton
                   ><template
@@ -822,15 +883,16 @@ onBeforeUnmount(hideKeys);
                       panel === 'storage' &&
                       ['LOCAL', 'S3'].includes(item.storage_type)
                     "
-                    ><UiButton @click="storageAction(item, 'test')"
+                    ><UiButton size="small" @click="storageAction(item, 'test')"
                       >测试</UiButton
                     ><UiButton
                       v-if="!item.is_default"
+                      size="small"
                       @click="storageAction(item, 'set-default')"
                     >
                       设为默认
                     </UiButton></template
-                  ><UiButton class="danger" @click="remove(item)"
+                  ><UiButton class="danger" size="small" @click="remove(item)"
                     >删除</UiButton
                   >
                 </div>
