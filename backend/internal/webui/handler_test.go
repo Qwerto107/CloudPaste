@@ -25,6 +25,9 @@ func TestPageStyleNonceMatchesHTML(t *testing.T) {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		policy := response.Header().Get("Content-Security-Policy")
+		if !strings.Contains(policy, "img-src 'self' blob:") || !strings.Contains(policy, "script-src 'self';") || !strings.Contains(policy, "connect-src 'self';") {
+			t.Fatal("图片预览策略不得放开脚本或网络连接的 blob 权限")
+		}
 		_, rest, found := strings.Cut(policy, "'nonce-")
 		nonce, _, closed := strings.Cut(rest, "'")
 		if !found || !closed || nonce == "" || nonce == previous || strings.Contains(policy, "unsafe-inline") {

@@ -87,6 +87,21 @@ Windows 可构建 `backend/bin/sharing-backend.exe`，测试默认使用这个�
 
 端到端检查启动独立临时服务与数据库，覆盖登录、分享、上传、媒体预览、设置、权限、主题和屏宽。设置 `SHARING_TEST_STANDALONE=1` 并将 `SHARING_TEST_BINARY` 指向带 `with_frontend` 的程序，可运行相同回归直接验证 Go 提供的页面。CI 检查这两种模式，另运行 `go test -race ./... -count=1 -timeout=300s`、依赖漏洞检查及两套真实 Docker 集成测试。
 
+## 设备互传测试
+
+设备互传另有两个浏览器身份的隔离测试。构建并准备内嵌前端后执行：
+
+```sh
+cd backend
+go build -tags with_frontend -o bin/transfer-test ./cmd/cloudpaste
+cd ../frontend
+TRANSFER_TEST_BINARY=../backend/bin/transfer-test npm run test:transfer
+```
+
+Windows 默认程序名为 `backend/bin/transfer-test.exe`，环境变量用 PowerShell 语法设置。测试覆盖配对确认、双向文字、真实原生附件下载、零字节文件、断开清理和两种屏宽。直连测试使用真实 WebRTC，并以 OPFS 写入替代需要人工交互的系统保存对话框，校验双向文件摘要且确认没有 HTTP 文件中继请求；它不代替不同真机浏览器的兼容性验证。
+
+互传测试还覆盖手动中继展开下载操作、浏览器下载与外部工具共用链接、分段和重新下载的双方进度、完成接收后撤销链接、自动接收直接触发下载、任务移除、模拟上传失败后重发、双向图片粘贴预览与下载，以及后台保护设置保存。设置 `TRANSFER_BENCHMARK_MB=64` 可输出同机 64 MiB 文件的平均速率；`TRANSFER_RATE_MB` 指定临时测试服务的中继限速。计时包括浏览器操作与完成确认，不能等同于公网或不同真机的吞吐。单测覆盖重发额度与身份约束、图片格式和像素限制、图片排队；背压单测会暂停写盘，验证未确认队列保持有界且取消能唤醒等待。
+
 ## 图标与截图
 
 图标源文件为 [chain-cloud.svg](../frontend/public/chain-cloud.svg)，导出脚本为 [generate-icons.mjs](../frontend/scripts/generate-icons.mjs)。它使用本地浏览器导出 16 / 32 / 48 像素 ICO、32 像素 PNG 和 180 像素触屏图标。修改图形后同步导出并检查浅暗背景。

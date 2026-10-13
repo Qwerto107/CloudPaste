@@ -15,7 +15,8 @@ import (
 )
 
 // 与 docker/frontend/nginx.conf 的网页策略保持一致；API 继续使用原有内容沙箱。
-const pageCSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: http:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+// blob 仅用于本地图片预览；脚本、网络连接和嵌入对象的策略保持独立限制。
+const pageCSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: https: http:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
 
 func newHandler(api http.Handler, files fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

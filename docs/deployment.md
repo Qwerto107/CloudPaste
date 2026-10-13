@@ -88,6 +88,45 @@ docker compose --env-file backend/.env -f docker-compose.standalone.yml up -d --
 
 Windows 的 LOCAL 存储只接受与磁盘实际名称一致的路径，拒绝不同大小写、8.3 短名称以及尾点、尾空格等别名，防止绕过目录或单文件密码。配置挂载根内路径、API Key 的 `basic_path` 和目录元信息时，应使用文件实际的名称和大小写；Linux 与 S3 的路径规则保持不变。
 
+## 设备互传与实时中继
+
+单文件程序和合并容器已包含配对、WebSocket 消息与 HTTP 实时中继，全部沿用网站端口，无需开放其他服务端口或部署 TURN。直连由两端浏览器尝试建立；网络不允许直连时选择中继。新增功能需要从源码构建，尚未包含在本文示例的 `0.6.1` 镜像中。
+
+| 环境变量 | 默认值 | 含义 |
+| --- | --- | --- |
+| `TRANSFER_ENABLED` | `true` | 设为 `false` 关闭设备互传 |
+| `TRANSFER_MAX_FILE_MB` | `10240` | 单个互传文件硬上限，1–10240 MiB；后台可设置更小的值 |
+| `TRANSFER_RATE_MB` | `64` | 初始中继合计发送速率，0–10240 MiB/s；0 为不限速，后台保存值优先 |
+| `TRANSFER_STUN` | 空 | 可选 `stun:主机:端口`；默认不联系第三方 STUN |
+
+管理后台的「系统设置 → 设备互传」可保存中继总速率、并发请求数（默认 4，范围 1–16）和单文件大小。每个分段下载请求各占一路并发。速率保存后立即生效；降低并发只阻止新的超额传输，不中断已有文件；大小限制用于新建配对连接。设置保存到数据库，重启后恢复。设置为不限速仍保留背压、固定缓冲及并发保护，不代表无限制地接收数据。
+
+固定上限为 16 个连接房间、40 条 WebSocket（每 IP 最多 8 条）；同一创建者或 IP 最多创建 2 个房间。中继使用小块缓冲和背压，不将文件完整放入内存或服务器磁盘。浏览器、操作系统和代理仍有各自缓冲，内存不等于零；超额请求会失败，不无限排队。默认 64 MiB/s 是整个服务的中继发送总预算，与普通分享下载分开，也不限制 WebRTC 直连。
+
+HTTPS 反向代理需允许 WebSocket Upgrade，关闭 `/api/transfer/upload/` 的请求缓冲和 `/api/transfer/download/` 的响应缓冲，并允许所设单文件大小。仓库自带的前端 Nginx 已配置；外层 Nginx 可在现有 `/api/` location 中合并以下选项，保留原有 `proxy_pass`、Host 和可信来源设置：
+
+```nginx
+# http 层定义，用空值移除普通请求的 Connection 头。
+map $http_upgrade $transfer_connection {
+    default upgrade;
+    '' '';
+}
+
+# 放在现有 /api/ location 内。
+proxy_http_version 1.1;
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection $transfer_connection;
+proxy_request_buffering off;
+proxy_buffering off;
+proxy_read_timeout 120s;
+proxy_send_timeout 120s;
+client_max_body_size 10g;
+```
+
+边收边转发依赖每一层代理都支持流式处理；CDN 的请求大小或持续时间限制仍然生效。服务自身在约 1 分钟无传输进展后清理文件，连接最长 2 小时。取消、断网或重启后没有服务端副本用于续传。
+
+临时下载链接含下载票据，服务代码不记录票据。普通中继票据仅使用一次，下载工具入口的票据可在 30 分钟内探测、分段和重试，闲置 10 分钟失效，结束任务或房间结束后撤销。自建代理应避免在访问日志中记录此路由的查询串（例如使用 `$uri` 而不是 `$request_uri`）。下载工具分段占用现有中继并发额度，不开启新监听端口，不在服务器缓存文件。公网使用 HTTPS/WSS；若前后端异源，需明确配置 `ALLOWED_ORIGINS`，推荐仍使用同源代理。
+
 ## HTTPS 与管理员入口
 
 前端、后端可独立部署。推荐浏览器统一访问站点域名，由反向代理将 `/api` 转发到后端；静态文件请求交给前端。默认 Compose 已配置同源转发。

@@ -120,6 +120,11 @@ jobs:
           SHARING_TEST_STANDALONE: '1'
           SHARING_TEST_BINARY: ${{ github.workspace }}/backend/bin/sharing-standalone
         run: npm run test:e2e
+      - name: 检查配对、消息与实时文件中继
+        working-directory: frontend
+        env:
+          TRANSFER_TEST_BINARY: ${{ github.workspace }}/backend/bin/sharing-standalone
+        run: npm run test:transfer
       - name: 保存已验证的静态资源供二进制构建复用
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # 官方 v7
         with:

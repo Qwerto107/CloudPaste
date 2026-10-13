@@ -151,6 +151,44 @@ curl --fail-with-body -X PUT 'http://127.0.0.1:8081/api/fs/upload?path=/local' \
 
 挂载、目录密码和分片接口用于程序化访问及路径授权；这些接口不对应前端导航入口。
 
+## 临时设备互传
+
+管理员通过 `PUT /api/admin/settings/group/3` 保存保护设置：`transfer_rate_mb`（0–10240 MiB/s，0 为不限速）、`transfer_max_relays`（1–16）和 `transfer_max_file_mb`（1 至环境硬上限，MiB）。速率立即应用，并发限制用于新传输，文件大小用于新房间。GET 同组返回当前有效值；保存后重启仍保留。
+
+页面入口为 `/transfer`。此功能与持久分享、存储和查看次数无关，房间与传输状态仅保存在进程内存中，文件内容不保存。
+
+| 方法与路径 | 凭据与用途 |
+| --- | --- |
+| `POST /api/transfer/create` | API Key，必须同时具备文本与文件分享权限；管理员改用 `/api/admin/transfer/create` |
+| `POST /api/transfer/join` | 无登录凭据，通过配对码申请第二席 |
+| `GET /api/transfer/socket` | WebSocket，首条 JSON 消息提交临时成员票据 |
+| `GET /api/transfer/download/{id}?ticket=…` | 接收方一次性票据，返回附件流 |
+| `PUT /api/transfer/upload/{id}` | 发送方 `Authorization: Transfer …`，请求体为原文件流 |
+| `GET /api/transfer/download/{id}/tool?ticket=…` | 下载工具短期票据，支持 HEAD、单个 HTTP Range 和重试 |
+| `PUT /api/transfer/upload/{id}/{request}` | 独立分段上传票据，请求体为所需文件区间 |
+
+创建请求为 `{"name":"设备 A","relay_only":false}`，返回 `token`、`code`、`member`、`expires_at`、`max_file_size`。加入请求多一个 `code` 字段，返回第二席的临时票据。WebSocket 要求有效的 `Origin`，首条消息为 `{"type":"auth","token":"…"}`；长期 API Key 和管理员凭据不得放在 WebSocket URL 中。
+
+创建者收到 `joining` 后发送 `{"type":"confirm"}`，双方收到 `paired` 后方可交流。消息类型包括 `text`、`signal`（WebRTC 协商）、`offer`（`client_id/name/size`）、`accept`（`id/mode`，模式为 `relay`、`p2p` 或 `tool`）、`cancel`、`fail`（客户端传输异常）和 `leave`。服务端通过 `file/state/progress/error` 通知状态。直连接收方用 `progress/complete` 报告已写入字节数，服务端不为直连内容作完整性背书。
+
+服务端广播的 `text` 和 `file` 通知携带 `sent_at`（UTC RFC 3339 时间），表示服务端收到文字或文件发送请求的时间；双方收到同一时间值。客户端提交的时间不会被采用，图片完成接收时不改变其原始发送时间。
+
+直连客户端在 `signal.data.description` 的同级字段 `max_chunk_size` 声明应用可接收的分块上限，`receive_window` 声明待写盘数据窗口。双方支持时使用最高 256 KiB 分块；对方未声明分块上限时兼容旧页面的 64 KiB 上限，并始终遵守 SCTP 协商的消息上限。发送缓冲限制为 4 MiB，等待接收端写盘确认的数据不超过双方窗口中的较小值，最高 8 MiB；对方未声明窗口时兼容旧页面的 2 MiB 窗口。以上限制不随文件总大小增长，并非浏览器进程总内存上限。
+
+`signal.data.generation` 表示本次直连协商代次，初始为 0。双方收到直连任务取消或失败的终态后，关闭旧连接、递增代次并重新协商；迟到的旧代次 SDP 和 ICE 消息会被丢弃。未提供代次的旧页面按 0 处理。
+
+聊天图片在 `offer` 中额外携带 `image_type`，仅允许 `image/png` 或 `image/jpeg` 且大小为 1 字节至 4 MiB。`file` 通知原样携带该字段；网页在空闲时自动以中继接收，并在解码前校验图片格式和像素上限。图片内容走现有 HTTP 中继，不放进 WebSocket 消息。失败重发使用新的 `offer/client_id` 创建独立任务，沿用大小、文件数量、累计额度与接收确认规则，旧票据不可复用。
+
+中继接收方先 `accept`，得到 `download` 消息内的临时 URL。**实际 GET 开始后**发送方才收到 `start` 及独立上传票据；上传和下载票据不能互换，单次使用、绑定文件、房间结束即失效。HEAD、Range 和重新消费票据不提供文件；上传字节数必须与申报大小一致。中途失败会截断下载而不追加 JSON，请检查下载是否完整。
+
+下载工具接收使用 `accept` 的 `mode:"tool"`，收到 `download-tool`（`url/expires_at/max_connections`）后由用户交给下载工具，不提前自动 GET。HEAD 仅返回元数据；GET 支持 200 全文件、206 单个区间（含开放结尾与后缀）、416 不可满足区间，并提供稳定 ETag、Last-Modified 和 If-Range 校验。多段 multipart 请求不支持；并行分段使用多个独立 GET。
+
+每个实际下载请求向发送页面发送 `range-start`（`id/request_id/token/start/end`，end 不包含），页面对原 File 做 slice 后 PUT 到分段上传入口。票据只用于该次分段上传，不能互换或重复消费；`range-stop` 取消相应上传，发送端也可用 `range-failed`（`id/request_id`）结束失败分段。单段中止不终止任务，可在票据期限内重试。仅接收端的 `finish-download` 结束任务并撤销下载链接；取消、配对断开或权限撤销也使链接失效。
+
+下载工具链接最长 30 分钟有效，受房间有效期约束，闲置 10 分钟失效。每文件最多 4 个并发请求，并共享 `transfer_max_relays`，最多 256 次实际 GET，累计转发额度为 `max(1 MiB, 文件大小×4)`；HEAD 和非法 Range 不消耗 GET 额度。每请求停滞上限 1 分钟，上传、下载各使用 32 KiB 固定缓冲，服务器不缓存文件。进度按当前轮次合并已转发区间，单轮内重试不重复计数；完整下载后再次 GET 开启新一轮，`progress.round` 递增，双方清零显示进度和速率。HEAD 不开启新轮次，历史流量和请求额度不清零；上一轮 HTTP 请求的迟到退出不会影响新一轮进度。服务器无法确认下载工具最终落盘。
+
+单帧最大 16 KiB，单条文字最大 4096 字节。配对码猜测、连接数、房间数、文件并发、带宽和传输停滞均有限制，详见 [部署指南](deployment.md#设备互传与实时中继)。连接失效或不可用统一返回 `404 / TRANSFER_UNAVAILABLE`，超额返回 `429 / TRANSFER_BUSY`。
+
 ## 自定义分享链接
 
 `POST /api/paste` 的 JSON 或文件上传选项中的 `slug` 用于自定义链接末尾名称，例如 `my-note` 对应前端 `/paste/my-note`，文件则对应 `/file/my-note`。留空自动生成；只允许 1–100 个英文字母、数字、短横线和下划线。同类分享名称重复会返回错误，不覆盖原分享。
