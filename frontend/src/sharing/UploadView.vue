@@ -7,6 +7,7 @@ import { settings } from "./settings.js";
 import Icon from "./Icon.vue";
 import ShareNameField from "./ShareNameField.vue";
 import ExpirySelect from "./ExpirySelect.vue";
+import { shareText } from "./share-text.js";
 const route = useRoute();
 const files = ref([]);
 const storages = ref([]);
@@ -119,6 +120,7 @@ async function upload() {
         results.value.push({
           name: file.name,
           url: shareURL("file", record.slug),
+          password: record.password || "",
         });
       files.value = files.value.filter((item) => item !== entry);
     }
@@ -138,7 +140,11 @@ async function upload() {
         signal: controller.signal,
       });
       results.value = [
-        { name: record.filename, url: shareURL("file", record.slug) },
+        {
+          name: record.filename,
+          url: shareURL("file", record.slug),
+          password: record.password || "",
+        },
       ];
       uploaded.value = [];
       collection.value = false;
@@ -154,9 +160,17 @@ async function upload() {
 async function copy(value) {
   try {
     await navigator.clipboard.writeText(value);
+    return true;
   } catch {
     error.value = "复制失败，请手动复制链接";
+    return false;
   }
+}
+async function copyResult(item, kind) {
+  if (
+    await copy(kind === "text" ? shareText(item.url, item.password) : item.url)
+  )
+    item.copied = kind;
 }
 </script>
 <template>
@@ -329,10 +343,29 @@ async function copy(value) {
     <h2>分享链接</h2>
     <div v-for="item in results" :key="item.url" class="share-result">
       <strong>{{ item.name }}</strong>
-      <div class="copy-row">
-        <UiInput :value="item.url" readonly /><UiButton @click="copy(item.url)">
-          复制</UiButton
-        ><a :href="item.url" target="_blank" rel="noopener noreferrer">打开</a>
+      <UiInput
+        :value="shareText(item.url, item.password)"
+        type="textarea"
+        :rows="item.password ? 2 : 1"
+        :autosize="{ minRows: item.password ? 2 : 1, maxRows: 6 }"
+        readonly
+        aria-label="分享文字"
+      />
+      <div class="result-actions">
+        <UiButton type="button" @click="copyResult(item, 'link')">{{
+          item.copied === "link" ? "链接已复制" : "复制链接"
+        }}</UiButton>
+        <UiButton type="button" @click="copyResult(item, 'text')">{{
+          item.copied === "text" ? "分享文字已复制" : "复制分享文字"
+        }}</UiButton>
+        <UiButton
+          tag="a"
+          type="button"
+          :href="item.url"
+          target="_blank"
+          rel="noopener noreferrer"
+          >打开分享</UiButton
+        >
       </div>
     </div>
   </section>

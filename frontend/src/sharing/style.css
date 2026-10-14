@@ -466,10 +466,6 @@ textarea::placeholder {
   padding-top: 1.25rem;
   border-top: 1px solid var(--line);
 }
-.editor-meta {
-  text-align: right;
-  margin: 0.5rem 0 1.5rem;
-}
 .share-options {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -504,9 +500,13 @@ textarea::placeholder {
 .copy-row .n-date-picker {
   flex: 1;
 }
-.result a {
-  display: inline-block;
-  margin-top: 0.7rem;
+/* 创建结果的操作使用相同按钮，留出间距并允许窄屏自动换行。 */
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 0.8rem;
 }
 .tabs {
   display: flex;
@@ -749,6 +749,10 @@ progress {
 }
 .share-result {
   margin: 1rem 0;
+}
+.share-result > strong {
+  display: block;
+  margin-bottom: 0.6rem;
 }
 .plain-preview {
   white-space: pre-wrap;

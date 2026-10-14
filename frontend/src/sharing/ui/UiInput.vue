@@ -8,6 +8,7 @@ const props = defineProps({
   value: [String, Number],
   type: { type: String, default: "text" },
   disabled: Boolean,
+  autosize: [Boolean, Object],
   modelModifiers: { type: Object, default: () => ({}) },
 });
 const emit = defineEmits(["update:modelValue"]);
@@ -40,6 +41,7 @@ function update(value) {
     :maxlength="attrs.maxlength == null ? undefined : Number(attrs.maxlength)"
     :minlength="attrs.minlength == null ? undefined : Number(attrs.minlength)"
     :rows="attrs.rows == null ? undefined : Number(attrs.rows)"
+    :autosize="autosize"
     :input-props="nativeProps"
     :show-password-on="type === 'password' ? 'click' : undefined"
     @update:value="update"

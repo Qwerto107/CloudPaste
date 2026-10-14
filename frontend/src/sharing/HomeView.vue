@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import { request, shareURL } from "./api.js";
 import { hasPermission } from "./session.js";
 import { settings } from "./settings.js";
+import { shareText } from "./share-text.js";
 import ShareNameField from "./ShareNameField.vue";
 import ExpirySelect from "./ExpirySelect.vue";
 const MarkdownEditor = defineAsyncComponent(
@@ -20,6 +21,8 @@ const busy = ref(false);
 const error = ref("");
 const link = ref("");
 const copied = ref(false);
+const sharedPassword = ref("");
+const copiedText = ref(false);
 const allowed = computed(() => hasPermission(1));
 async function share() {
   if (busy.value || !allowed.value) return;
@@ -27,6 +30,7 @@ async function share() {
   error.value = "";
   link.value = "";
   copied.value = false;
+  copiedText.value = false;
   try {
     const expires_at =
       hours.value > 0
@@ -45,6 +49,8 @@ async function share() {
       },
     });
     link.value = shareURL("paste", record.slug);
+    // 结果绑定本次创建响应，修改表单不会改变已生成分享的密码。
+    sharedPassword.value = record.password || "";
   } catch (reason) {
     error.value = reason.message;
   } finally {
@@ -57,6 +63,16 @@ async function copy() {
     copied.value = true;
   } catch {
     error.value = "复制失败，请手动复制链接";
+  }
+}
+async function copyShareText() {
+  try {
+    await navigator.clipboard.writeText(
+      shareText(link.value, sharedPassword.value),
+    );
+    copiedText.value = true;
+  } catch {
+    error.value = "复制失败，请手动复制分享链接和密码";
   }
 }
 </script>
@@ -83,7 +99,6 @@ async function copy() {
           aria-label="分享标题"
         />
         <MarkdownEditor v-model="content" :disabled="busy || !allowed" />
-        <p class="editor-meta muted small">{{ content.length }} 个字符</p>
         <ShareNameField v-model="slug" id="text-share-name" :disabled="busy" />
         <div class="share-options">
           <div class="form-row share-main-fields">
@@ -120,13 +135,30 @@ async function copy() {
   </section>
   <section v-if="link" class="panel result">
     <h2>分享已创建</h2>
-    <div class="copy-row">
-      <UiInput :value="link" readonly aria-label="分享链接" /><UiButton
-        @click="copy"
+    <!-- 原生只读文本框可选择、复制整段文字，禁用剪贴板权限时也能使用。 -->
+    <UiInput
+      :value="shareText(link, sharedPassword)"
+      type="textarea"
+      :rows="sharedPassword ? 2 : 1"
+      :autosize="{ minRows: sharedPassword ? 2 : 1, maxRows: 6 }"
+      readonly
+      aria-label="分享文字"
+    />
+    <div class="result-actions">
+      <UiButton type="button" @click="copy">{{
+        copied ? "链接已复制" : "复制链接"
+      }}</UiButton>
+      <UiButton type="button" @click="copyShareText">{{
+        copiedText ? "分享文字已复制" : "复制分享文字"
+      }}</UiButton>
+      <UiButton
+        tag="a"
+        type="button"
+        :href="link"
+        target="_blank"
+        rel="noopener noreferrer"
+        >打开分享</UiButton
       >
-        {{ copied ? "已复制" : "复制链接" }}
-      </UiButton>
     </div>
-    <a :href="link" target="_blank" rel="noopener noreferrer">打开分享 →</a>
   </section>
 </template>
