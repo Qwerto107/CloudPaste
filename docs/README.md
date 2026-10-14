@@ -14,4 +14,4 @@ CloudPaste 是面向 Docker 和独立服务器的临时文本与文件分享站�
 | [发布流程](releasing.md) | 双架构构建、镜像标签和 Release 附件 |
 | [更新记录](changelog.md) | 版本改动 |
 
-文档中的 Docker 命令默认从仓库根目录运行。界面展示图片位于 `docs/assets/`；`product-showcase.png` 为产品效果图，其余为使用演示内容的实际截图。
+镜像部署的 Docker 命令在自行创建的运行目录执行，源码构建命令在仓库根目录执行。界面展示图片位于 `docs/assets/`；`product-showcase.png` 为产品效果图，其余为使用演示内容的实际截图。

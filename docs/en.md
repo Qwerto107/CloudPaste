@@ -59,40 +59,36 @@ Open `/transfer` to connect two devices. Relay downloads support the browser and
 
 ## Docker quick start
 
-Run from the repository root with Docker Compose available:
+The recommended **single-container deployment** includes both the web interface and API. With Docker and Compose installed, create a deployment directory and download the Compose file:
 
 ```sh
-cp backend/.env.example backend/.env
-mkdir -p files
+mkdir -p cloudpaste/data cloudpaste/files
+cd cloudpaste
+curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.yml -o docker-compose.yml
 ```
 
-Edit `backend/.env` with your own strong password and matching image versions:
+Create `.env` in the `cloudpaste` directory and set your own administrator password of at least 12 bytes:
 
 ```dotenv
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=replace-with-your-own-strong-password
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.7.0
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.7.0
-LOCAL_FILES_DIR=./files
+ADMIN_PASSWORD='replace-with-your-own-strong-password'
 ```
 
-On Linux, grant UID/GID `65532` access to the file directory. For a newly created dedicated directory, use `sudo chown 65532:65532 files`.
+On Linux, grant UID/GID `65532` access to both directories. For newly created dedicated directories, use `sudo chown 65532:65532 data files`.
 
 ```sh
-docker compose --env-file backend/.env pull
-docker compose --env-file backend/.env up -d --no-build
+docker compose up -d --pull always
 ```
 
-Open `http://127.0.0.1:8081/admin/login`, sign in and configure LOCAL storage with `/files` as its root, or add S3 storage. Create API Keys for other users, who sign in at `/login`.
+Open `http://127.0.0.1:8081/admin/login` and sign in with `admin` and your password. Configure LOCAL storage with `/files` as its root, or add S3 storage. Create API Keys for other users, who sign in at `/login`.
 
-For a **single container with both the frontend and backend**, add `GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.7.0` to `backend/.env` and run:
+For a **separate frontend and backend**, also save the alternative configuration as `docker-compose.yml`. If the single-container deployment is running, execute `docker compose down` before replacing its configuration:
 
 ```sh
-docker compose --env-file backend/.env -f docker-compose.standalone.yml pull
-docker compose --env-file backend/.env -f docker-compose.standalone.yml up -d --no-build
+curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.split.yml -o docker-compose.yml
+docker compose up -d --pull always
 ```
 
-The entry point remains `http://127.0.0.1:8081`. Both modes share the data volume; stop the original services before switching. See the [deployment guide](deployment.md) for public access, directory permissions, resource limits and upgrades. [Linux standalone binaries](binary.md) include the complete web interface in one executable; API-only binaries remain available.
+Both modes use prebuilt `0.7.0` images and the same entry point. Stop the active mode before switching to the other. Access is limited to the local machine by default. See the [deployment guide](deployment.md) for server access, switching modes and upgrades. [Linux standalone binaries](binary.md) include the complete web interface in one executable; API-only binaries remain available.
 
 ## Local assets, clear boundaries
 

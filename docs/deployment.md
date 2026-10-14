@@ -2,73 +2,178 @@
 
 [文档中心](README.md) · [使用指南](usage.md) · [二进制部署](binary.md)
 
-## Docker Compose
+## 单容器部署（推荐）
 
-需要 Docker 和 Compose。仓库根目录的 [docker-compose.yml](../docker-compose.yml) 包含静态前端和 Go 后端两个服务。
+一个容器提供完整界面和 API，适合大多数部署。安装 Docker 与 Compose 后，只需准备运行目录、Compose 文件和 `.env`。
+
+### 1. 创建运行目录并下载 Compose 文件
 
 ```sh
-cp backend/.env.example backend/.env
-mkdir -p files
+mkdir -p cloudpaste/data cloudpaste/files
+cd cloudpaste
+curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.yml -o docker-compose.yml
 ```
 
-编辑 `backend/.env`：
+### 2. 创建环境文件并启动
+
+在运行目录新建 `.env`，下面是完整的容器部署配置示例。替换 `ADMIN_PASSWORD` 为自己的 12–72 字节长随机密码，其余可先使用默认值；可选项留空即可。
 
 ```dotenv
+# 管理员：首次初始化使用，之后在管理后台修改账号和密码。
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=请替换为至少12字节的强密码
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.7.0
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.7.0
+ADMIN_PASSWORD='请替换为自己的长随机密码'
+
+# 文件目录：宿主机路径，容器内仍使用 /files。
 LOCAL_FILES_DIR=./files
-BIND_ADDRESS=127.0.0.1
-HTTP_PORT=8081
+LOCAL_FILES_READ_ONLY=false
+
+# 资源与普通文件上传，大小单位 MiB。
+GOMEMLIMIT=80MiB
+MAX_DOWNLOADS=8
+MAX_UPLOADS=2
+MAX_UPLOAD_SIZE_MB=100
+MAX_STAGED_SIZE_MB=1024
+
+# 设备互传：授权用户创建，访客用配对码加入。
+TRANSFER_ENABLED=true
+TRANSFER_MAX_FILE_MB=10240
+TRANSFER_RATE_MB=64
+# 可选 STUN 地址，格式 stun:主机:端口。
+TRANSFER_STUN=
+
+# 可信反向代理：直接访问时留空；只填实际可信代理 IP、CIDR 或主机名。
+# 多容器后端由 Compose 固定信任 frontend，此项用于单容器。
+TRUSTED_PROXIES=
+
+# 同源部署留空；前后端异源时填写页面 Origin，多个值用逗号分隔。
+ALLOWED_ORIGINS=
+
+# 留空时自动生成并保存 ./data/encryption.key；已有数据不要随意换密钥。
+# 自定义值必须是 32 字节随机数据的 Base64 编码。
+ENCRYPTION_SECRET=
 ```
 
-Linux 上，新建的专用文件目录可使用 `sudo chown 65532:65532 files` 授权。已有目录应按实际所有权设置权限或 ACL，确保 UID/GID `65532` 可进入、读取和写入。
+Linux 上，新建的专用目录执行 `sudo chown 65532:65532 data files`。已有目录按原所有权设置权限或 ACL，确保容器用户 UID/GID `65532` 能进入、读写；Docker Desktop 的目录授权方式以宿主机为准。然后拉取镜像并启动：
 
 ```sh
-docker compose --env-file backend/.env pull
-docker compose --env-file backend/.env up -d --no-build
-docker compose --env-file backend/.env ps
+docker compose up -d --pull always
 ```
 
-管理员访问 `http://127.0.0.1:8081/admin/login`。添加 LOCAL 存储时，根目录填容器内路径 `/files`；S3 填写 Bucket、Region、Endpoint 和凭据。
+此命令使用 [docker-compose.yml](../docker-compose.yml)，默认拉取 `ghcr.io/qwerto107/cloudpaste-standalone:0.7.0`。镜像已包含前后端，无需安装 Go、Node.js 或本地打包。
 
-从源码构建时，注释两个 `GO_*_IMAGE` 变量，然后执行 `docker compose --env-file backend/.env up -d --build`。
+### 3. 登录并添加存储
 
-## 合并运行：一个容器提供前后端
+打开 `http://127.0.0.1:8081/admin/login`，使用 `admin` 和刚填写的密码登录。在「存储管理」添加 LOCAL 存储，根目录填 **`/files`**，随后即可上传文件；也可添加 S3 存储。文本分享和设备互传不依赖文件存储。
 
-[docker-compose.standalone.yml](../docker-compose.standalone.yml) 使用同一个 Go 进程提供内嵌前端与 API，不依赖 Nginx。在上面的 `backend/.env` 中增加：
-
-```dotenv
-GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.7.0
-```
-
-启动命令：
+默认入口仅本机可访问。远程服务器可先使用 SSH 转发：
 
 ```sh
-docker compose --env-file backend/.env -f docker-compose.standalone.yml pull
-docker compose --env-file backend/.env -f docker-compose.standalone.yml up -d --no-build
+ssh -L 8081:127.0.0.1:8081 用户名@服务器地址
 ```
 
-页面入口仍为 `http://127.0.0.1:8081/admin/login`，容器内监听 `8787`。从源码构建时，注释 `GO_STANDALONE_IMAGE` 后执行 `docker compose --env-file backend/.env -f docker-compose.standalone.yml up -d --build`。
+保持 SSH 连接，再从自己电脑打开上述地址。正式对外服务请配置 [HTTPS 反向代理](#https-与管理员入口)。
 
-两种模式使用相同项目名 `cloudpaste-go`、`go-data` 数据卷和 `/files` 挂载。已有分离部署切换前，先执行 `docker compose --env-file backend/.env down`；反向切换时，先执行 `docker compose --env-file backend/.env -f docker-compose.standalone.yml down`。保留原环境文件和项目名，不加 `-v`，不要让两种模式同时访问同一数据库。
+## 多容器部署（前后端分离）
 
-合并版默认不信任转发头；如果前面还有 HTTPS 代理，使用 `TRUSTED_PROXIES` 配置 Go 进程实际看到的可信代理地址。配置方法见下文。合并版无需配置 Nginx 的 `set_real_ip_from`。
+需要单独管理静态前端和 Go 后端时，使用 [多容器配置模板](../docker-compose.split.yml)。同样创建 `cloudpaste/data`、`cloudpaste/files`，进入运行目录并新建 `.env`，下载后仍保存为 **`docker-compose.yml`**，启动命令与单容器相同。已有运行中的部署请按下文的切换步骤操作。
+
+```sh
+curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.split.yml -o docker-compose.yml
+docker compose up -d --pull always
+```
+
+默认拉取 `cloudpaste-frontend:0.7.0`、`cloudpaste-backend:0.7.0` 两个 GHCR 镜像。前端 Nginx 提供页面并转发 API，浏览器入口仍为 `http://127.0.0.1:8081`。
+
+## 切换部署方式
+
+两种模式使用相同项目名 **`cloudpaste`**，共用运行目录下的 **`./data`** 和文件目录。继续在同一运行目录操作，保留 `.env`，**先停止当前模式，再下载另一种配置替换 `docker-compose.yml` 并启动**。如果修改过镜像版本、端口或挂载路径，替换后恢复自己的设置再启动。
+
+多容器 → 单容器：
+
+```sh
+docker compose down
+curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d --pull always
+```
+
+单容器 → 多容器：
+
+```sh
+docker compose down
+curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.split.yml -o docker-compose.yml
+docker compose up -d --pull always
+```
+
+`down` 停止并移除容器，`./data` 和文件目录仍保留。不要让两种模式同时访问同一数据库。
+
+## 配置在哪里改
+
+**应用参数改 `.env`，镜像和端口改 Compose。** Compose 自动读取同目录 `.env` 以解析文件挂载路径、校验密码及 GC 目标；服务的 `env_file: .env` 将应用参数传给容器。`environment` 仅保留这些启动约束、容器内 `/data` 与 `8787`，以及分离模式的可信内部代理。参考 [Docker 环境文件说明](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/)。
+
+| 要调整什么 | 修改位置 | 示例 |
+| --- | --- | --- |
+| 管理员账号 | `.env` | `ADMIN_USERNAME`、`ADMIN_PASSWORD`（首次初始化使用；之后在后台修改） |
+| 单容器镜像版本 | `docker-compose.yml` 的 `image` | `ghcr.io/qwerto107/cloudpaste-standalone:版本号` |
+| 多容器镜像版本 | 运行目录的 `docker-compose.yml` 中两处 `image` | 前后端填写相同版本 |
+| 监听地址和宿主机端口 | 对应 Compose 的 `ports` | 单容器 `127.0.0.1:8081:8787`，多容器前端 `127.0.0.1:8081:8080` |
+| 文件目录 | `.env` | `LOCAL_FILES_DIR=./files`，后台仍填 `/files` |
+| 上传与互传限制 | `.env` | `MAX_*`、`TRANSFER_*`；可在后台调整的项目见下文 |
+
+修改后重新执行对应模式的启动命令；环境变量仅在创建或重建容器时更新，`restart` 不会加载新配置。密码含 `$` 或 `#` 时可用单引号包住值，例如 `ADMIN_PASSWORD='你的长随机密码'`。局域网访问时，把端口映射中的 `127.0.0.1` 改为服务器的局域网 IP；公网使用 HTTPS。
+
+上面的完整示例也保存在 [环境配置示例](../backend/.env.example)。README 的快速部署只列必填密码；完整配置的各项作用如下。
+
+### `.env` 参数说明
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `ADMIN_USERNAME` | `admin` | 首次创建管理员的用户名；已有账号不随此值更新 |
+| `ADMIN_PASSWORD` | 无，必填 | 首次创建管理员的密码，12–72 字节；已有密码在后台修改，Compose 仍要求此项非空 |
+| `LOCAL_FILES_DIR` | `./files` | 宿主机文件目录；启动前创建，Linux 上授权 UID/GID `65532` 读写 |
+| `LOCAL_FILES_READ_ONLY` | `false` | 设为 `true` 只读挂载文件目录；后台相应存储也应设置只读，不影响 `./data` |
+| `GOMEMLIMIT` | `80MiB` | Go GC 软目标；容器内存上限仍由 Compose 的 `mem_limit` 控制 |
+| `MAX_DOWNLOADS` | `8` | 普通文件下载总并发，范围 1–128；设备互传的中继并发独立设置 |
+| `MAX_UPLOADS` | `2` | 普通文件上传并发，范围 1–8 |
+| `MAX_UPLOAD_SIZE_MB` | `100` | 单文件上传硬上限，范围 1–10240 MiB；后台上传大小不能高于此值 |
+| `MAX_STAGED_SIZE_MB` | `1024` | 上传暂存总额度，范围 1–102400 MiB，不能小于单文件上传上限 |
+| `TRANSFER_ENABLED` | `true` | 设为 `false` 关闭设备互传 |
+| `TRANSFER_MAX_FILE_MB` | `10240` | 互传文件硬上限，范围 1–10240 MiB；后台只能设置不高于此值的上限 |
+| `TRANSFER_RATE_MB` | `64` | 初始中继总速率，范围 0–10240 MiB/s，0 表示不限速；后台保存的值优先 |
+| `TRANSFER_STUN` | 空 | 可选 `stun:主机:端口`，用于跨网络直连；留空不联系第三方 STUN |
+| `TRUSTED_PROXIES` | 空 | 单容器的可信代理 IP、CIDR 或主机名，多值逗号分隔；多容器由 Compose 固定为 `frontend` |
+| `ALLOWED_ORIGINS` | 空 | 额外允许的浏览器页面 Origin，例如 `https://share.example.com`；多个值逗号分隔，同源部署留空 |
+| `ENCRYPTION_SECRET` | 空 | 可选加密密钥，必须是 32 字节随机值的 Base64；留空生成 `./data/encryption.key`，备份时连同数据库保存 |
+
+`DATA_DIR` 和 `PORT` 也是后端支持的变量，但容器配置固定为 `/data` 和 `8787`，在 `.env` 中填写其他值会被 Compose 覆盖。宿主机数据路径修改 `volumes`，对外访问端口修改 `ports`。容器项目名、镜像版本、内存硬限制和日志配置也直接在 `docker-compose.yml` 修改。
+
+修改 `.env` 后重新执行 `docker compose up -d --pull always`。后台已保存的业务配置不会全部被环境文件重置：上传硬上限限制后台值，互传总速率优先使用后台保存值，中继并发在「系统设置 → 设备互传」配置。修改管理员环境变量不会覆盖已有账号。
+
+加密密钥用于读取存储凭据和 API Key 等已加密数据。已有部署应继续使用原密钥；切换为不同的 `ENCRYPTION_SECRET` 或丢失 `encryption.key` 会导致原加密数据无法正常读取。
+
+### 已有部署迁移
+
+旧部署使用 `backend/.env`、`cloudpaste-go` 项目名及命名数据卷，旧 `docker-compose.yml` 为多容器配置。迁移前保留旧文件，先用**旧 Compose 文件和原项目名**停止旧容器，完整备份数据；将原环境文件复制到运行目录的 `.env`，把旧卷中数据库、WAL、`encryption.key` 和暂存文件一起迁移到 `./data`，授予 UID/GID `65532` 读写权限，再使用新版 Compose 启动。文件存储继续使用原路径。**只改变项目名和挂载配置不会自动搬迁数据**，确认新服务正常前保留旧卷。
+
+旧环境文件中的 `GO_*_IMAGE`、`BIND_ADDRESS`、`HTTP_PORT` 不再控制新版 Compose；把原镜像版本和端口写到对应的 `image`、`ports` 中。
+
+<details>
+<summary><strong>进阶配置：端口、目录、资源限制、设备互传与反向代理</strong></summary>
+
+单容器默认不信任转发头；如果前面还有 HTTPS 代理，使用 `TRUSTED_PROXIES` 配置 Go 进程实际看到的可信代理地址。单容器无需配置前端 Nginx 的 `set_real_ip_from`。
 
 ## 端口与目录
 
 | 项目 | 默认值 | 说明 |
 | --- | --- | --- |
-| 前端宿主机入口 | `127.0.0.1:8081` | 由 `BIND_ADDRESS`、`HTTP_PORT` 配置 |
+| 宿主机入口 | `127.0.0.1:8081` | 在对应 Compose 的 `ports` 中修改 |
 | 前端容器端口 | `8080` | Nginx 提供页面和同源 API 转发 |
 | 后端容器端口 | `8787` | Compose 不单独公开宿主机端口 |
-| 合并版容器端口 | `8787` | 同时提供页面和 API，映射到宿主机 `HTTP_PORT` |
-| 数据目录 | `/data` | 挂载名为 `go-data` 的数据卷 |
+| 合并版容器端口 | `8787` | 同时提供页面和 API，映射到宿主机 `8081` |
+| 数据目录 | `/data` | 直接挂载运行目录下的 `./data` |
 | 本地文件目录 | `/files` | 来自 `LOCAL_FILES_DIR`，宿主机目录必须存在 |
-| Compose 项目名 | `cloudpaste-go` | 更改项目名可能创建另一套数据卷 |
+| Compose 项目名 | `cloudpaste` | 两种部署模式使用相同名称 |
 
-可以把 `go-data:/data` 改为 `./data:/data` 直接绑定目录。此时应先创建 `data` 并授予 UID/GID `65532` 读写权限；现有数据库、WAL 及加密密钥也需可读写。出现 `permission denied` 时优先核对挂载路径与所有权，不要用全局可写权限替代排查。
+`data` 和文件目录必须在启动前创建。Linux 上需授予 UID/GID `65532` 读写权限；现有数据库、WAL 及加密密钥也需可读写。出现 `permission denied` 时优先核对挂载路径与所有权，不要用全局可写权限替代排查。
 
 `LOCAL_FILES_READ_ONLY=true` 会将文件目录只读挂载，管理界面也应将对应存储标记为只读。
 
@@ -141,7 +246,7 @@ client_max_body_size 10g;
 
 密码尝试按真实来源分别限流，同时保留访客/管理入口隔离和全站总额度。后端默认忽略所有转发头。二进制部署可设置 `TRUSTED_PROXIES`，填写逗号分隔的明确代理 IP、CIDR 或可信 DNS 管理的代理主机名；例如本机代理可使用 `127.0.0.1,::1`。不要填写包含普通客户端的宽泛网段，后端拒绝 `/0` 和 `*`。解析主机名最多等待一秒，地址缓存 30 秒；DNS 失败时不继续使用已过期的信任地址。
 
-默认 Compose 只信任内部服务名 `frontend`，通过 Docker DNS 识别前端容器，无需固定 Docker 子网。前端 Nginx 用自己的 `$remote_addr` **覆盖** `X-Forwarded-For`，客户端自行发送该头不能伪造限流身份。后端仅接受可信 TCP 对端提供的转发链，并从右向左取首个不受信的地址。容器网络与配置中的 DNS 服务均属于信任边界，不应接入不受信任的容器。
+多容器 Compose 只信任内部服务名 `frontend`，通过 Docker DNS 识别前端容器，无需固定 Docker 子网。前端 Nginx 用自己的 `$remote_addr` **覆盖** `X-Forwarded-For`，客户端自行发送该头不能伪造限流身份。后端仅接受可信 TCP 对端提供的转发链，并从右向左取首个不受信的地址。容器网络与配置中的 DNS 服务均属于信任边界，不应接入不受信任的容器。
 
 如果前端前面还有宿主机 HTTPS 代理、负载均衡器或 CDN，需要在**每一层**恢复并校验来源，否则这一层后面的访客仍会共享同一个限流地址：
 
@@ -160,24 +265,28 @@ real_ip_recursive on;
 
 部署后用两个不同来源验证：一个来源达到登录尝试上限时，另一个来源应仍可登录；同时验证不受信客户端自行填写转发头不能更换身份。不要通过直接信任用户的转发头解决共享限流问题。
 
-## 数据与升级
+</details>
 
-`/data` 包含 `cloudpaste-go.db`、SQLite WAL 文件、`encryption.key` 和上传暂存数据。备份前停止写入，保存完整数据目录与需要保留的文件存储；数据库和加密密钥应一起保存。
+## 升级与备份
 
-分离版升级时将两个镜像变量改为相同版本，再执行：
+运行目录的 `./data` 包含 `cloudpaste-go.db`、SQLite WAL 文件、`encryption.key` 和上传暂存数据，容器内对应 `/data`。备份前停止写入，保存完整 `./data` 与需要保留的文件存储；数据库和加密密钥应一起保存。
+
+升级前先备份。修改运行目录 `docker-compose.yml` 的镜像标签：单容器修改一处 `image`，多容器修改前后端两处并使用相同版本。两种方式都执行：
 
 ```sh
-docker compose --env-file backend/.env pull
-docker compose --env-file backend/.env up -d --no-build
+docker compose up -d --pull always
 ```
 
-合并版升级只需修改 `GO_STANDALONE_IMAGE` 的版本，并在上述两条命令中添加 `-f docker-compose.standalone.yml`。
-
-继续使用同一项目名、数据卷及文件路径。升级不需要重新初始化数据库；`docker compose down -v` 会删除命名数据卷。分享过期或删除记录只撤销访问，不会清除原文件。
+继续使用同一运行目录和数据、文件路径。升级不需要重新初始化数据库；停止或删除容器不会删除宿主机的 `./data`。分享过期或删除记录只撤销访问，不会清除原文件。更新镜像标签时无需重新下载 Compose，以免覆盖自定义端口或挂载路径。
 
 ## 常见问题
 
+- **查看运行状态或日志**：两种方式都执行 `docker compose ps` 或 `docker compose logs --tail=100`。
+- **服务器启动了，但自己的电脑打不开 127.0.0.1**：该地址只指向当前电脑。先用上面的 SSH 转发，或配置域名与 HTTPS 反向代理。
+- **配置改了没生效**：重新执行 `up -d`，不要只执行 `restart`。自定义环境文件时，同时修改 Compose 中的 `env_file` 路径及命令中的 `--env-file` 路径。
 - **登录报 CORS**：确认浏览器的 API 地址与页面同源。不要混用 `localhost` 和 `127.0.0.1`；开发配置见 [开发指南](development.md)。
 - **后端日志已启动但无法连接宿主机 8787**：默认没有公开后端端口，通过前端入口访问 `/api/health`。
 - **文件无法上传**：核对存储公开标记、API Key 权限、存储 ACL、路径范围、目录写权限与上传额度。
-- **界面没有更新**：确认两个镜像版本一致并已重新创建容器，然后刷新浏览器。
+- **界面没有更新**：确认已拉取目标版本并重新创建容器，然后刷新浏览器；多容器还需确认前后端镜像版本一致。
+
+需要修改代码并构建镜像时，见 [开发指南](development.md#从源码构建-docker-镜像)。

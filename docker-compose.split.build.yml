@@ -1,0 +1,13 @@
+# 仅用于开发和 CI；与多容器部署配置一起使用，不影响普通镜像部署。
+services:
+  backend:
+    image: cloudpaste-backend:dev
+    build:
+      context: ./backend
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+  frontend:
+    image: cloudpaste-frontend:dev
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile

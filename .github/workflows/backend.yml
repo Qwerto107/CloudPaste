@@ -15,8 +15,10 @@ on:
       - docker/frontend/**
       - docker/standalone/**
       - scripts/**
+      - docker-compose.split.yml
       - docker-compose.yml
-      - docker-compose.standalone.yml
+      - docker-compose.split.build.yml
+      - docker-compose.build.yml
       - .dockerignore
       - .gitattributes
       - .github/workflows/backend.yml
@@ -32,8 +34,10 @@ on:
       - docker/frontend/**
       - docker/standalone/**
       - scripts/**
+      - docker-compose.split.yml
       - docker-compose.yml
-      - docker-compose.standalone.yml
+      - docker-compose.split.build.yml
+      - docker-compose.build.yml
       - .dockerignore
       - .gitattributes
       - .github/workflows/backend.yml
@@ -197,35 +201,40 @@ jobs:
       matrix:
         include:
           - mode: split
-            compose: docker-compose.yml
+            compose: docker-compose.split.yml
+            build_compose: docker-compose.split.build.yml
           - mode: standalone
-            compose: docker-compose.standalone.yml
+            compose: docker-compose.yml
+            build_compose: docker-compose.build.yml
     env:
-      # 仅用于每次新建的 CI 数据卷，不对应真实部署凭证。
+      # 仅用于每次新建的 CI 数据目录，不对应真实部署凭证。
       ADMIN_PASSWORD: CI-only-password-12345
       LOCAL_FILES_DIR: ./.go-smoke-files
-      COMPOSE_FILE: ${{ matrix.compose }}
+      # CI 加载构建配置，普通部署直接使用发布镜像。
+      COMPOSE_FILE: ${{ matrix.compose }}:${{ matrix.build_compose }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # 官方 v6
         with:
           persist-credentials: false
       - name: 准备可读写测试目录
         run: |
-          mkdir -p .go-smoke-files
+          mkdir -p data .go-smoke-files
           printf '0123456789' > .go-smoke-files/demo.txt
-          sudo chown -R 65532:65532 .go-smoke-files
+          sudo chown -R 65532:65532 data .go-smoke-files
+          # 使用示例参数与独立测试密码，不读取真实部署配置。
+          cp backend/.env.example .env
       - name: 检查 Compose 配置并启动镜像
         run: |
           docker compose config --quiet
-          docker compose up -d --build --wait --wait-timeout 120
+          docker compose up -d --build --pull never --wait --wait-timeout 120
       - name: 检查前后端与核心安全约束
         run: python3 backend/scripts/docker_smoke.py
       - name: 输出失败日志
         if: failure()
         run: docker compose logs --tail=100
-      - name: 清理本次 CI 容器与临时数据卷
+      - name: 清理本次 CI 容器
         if: always()
-        run: docker compose down -v
+        run: docker compose down
 
   images:
     name: 发布 ${{ matrix.component }} 双架构镜像

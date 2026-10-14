@@ -1,0 +1,61 @@
+name: cloudpaste
+
+services:
+  backend:
+    image: ghcr.io/qwerto107/cloudpaste-backend:0.7.0
+    # 应用参数统一从文件读取，下面仅覆盖容器路径、代理与启动约束。
+    env_file: .env
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 中设置至少12字节的管理员密码}
+      DATA_DIR: /data
+      PORT: 8787
+      # 仅信任内部 DNS 对应的前端服务，不依赖固定 Docker 子网。
+      TRUSTED_PROXIES: frontend
+      GOMEMLIMIT: ${GOMEMLIMIT:-80MiB}
+    volumes:
+      # 数据直接保存到运行目录，切换部署模式时继续使用相同路径。
+      - type: bind
+        source: ./data
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${LOCAL_FILES_DIR:-./files}
+        target: /files
+        read_only: ${LOCAL_FILES_READ_ONLY:-false}
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    pids_limit: 128
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+
+  frontend:
+    image: ghcr.io/qwerto107/cloudpaste-frontend:0.7.0
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    pids_limit: 64
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"

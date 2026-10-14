@@ -12,8 +12,8 @@ docker/standalone/        前后端合并镜像
 scripts/prepare-webui.mjs  将前端构建产物准备到 Go 嵌入目录
 docs/                     产品、API、部署、开发文档及截图
 .github/workflows/        检查与发布流水线
-docker-compose.yml        默认部署
-docker-compose.standalone.yml 合并运行部署
+docker-compose.yml        单容器镜像部署（推荐）
+docker-compose.split.yml  前后端分离镜像部署
 ```
 
 使用 Go 1.27.2 与 npm 构建工具链；具体构建环境和依赖版本以工作流及锁文件为准。SQLite 使用纯 Go 实现，无需 C 编译器。
@@ -67,6 +67,24 @@ go build -tags with_frontend -trimpath -ldflags='-s -w' -o bin/cloudpaste ./cmd/
 Windows 可将输出路径改为 `bin/cloudpaste.exe`。设置管理员密码后运行产物，直接访问 `http://127.0.0.1:8787`。不传 `with_frontend` 时仍构建仅 API 的后端。
 
 准备脚本只复制已构建的 `frontend/dist`，输出到被 Git 忽略的 `backend/internal/webui/dist`；构建合并版前必须重新构建并准备前端，避免嵌入旧资源。缺少 `dist/index.html` 时，带标签的 Go 构建会失败。二进制通过嵌入文件系统提供页面，不会读取工作目录中的其他文件。
+
+## 从源码构建 Docker 镜像
+
+普通部署只需下载 Compose 文件并使用发布好的镜像，见 [部署指南](deployment.md)。以下源码构建步骤需先下载仓库，在仓库根目录准备 `.env`、`data` 和 `files` 目录，再选择一种模式；Linux 上需确保 UID/GID `65532` 能读写这两个目录。切换模式前停止原服务。完整环境配置示例为 [backend/.env.example](../backend/.env.example)，可复制为根目录的 `.env` 后填写密码。
+
+单容器：
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build --pull never
+```
+
+前后端分离：
+
+```sh
+docker compose -f docker-compose.split.yml -f docker-compose.split.build.yml up -d --build --pull never
+```
+
+构建配置只用于开发和 CI，将镜像标签覆盖为本地 `:dev`，不会覆盖发布镜像。`--pull never` 使用本机构建的镜像；上面的命令也适用于 PowerShell。
 
 ## 检查
 

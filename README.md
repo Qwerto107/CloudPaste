@@ -67,42 +67,38 @@
 
 ## 快速部署
 
-准备 Docker Compose。在仓库根目录执行：
+推荐使用**单容器镜像**，一个容器提供界面和 API。安装 Docker 与 Compose 后，创建运行目录并下载 Compose 文件即可：
 
 ```sh
-cp backend/.env.example backend/.env
-mkdir -p files
+mkdir -p cloudpaste/data cloudpaste/files
+cd cloudpaste
+curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.yml -o docker-compose.yml
 ```
 
-编辑 `backend/.env`，设置自己的强密码和前后端镜像：
+在 `cloudpaste` 目录新建 `.env`，填写自己的管理员密码（至少 12 字节）：
 
 ```dotenv
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=请替换为至少12字节的强密码
-GO_BACKEND_IMAGE=ghcr.io/qwerto107/cloudpaste-backend:0.7.0
-GO_FRONTEND_IMAGE=ghcr.io/qwerto107/cloudpaste-frontend:0.7.0
-LOCAL_FILES_DIR=./files
+ADMIN_PASSWORD='请替换为自己的长随机密码'
 ```
 
-Linux 上需确保 UID/GID `65532` 能读写文件目录；新建的专用目录可执行 `sudo chown 65532:65532 files`。然后启动：
+Linux 上，新建的专用目录执行 `sudo chown 65532:65532 data files`。然后拉取镜像并启动：
 
 ```sh
-docker compose --env-file backend/.env pull
-docker compose --env-file backend/.env up -d --no-build
+docker compose up -d --pull always
 ```
 
-1. 打开 `http://127.0.0.1:8081/admin/login`，使用配置的管理员账号登录。
+1. 打开 `http://127.0.0.1:8081/admin/login`，使用 `admin` 和刚设置的密码登录。
 2. 添加本地存储（根目录填 `/files`）或 S3 存储。
 3. 创建文本或上传文件，生成分享链接。需要多人使用时，创建 API Key 并按需授权。
 
-也可用 **一个容器运行前后端**。在 `backend/.env` 增加 `GO_STANDALONE_IMAGE=ghcr.io/qwerto107/cloudpaste-standalone:0.7.0`，使用以下命令启动（入口仍为 `http://127.0.0.1:8081`）：
+需要**前后端分离的多容器部署**时，将对应配置也保存为 `docker-compose.yml`。如果单容器已在运行，先执行 `docker compose down`，再替换配置：
 
 ```sh
-docker compose --env-file backend/.env -f docker-compose.standalone.yml pull
-docker compose --env-file backend/.env -f docker-compose.standalone.yml up -d --no-build
+curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.split.yml -o docker-compose.yml
+docker compose up -d --pull always
 ```
 
-两种方式共用数据卷；切换前先停止原服务。公网部署、目录权限、资源限制与升级步骤见 [部署指南](docs/deployment.md)。不使用 Docker 时，可下载内置完整界面的 [Linux 单文件程序](docs/binary.md)。
+两种方式都使用现成的 `0.7.0` 镜像，入口相同。已有运行中的容器需先停止当前模式，再切换另一种。默认仅本机可访问；服务器部署、模式切换与升级见 [部署指南](docs/deployment.md)。不使用 Docker 时，可下载内置完整界面的 [Linux 单文件程序](docs/binary.md)。
 
 ## 轻量，也有边界
 

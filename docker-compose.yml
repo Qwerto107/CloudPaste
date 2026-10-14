@@ -1,31 +1,24 @@
-name: cloudpaste-go
+# 与多容器部署共用 ./data；切换模式前先停止原服务，不要同时运行两种模式。
+name: cloudpaste
 
 services:
-  backend:
-    build:
-      context: ./backend
-      args:
-        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
-    image: ${GO_BACKEND_IMAGE:-cloudpaste-backend:local}
+  standalone:
+    image: ghcr.io/qwerto107/cloudpaste-standalone:0.7.0
+    # 应用参数统一从文件读取，下面仅覆盖容器路径与必需的启动约束。
+    env_file: .env
+    ports:
+      - "127.0.0.1:8081:8787"
     environment:
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 backend/.env 中设置至少12字节的管理员密码}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 中设置至少12字节的管理员密码}
       DATA_DIR: /data
       PORT: 8787
-      MAX_DOWNLOADS: ${MAX_DOWNLOADS:-8}
-      MAX_UPLOADS: ${MAX_UPLOADS:-2}
-      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-100}
-      MAX_STAGED_SIZE_MB: ${MAX_STAGED_SIZE_MB:-1024}
-      TRANSFER_ENABLED: ${TRANSFER_ENABLED:-true}
-      TRANSFER_MAX_FILE_MB: ${TRANSFER_MAX_FILE_MB:-10240}
-      TRANSFER_RATE_MB: ${TRANSFER_RATE_MB:-64}
-      TRANSFER_STUN: ${TRANSFER_STUN:-}
-      # 仅信任内部 DNS 对应的前端服务，不依赖固定 Docker 子网。
-      TRUSTED_PROXIES: frontend
       GOMEMLIMIT: ${GOMEMLIMIT:-80MiB}
     volumes:
-      # 保留既有 Go 项目名和数据卷名，升级目录结构时继续使用原数据。
-      - go-data:/data
+      - type: bind
+        source: ./data
+        target: /data
+        bind:
+          create_host_path: false
       - type: bind
         source: ${LOCAL_FILES_DIR:-./files}
         target: /files
@@ -45,30 +38,3 @@ services:
       options:
         max-size: 5m
         max-file: "2"
-
-  frontend:
-    build:
-      context: .
-      dockerfile: docker/frontend/Dockerfile
-    image: ${GO_FRONTEND_IMAGE:-cloudpaste-frontend:local}
-    ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-8081}:8080"
-    depends_on:
-      backend:
-        condition: service_healthy
-    read_only: true
-    tmpfs:
-      - /tmp:size=16m,mode=1777
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    mem_limit: 64m
-    pids_limit: 64
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: 5m
-        max-file: "2"
-
-volumes:
-  go-data:
