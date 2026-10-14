@@ -11,8 +11,9 @@ import {
 import { useRoute, useRouter } from "vue-router";
 import { request, shareURL } from "./api.js";
 import { session, clearSession } from "./session.js";
-import { useConfirmation } from "./ui/confirm.js";
+import { useConfirmation, useFileDeletionConfirmation } from "./ui/confirm.js";
 const confirmAction = useConfirmation();
+const confirmFileDeletion = useFileDeletionConfirmation();
 const MarkdownPreview = defineAsyncComponent(
   () => import("./MarkdownPreview.vue"),
 );
@@ -280,19 +281,23 @@ async function save() {
 }
 
 async function remove(item) {
-  if (
-    !(await confirmAction(
-      `确定删除“${item.title || item.filename || item.name || item.slug}”？${panel.value === "files" ? "删除分享记录不会删除存储中的原文件。" : ""}`,
-    ))
-  )
-    return;
+  const name = item.title || item.filename || item.name || item.slug;
+  // 文件删除明确选择是否删除原件；关闭确认框不会执行任何操作。
+  const deleteMode =
+    panel.value === "files"
+      ? await confirmFileDeletion(name)
+      : await confirmAction(`确定删除“${name}”？`);
+  if (!deleteMode) return;
   busy.value = true;
   error.value = "";
   try {
     if (panel.value === "texts" || panel.value === "files")
       await request(`${endpoint.value}/batch-delete`, {
         method: "DELETE",
-        body: { ids: [item.id] },
+        body: {
+          ids: [item.id],
+          ...(panel.value === "files" ? { delete_mode: deleteMode } : {}),
+        },
       });
     else
       await request(

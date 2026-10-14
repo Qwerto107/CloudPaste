@@ -411,28 +411,24 @@ func (a *App) deleteShares(w http.ResponseWriter, r *http.Request) error {
 	if len(body.IDs) == 0 || len(body.IDs) > 200 {
 		return badRequest("一次删除 1-200 条记录")
 	}
-	// 第一版存储只读，明确拒绝“同时删除文件”，防止界面误报文件已经删除。
-	if body.DeleteMode != "" && body.DeleteMode != "record_only" {
-		return unsupported()
+	if body.DeleteMode != "" && body.DeleteMode != "record_only" && body.DeleteMode != "both" {
+		return badRequest("delete_mode 必须为 both 或 record_only")
 	}
-	a.mutationMu.Lock()
-	defer a.mutationMu.Unlock()
+	deleteFiles := body.DeleteMode != "record_only"
 	count := 0
 	for _, id := range body.IDs {
-		r.SetPathValue("id", id)
-		s, err := a.ownedShare(r)
+		deleted, err := a.deleteShare(r, id, deleteFiles)
 		if err != nil {
-			var api *apiError
-			if errors.As(err, &api) && api.Status == 404 {
-				continue
-			}
 			return err
 		}
-		if err = a.deleteResource(r.Context(), "shares", s.ID); err != nil {
-			return err
+		if deleted {
+			count++
 		}
-		count++
 	}
-	a.write(w, 200, map[string]int{"success": count, "deleted": count}, "分享记录已删除，原文件保留")
+	message := "分享记录及原文件已删除"
+	if !deleteFiles {
+		message = "分享记录已删除，原文件保留"
+	}
+	a.write(w, 200, map[string]int{"success": count, "deleted": count}, message)
 	return nil
 }

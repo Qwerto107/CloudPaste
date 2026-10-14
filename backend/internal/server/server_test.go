@@ -235,7 +235,7 @@ func TestSharePasswordAndLastViewLease(t *testing.T) {
 	f.request(t, "POST", "/api/share/verify/"+slug, "", map[string]any{"password": "share-password"}, nil, 404)
 	f.request(t, "PUT", "/api/files/"+s["id"].(string), f.admin, map[string]any{"password": "new-share-password"}, nil, 200)
 	f.request(t, "GET", link, "", nil, nil, 403)
-	f.request(t, "DELETE", "/api/files/batch-delete", f.admin, map[string]any{"ids": []string{s["id"].(string)}, "delete_mode": "both"}, nil, 501)
+	f.request(t, "DELETE", "/api/files/batch-delete", f.admin, map[string]any{"ids": []string{s["id"].(string)}, "delete_mode": "invalid"}, nil, 400)
 	f.request(t, "DELETE", "/api/files/batch-delete", f.admin, map[string]any{"ids": []string{s["id"].(string)}, "delete_mode": "record_only"}, nil, 200)
 	if _, err := os.Stat(filepath.Join(root, "file.txt")); err != nil {
 		t.Fatal("original file removed", err)
