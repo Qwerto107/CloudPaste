@@ -53,7 +53,7 @@ Self-hosted text and file sharing, with custom links, expiration, passwords and 
 | Administration | Share records, storage, keys, admin account and site settings |
 | Device transfers | Pairing codes, text and pasted images, WebRTC file transfers and streaming relay downloads through the website port |
 
-New shares expire after 24 hours by default. Expiring or deleting a share revokes access without deleting the stored file. Editing a filename changes its display name only.
+New shares expire after 24 hours by default. Owners and administrators can still view expired shares without consuming views. Expiration keeps the stored file; deleting a file share removes its original file by default, with an option to delete only the record. Single-file uploads allow up to 10 GiB by default. Editing a filename changes its display name only.
 
 Open `/transfer` to connect two devices. Relay downloads support the browser and external download tools such as AB Download Manager through the same link. Both pages must remain online; the server does not cache files. WebRTC downloads are available when the receiving browser supports saving directly to disk.
 

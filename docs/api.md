@@ -1,155 +1,133 @@
 # API 参考
 
-本文对应 CloudPaste 的 HTTP API。管理员前缀为 `/api/admin`，普通用户使用 `/api`。返回 [文档中心](README.md)。
+本文对应当前前端使用的 HTTP API 与 WebSocket 协议。返回 [文档中心](README.md)。
 
 ## 身份与入口
 
-| 身份 | 入口 | 认证 |
-| --- | --- | --- |
-| 未登录访客 | 公开 `/api/*` 分享及站点信息 | 公开分享仍校验密码、过期、次数及读取票据 |
-| API Key 用户 | 普通 `/api/*` | `Authorization: ApiKey <密钥>` 或 `Authorization: ApiKeyBase64 <UTF-8 密钥的 Base64>` |
-| 管理员 | `/api/admin/*` | `Authorization: Bearer <会话令牌>` |
+| 身份         | 入口               | 认证                                  |
+| ------------ | ------------------ | ------------------------------------- |
+| 未登录访客   | 公开分享与站点设置 | 分享仍校验密码、过期、次数和读取票据  |
+| API Key 用户 | 普通 /api 路径     | Authorization: ApiKey 或 ApiKeyBase64 |
+| 管理员       | /api/admin 路径    | Authorization: Bearer                 |
 
-目前没有普通用户注册体系。API Key 必须启用且未过期，并满足权限、路径范围和存储 ACL；非管理员内容管理还检查归属。
+API Key 必须启用且未过期，并满足权限、路径范围与存储 ACL；分享管理还检查归属。密钥含中文、空白或控制字符时，用 ApiKeyBase64 传输完整密钥的 UTF-8 标准 Base64，前端自动处理。
 
-密钥含中文、空格或控制字符时，使用 `ApiKeyBase64` 格式，先将完整密钥按 UTF-8 转为字节，再使用标准 Base64 编码，保留首尾空白。前端自动处理编码；原有可见 ASCII 密钥仍可使用 `ApiKey` 格式。
+前端身份入口为 /login、/manage/* 和 /admin/login、/admin/*。管理员凭据只能用于管理员 API，API Key 不能进入管理员 API。外部反向代理的管理访问控制应覆盖 /api/admin 本身和全部子路径，包括登录。
 
-前端页面也按身份分离：API Key 登录页为 `/login`，管理页为 `/manage/*`；管理员登录页为 `/admin/login`，管理页为 `/admin/*`。页面路由与下表 API 路径不同，外部反向代理的管理员 API 访问控制仍需覆盖 `/api/admin/*`。
+## 限频策略
 
-管理员凭据不能用于普通用户入口，API Key 不能用于管理员入口。管理员下载和分片票据只能在管理员前缀中使用，换到普通路径会失败。外部代理必须覆盖 `/api/admin` 本身和 `/api/admin/` 下全部请求，包括登录、下载与分片；不要暴露可绕过代理的后端端口。
+不再设置跨 IP 的每分钟总次数。下表使用一分钟固定窗口，环境变量为空或未配置时使用默认值，配置范围为 1–1000000 的整数；`0` 不表示关闭限频，非法配置会阻止启动。
 
-共享业务接口为管理员提供对应路径：普通用户的 `/api/fs/list` 对应管理员的 `/api/admin/fs/list`，`/api/paste` 对应 `/api/admin/paste`。管理员路径仍要求管理员身份，不能依靠改 URL 提权。前端根据此次请求的认证身份选择路径。
+| 操作                         | 计数范围                 | 默认次数/分钟 | 环境变量                          |
+| ---------------------------- | ------------------------ | ------------- | --------------------------------- |
+| 密码验证                     | 每 IP，管理/访客入口独立 | 10            | `PASSWORD_ATTEMPTS_PER_MINUTE`    |
+| 创建互传连接                 | 每 IP                    | 30            | `TRANSFER_CREATE_PER_MINUTE`      |
+| 输入配对码加入连接           | 每 IP                    | 30            | `TRANSFER_JOIN_PER_MINUTE`        |
+| 普通实时中继上传、下载       | 两者共享每 IP 的额度     | 180           | `TRANSFER_RELAY_PER_MINUTE`       |
+| WebSocket 连接尝试           | 每 IP                    | 30            | `TRANSFER_WS_CONNECT_PER_MINUTE`  |
+| 已认证 WebSocket 应用消息    | 每成员                   | 240           | `TRANSFER_WS_MESSAGES_PER_MINUTE` |
+| 下载工具 HEAD、GET、分段 GET | 共享每 IP 的额度         | 240           | `TRANSFER_TOOL_PER_MINUTE`        |
 
-## 未登录访客
+密码验证成功或失败均计数，配对码未匹配也计数；格式或授权在计数前被拒绝的请求不计数。普通中继在票据长度合法后计数，下载工具在确认有效票据后计数，HEAD 和非法 Range 也计入每分钟限频。各操作的额度独立，普通中继与下载工具不共享次数。HTTP 超限返回 429；WebSocket 应用消息超限直接断开。
 
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| GET | `/api/health` | 健康检查 |
-| GET | `/api/version` | 基础版本信息 |
-| GET | `/api/system/max-upload-size` | 上传上限，不授予上传权限 |
-| GET | `/api/public/guest-config` | 当前游客模式关闭 |
-| GET | `/api/public/settings` | 公开站点设置白名单，支持 `group` 参数 |
-| POST | `/api/admin/login` | 管理员登录；唯一不要求已有管理员会话的登录入口，仍位于代理保护范围 |
-| GET / POST | `/api/paste/{slug}` | 读取公开文本 / 提交分享密码；私有文本不对访客开放 |
-| GET | `/api/raw/{slug}` | 原始文本，检查密码、过期和次数 |
-| GET | `/api/share/get/{slug}` | 分享信息或密码提示 |
-| POST | `/api/share/verify/{slug}` | 验证分享密码并获取读取票据 |
-| GET | `/api/s/{slug}`、`/api/s/{slug}/{filename}` | 文件分享读取；密码分享要求有效 `token` |
-| GET | `/api/share/content/{slug}`、`/api/share/content/{slug}/{filename}` | 文件分享读取的兼容入口 |
-| GET | `/api/p/{path...}` | API Key 用户签发的短期读取链接，必须携带有效 `sign` |
-| OPTIONS | 任意路径 | 预检响应，不授予资源访问权限 |
+窗口从各计数项首次请求起算，一分钟后恢复额度。计数保存在单个服务进程内，重启清空，多实例之间不共享。环境变量在启动时读取，修改后需重启进程或重建容器，详情见 [部署指南的限频配置](deployment.md#每分钟限频配置)。
 
-公开文件分享是创建者主动授权的访问方式，管理员创建的分享也可供访客读取。分享链接仍使用普通路径；它与管理员私有文件读取票据不同。
+并发、房间容量和带宽保护继续生效：普通 API 总并发 16，密码验证总并发 2；互传在线房间最多 16，同一创建者或 IP 最多 2 个房间；WebSocket 总连接最多 40、每 IP 最多 8。中继并发与总带宽仍由后台保护设置控制，下载工具每文件并发、累计请求数和流量上限也保留。限频放宽不会增加这些容量。
 
-## 普通用户 / API Key
+## 公开接口
 
-下列路径供 API Key 使用。管理员调用对应的 `/api/admin/...` 路径；管理员不受 API Key 权限位限制。
+| 方法       | 路径                                    | 用途                                |
+| ---------- | --------------------------------------- | ----------------------------------- |
+| GET        | /api/health                             | 程序、容器的健康检查                |
+| GET        | /api/public/settings                    | 公开站点设置白名单，支持 group 参数 |
+| GET / POST | /api/paste/{slug}                       | 读取文本或提交密码                  |
+| GET        | /api/share/get/{slug}                   | 分享信息或密码提示                  |
+| POST       | /api/share/verify/{slug}                | 验证分享密码并签发读取票据          |
+| GET        | /api/s/{slug}、/api/s/{slug}/{filename} | 文件或合集读取，支持下载与 Range    |
 
-| 方法 | 路径 | 用途 / 权限位 |
-| --- | --- | --- |
-| GET | `/api/test/api-key` | 当前身份及权限，有效认证 |
-| GET | `/api/storage`、`/api/storage/{id}` | 需具备 `256`、`512`  中至少一项权限；仅返回存储选择和能力字段 |
-| GET | `/api/storage-types` | 支持的存储和配置字段 |
-| POST | `/api/paste` | 创建文本，`1` |
-| GET | `/api/pastes`、`/api/pastes/{id}` | 列表和详情，`4` |
-| PUT | `/api/pastes/{slug}` | 编辑文本，`4` |
-| DELETE | `/api/pastes/batch-delete` | 批量删除文本，`4` |
-| GET | `/api/files`、`/api/files/{id}` | 文件分享列表和详情，`8` |
-| PUT | `/api/files/{id}` | 编辑分享设置，`8` |
-| DELETE | `/api/files/batch-delete` | 删除分享记录，`8`；不删除文件本体 |
-| GET | `/api/mount/list` | 可访问挂载，`256` |
-| GET | `/api/fs/list`、`/api/fs/get` | 目录列表 / 文件详情，`256`，使用 `path` 参数 |
-| GET | `/api/fs/content`、`/api/fs/download` | 内容 / 下载，`256`，使用 `path` 参数 |
-| GET | `/api/fs/file-link` | 短期读取链接，`256` |
-| GET | `/api/storage-types/{type}/capabilities` | 查询存储能力，`256` |
-| POST | `/api/fs/meta/password/verify` | 验证目录密码，`256` |
-| POST | `/api/fs/create-share` | 分享已有文件，`2+256` |
-| PUT / POST | `/api/fs/upload` | 挂载上传，`512` |
-| PUT / POST | `/api/share/upload` | 上传并分享，`2+512` |
-| POST | `/api/fs/multipart/init` | 创建分片会话，`512` |
-| POST | `/api/fs/multipart/sign-parts` | 签发分片票据，`512` |
-| POST | `/api/fs/multipart/list-parts` | 查询分片，`512` |
-| POST | `/api/fs/multipart/list-uploads` | 查询可恢复上传，`512` |
-| POST | `/api/fs/multipart/abort` | 取消会话，`512` |
-| POST | `/api/fs/multipart/complete` | 校验、合并并发布，`512` |
-| PUT | `/api/fs/multipart/part/{id}/{number}` | 专用 `sign`；复核原身份、会话及上传权限 |
+这些公开接口不接受管理员凭据。私有文本不向访客开放；访客查看管理员创建的分享仍使用普通路径。GET 路由同时匹配 HEAD；OPTIONS 提供预检响应。
 
-`POST /api/proxy/link` 及其管理员对应路径返回不支持，不能用于任意代理。
+## 创建与管理分享
 
-普通存储响应的字段白名单为 `id`、`name`、`storage_type`、`is_public`、`is_default`、`status`、`readonly`、`capabilities` 和 `upload_protocol`。真实路径、上游地址、桶名称、区域、用户名、备注、凭据和管理时间字段仅供管理员查看；`reveal` 参数不能扩大 API Key 的响应范围。存储 ACL 和公开标记仍同时生效。
+下面的业务接口同时提供对应的管理员路径，例如 /api/paste 对应 /api/admin/paste。
 
-## 管理员专属
+| 方法   | 普通路径                      | API Key 权限                       |
+| ------ | ----------------------------- | ---------------------------------- |
+| GET    | /api/test/api-key             | 有效身份；仅普通路径               |
+| GET    | /api/storage                  | 存储选择列表，需文件浏览或上传权限 |
+| POST   | /api/paste                    | 创建文本，1                        |
+| GET    | /api/pastes、/api/pastes/{id} | 文本列表与详情，4                  |
+| PUT    | /api/pastes/{slug}            | 修改文本，4                        |
+| DELETE | /api/pastes/batch-delete      | 删除文本记录，4                    |
+| GET    | /api/files                    | 文件分享列表，8                    |
+| PUT    | /api/files/{id}               | 修改文件分享，8                    |
+| DELETE | /api/files/batch-delete       | 删除文件分享，8；可选择保留原文件  |
+| PUT    | /api/share/upload             | 原始文件上传并分享，2+512          |
+| POST   | /api/share/collection         | 将同一所有者的文件分享组成合集，2  |
+| POST   | /api/transfer/create          | 创建互传连接，1+2；详见下文        |
 
-下列操作只接受管理员身份，并统一位于管理员前缀下。
+普通存储列表使用字段白名单：id、name、storage_type、is_public、is_default、status、readonly、capabilities、upload_protocol。真实目录、桶、上游地址和备注仅供管理员查看；列表不返回存储凭据。
 
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| POST | `/api/admin/logout` | 撤销当前管理员会话 |
-| POST | `/api/admin/change-password` | 修改用户名或密码，撤销已有会话 |
-| GET | `/api/admin/test/admin-token` | 检查管理员会话 |
-| GET / POST | `/api/admin/api-keys` | 列表 / 创建 API Key |
-| PUT / DELETE | `/api/admin/api-keys/{id}` | 修改 / 删除 API Key |
-| GET | `/api/admin/api-keys/{id}/reveal` | 管理员读取完整密钥，返回 `data.key`，响应禁止缓存 |
-| GET / PUT | `/api/admin/api-keys/{id}/storage-acl` | 查询 / 修改存储 ACL |
-| POST | `/api/admin/storage` | 创建存储 |
-| PUT / DELETE | `/api/admin/storage/{id}` | 修改 / 删除存储 |
-| GET | `/api/admin/storage/{id}?reveal=plain或masked` | 查看完整或脱敏凭据 |
-| PUT | `/api/admin/storage/{id}/set-default` | 设置默认存储 |
-| POST | `/api/admin/storage/{id}/test` | 测试连接 |
-| POST | `/api/admin/mount/create` | 创建挂载 |
-| PUT / DELETE | `/api/admin/mount/{id}` | 修改 / 删除挂载 |
-| GET | `/api/admin/mount-schema` | 挂载配置字段 |
-| GET | `/api/admin/fs-meta/list` | 元信息列表 |
-| POST | `/api/admin/fs-meta/create` | 创建元信息 |
-| GET / PUT / DELETE | `/api/admin/fs-meta/{id}` | 查询 / 修改 / 删除元信息 |
-| POST | `/api/admin/pastes/clear-expired` | 清理过期文本 |
-| GET | `/api/admin/settings` | 读取设置，支持 `group` 参数 |
-| GET | `/api/admin/settings/groups` | 设置分组 |
-| GET | `/api/admin/settings/metadata` | 设置字段元信息 |
-| PUT | `/api/admin/settings/group/{group}` | 修改可写设置 |
-| POST | `/api/admin/cache/clear` | 清理上游连接缓存 |
-| GET / HEAD | `/api/admin/p/{path...}` | 管理员短期读取票据，仅管理前缀有效 |
-| PUT | `/api/admin/fs/multipart/part/{id}/{number}` | 管理员分片票据，仅管理前缀有效 |
+## 管理员接口
 
-管理员共享业务接口还包括 `/api/admin/storage` 的 GET、`/api/admin/fs/*`、`/api/admin/paste`、`/api/admin/pastes/*`、`/api/admin/files/*`、`/api/admin/share/upload` 等，按前一节的路径映射调用。
+| 方法         | 路径                                                | 用途                                                            |
+| ------------ | --------------------------------------------------- | --------------------------------------------------------------- |
+| POST         | /api/admin/login                                    | 管理员登录                                                      |
+| POST         | /api/admin/logout                                   | 撤销当前会话                                                    |
+| POST         | /api/admin/change-password                          | 修改用户名或密码，并撤销会话                                    |
+| GET          | /api/admin/test/admin-token                         | 检查会话                                                        |
+| GET          | /api/admin/paste/{slug}                             | 管理员查看文本，忽略密码、期限和查看上限，不计次                |
+| GET          | /api/admin/share/get/{slug}                         | 管理员查看文件或合集，返回失效原因和管理员下载票据，不计次      |
+| GET          | /api/admin/s/{slug}、/api/admin/s/{slug}/{filename} | 管理员预览、下载或 ZIP 打包，支持 Range；需会话或管理员短期票据 |
+| GET / POST   | /api/admin/api-keys                                 | 列表或创建密钥                                                  |
+| PUT / DELETE | /api/admin/api-keys/{id}                            | 修改或删除密钥                                                  |
+| GET          | /api/admin/api-keys/{id}/reveal                     | 读取完整密钥，响应禁止缓存                                      |
+| POST         | /api/admin/storage                                  | 创建存储                                                        |
+| PUT / DELETE | /api/admin/storage/{id}                             | 修改或删除存储配置                                              |
+| PUT          | /api/admin/storage/{id}/set-default                 | 设置默认存储                                                    |
+| POST         | /api/admin/storage/{id}/test                        | 测试存储连接                                                    |
+| GET          | /api/admin/settings                                 | 读取设置，支持 group 参数                                       |
+| PUT          | /api/admin/settings/group/{group}                   | 修改可写设置                                                    |
 
-## 返回格式与上传
+密钥的 storage_config_ids 随创建或修改密钥提交。配置表单由前端定义，后端负责校验。历史数据库中的挂载和目录密码仍参与路径授权；不再提供挂载管理、文件浏览、目录元信息管理、HTTP 分片上传或动态表单 schema 接口。
 
-普通 JSON 成功响应为 `{"success":true,"code":"OK","message":"操作成功","data":{}}`；创建资源通常返回 HTTP `201` 和 `code="CREATED"`。错误使用相应 HTTP 状态，包含 `success=false`、字符串 `code` 和 `message`。下载和原始文本返回各自格式。GET 路由也匹配 HEAD，文件读取支持 Range。
+站点外观设置通过 `PUT /api/admin/settings/group/4` 保存，并由公开设置接口返回：`site_announcement_default_open`（布尔值，默认 false）控制启用且有内容的公告是否默认展开；`site_github_enabled`（布尔值，默认 true）控制右上角 GitHub 图标；`site_github_url` 默认 `https://github.com/Qwerto107/CloudPaste`，支持不含用户凭据的 HTTP/HTTPS 地址，留空隐藏图标。设置保存在数据库，重启保留。
 
-原始上传使用 `Content-Type: application/octet-stream` 和 `X-FS-Filename`；表单上传使用 `multipart/form-data`，文件字段名为 `file`。中文文件名和元信息编码可参考 [分享客户端](../frontend/src/sharing/api.js)。
+## 上传与访问控制
 
-普通 API Key 上传示例：
+普通 JSON 响应包含 success、code、message、data；创建资源一般返回 HTTP 201。下载直接返回文件内容。
 
-```sh
-curl --fail-with-body -X PUT 'http://127.0.0.1:8081/api/fs/upload?path=/local' \
-  -H "Authorization: ApiKey $CLOUDPASTE_API_KEY" \
-  -H 'Content-Type: application/octet-stream' \
-  -H 'X-FS-Filename: example.txt' \
-  --data-binary @example.txt
-```
+文件上传只使用 PUT /api/share/upload，管理员使用 /api/admin/share/upload。请求体是原始文件，X-Share-Filename 为 URL 编码文件名；X-Share-Options 为 UTF-8 JSON 的标准 Base64，包含 storage_config_id、expires_in（小时，允许小数）、password、remark、max_views、可选 path、slug 和 original_filename。默认以随机名称保存文件，original_filename:true 时保留原名但仍禁止覆盖。
 
-管理员改用 `/api/admin/fs/upload` 和 Bearer 会话令牌。上传先私有暂存，再检查实际大小、当前授权和目标配置；冲突返回 `409`，超过单文件上限返回 `413`，临时额度不足返回 `507`。分片会话保留 24 小时，分片大小为 5–16 MiB。
+上传先私有暂存，再校验实际大小、当前授权和目标配置。单文件默认最大 10 GiB（10240 MiB），站点设置与环境变量可调低；默认暂存总额度为 20 GiB。冲突返回 409，超过单文件上限返回 413，临时额度不足返回 507。HTTP 分片及 POST 表单上传已移除；S3 驱动仍可在后端内部按需分块写入大文件。
 
-上传由本站后端接收；API 不提供浏览器上游直传和文件本体删除操作。资源配置见 [部署指南](deployment.md)，路由与权限见 [后端源码](../backend/internal/server/)。
+新文本省略 expires_at、新文件省略 expires_in 时使用站点默认有效期。文本 expires_at:null、文件 expires_in:0 表示不过期。分享过期只撤销访客访问，不自动删除原文件。
 
-## 系统设置
+`DELETE /api/files/batch-delete` 请求体为 `{"ids":["记录ID"],"delete_mode":"both"}`。省略 `delete_mode` 或使用 `both` 时同时删除原文件；`record_only` 仅删除记录。合集会删除全部子文件。删除检查归属、当前路径与存储授权、来源版本和只读状态；文件已不存在时允许继续清理记录。存储删除失败时当前记录保留，可重试；合集或批量删除可能部分成功，数据库与外部存储不构成跨系统事务。
 
-全局、预览和站点设置分组分别为 `1`、`2`、`4`。认证使用管理员 Bearer 会话或 API Key，不接受 Basic 认证。
+管理员查看返回 `admin_preview:true` 和 `expiry_reason`（空、已过期、查看次数已用完），失效分享仍可读取现有内容；来源配置与权限变化仍需复核。管理员下载票据用途为 `admin-share`，绑定记录版本和管理员会话，10 分钟后失效，退出或修改账号后立即撤销；不能用于公开入口。访客和 API Key 不能调用管理员查看入口。
 
-可写全局设置：`max_upload_size`（MiB，只能降低环境硬上限）、`share_default_expiry_hours`（0–876000 小时）。可写预览设置：`preview_max_text_kb`（16–2048）、`preview_text_types`、`preview_image_types`、`preview_video_types`、`preview_audio_types`（逗号分隔扩展名）、`preview_allow_external_images`（布尔）。站点设置包括标题、图标、页脚、顶部 / 底部安全 HTML、文本 / 文件入口开关及公告；只读设置不能修改。
+创建者使用独立普通认证入口查看本人分享，持有效 API Key 且有对应创建或管理权限即可访问：
 
-`PUT /api/files/{id}` 支持 `filename`、`remark`、`password`、`clearPassword`、`expires_at`、`max_views` 和 `slug`。`filename` 仅修改显示名，必须是安全的单个文件名。省略 `max_views` 保留当前查看次数；显式修改查看限制会重置次数。
+| 方法       | 路径                                                    | 用途                                     |
+| ---------- | ------------------------------------------------------- | ---------------------------------------- |
+| GET        | `/api/owner/paste/{slug}`                               | 本人文本内容，支持过期及次数耗尽，不计次 |
+| GET        | `/api/owner/share/get/{slug}`                           | 本人文件或合集信息，签发读取票据，不计次 |
+| GET / HEAD | `/api/owner/s/{slug}`、`/api/owner/s/{slug}/{filename}` | 文件、合集子项或 ZIP 下载，不计次        |
 
-分享上传使用 `PUT /api/share/upload`，管理员使用 `/api/admin/share/upload`。`X-Share-Filename` 是 URL 编码文件名；`X-Share-Options` 是 UTF-8 JSON 的标准 Base64，包含 `storage_config_id`、`expires_in`（小时，可用小数，例如 `0.5` 为 30 分钟）、`password`、`remark`、`max_views`、可选 `path` 和 `slug`；请求体是原始文件。
+创建者查看返回 `owner_preview:true`、`expiry_reason`，不要求分享密码。其他创建者返回 404，匿名信息请求返回 401。读取票据用途为 `owner-share`，绑定分享 ID、版本和 API Key 摘要，10 分钟有效；原生下载不需要在 URL 中携带 API Key。每次读取重新校验凭据启用、有效期、权限、归属及文件来源；禁用、删除或更换 Key 后旧票据不可用，也不能转到管理员或公开入口。
 
-新文本省略 `expires_at`、新文件省略 `expires_in` 时使用站点默认有效期。文本显式 `expires_at:null`、文件 `expires_in:0` 表示不过期。过期分享和删除分享记录不自动删除存储文件。
+分享创建、管理列表、管理详情和修改响应返回 `password` 与 `password_available`，创建结果可据此生成带密码的分享文字。新建和重新设置的密码按验证哈希与 AES-GCM 加密副本保存，哈希及密文不进入响应。旧记录没有加密副本时 `password_available:false`，省略 `password`，原保护仍有效；必须重新设置才能查看原文。分享预览响应均不返回密码或加密副本，包括认证的创建者、管理员预览；公开密码验证响应也不返回这些字段。编辑 `password` 可直接替换，显式空字符串移除保护，省略则保留；兼容 `clearPassword:true`。
 
-带密码的文本、文件或合集验证成功后，响应包含 `access_token` 和 `access_expires_at`。后续读取分享时通过 `X-Share-Access` 请求头携带凭证，10 分钟内免除重复输入密码，但每次成功打开或刷新分享仍计入查看次数，达到上限后拒绝访问，刷新不延长凭证期限。文件预览、下载和视频分段复用当次查看的读取票据，不额外计数。凭证绑定分享类型、记录、链接和版本；修改密码、删除或过期后失效，文件来源与创建者权限仍会复核。前端仅在当前标签页的 `sessionStorage` 保存临时凭证，不保存明文密码。
+文本编辑器支持粘贴图片和通过工具栏插入图片链接。PNG、JPEG、GIF、WebP 图片以 Base64 嵌入 Markdown，单张最多 1 MiB，随文本一起保存和受密码保护；完整 JSON 请求仍限制为 2 MiB。站外图片链接是否展示由 `preview_allow_external_images` 控制，不允许 SVG 数据图片或脚本协议。
 
-公开分享入口对不存在、已过期或达到查看上限统一返回 HTTP `404`、`code="NOT_FOUND"` 和 `message="分享已失效或不存在"`，不再提示输入密码。验证密码前和计数前均检查失效状态；管理入口保留具体原因。文件读取票据在当次查看期限内继续有效，不因该次查看用尽额度而中断预览或下载。
+带密码的文本、文件和合集验证成功后返回 access_token、access_expires_at。后续使用 X-Share-Access 携带凭证，10 分钟内免于再次输入密码，每次成功打开仍消耗查看次数。刷新不延长凭证期限，修改密码、有效期或权限后会重新校验。
 
-挂载、目录密码和分片接口用于程序化访问及路径授权；这些接口不对应前端导航入口。
+文件预览使用服务端返回的 contentUrl、downloadUrl；合集中的每个文件和 ZIP 下载共用同一次查看票据。客户端不能自行构造来源地址。
+
+PUT /api/files/{id} 支持 filename、remark、password、clearPassword、expires_at、max_views、slug。filename 只修改显示名。省略 max_views 保留当前计数；显式修改上限重置计数。
+
+全局、预览、互传和站点设置分组分别为 1、2、3、4。只读设置不能修改；上传、互传大小只能收紧环境硬上限。文本预览限制为 16–2048 KiB，Markdown 默认禁止站外图片，自定义 HTML 始终经过清洗。
 
 ## 临时设备互传
 
@@ -157,21 +135,183 @@ curl --fail-with-body -X PUT 'http://127.0.0.1:8081/api/fs/upload?path=/local' \
 
 页面入口为 `/transfer`。此功能与持久分享、存储和查看次数无关，房间与传输状态仅保存在进程内存中，文件内容不保存。
 
-| 方法与路径 | 凭据与用途 |
-| --- | --- |
-| `POST /api/transfer/create` | API Key，必须同时具备文本与文件分享权限；管理员改用 `/api/admin/transfer/create` |
-| `POST /api/transfer/join` | 无登录凭据，通过配对码申请第二席 |
-| `GET /api/transfer/socket` | WebSocket，首条 JSON 消息提交临时成员票据 |
-| `GET /api/transfer/download/{id}?ticket=…` | 接收方一次性票据，返回附件流 |
-| `PUT /api/transfer/upload/{id}` | 发送方 `Authorization: Transfer …`，请求体为原文件流 |
-| `GET /api/transfer/download/{id}/tool?ticket=…` | 下载工具短期票据，支持 HEAD、单个 HTTP Range 和重试 |
-| `PUT /api/transfer/upload/{id}/{request}` | 独立分段上传票据，请求体为所需文件区间 |
+| 方法与路径                                      | 凭据与用途                                                                       |
+| ----------------------------------------------- | -------------------------------------------------------------------------------- |
+| `POST /api/transfer/create`                     | API Key，必须同时具备文本与文件分享权限；管理员改用 `/api/admin/transfer/create` |
+| `POST /api/transfer/join`                       | 无登录凭据，通过配对码申请第二席                                                 |
+| `GET /api/transfer/socket`                      | WebSocket，首条 JSON 消息提交临时成员票据                                        |
+| `GET /api/transfer/download/{id}?ticket=…`      | 接收方一次性票据，返回附件流                                                     |
+| `PUT /api/transfer/upload/{id}`                 | 发送方 `Authorization: Transfer …`，请求体为原文件流                             |
+| `GET /api/transfer/download/{id}/tool?ticket=…` | 下载工具短期票据，支持 HEAD、单个 HTTP Range 和重试                              |
+| `PUT /api/transfer/upload/{id}/{request}`       | 独立分段上传票据，请求体为所需文件区间                                           |
 
 创建请求为 `{"name":"设备 A","relay_only":false}`，返回 `token`、`code`、`member`、`expires_at`、`max_file_size`。加入请求多一个 `code` 字段，返回第二席的临时票据。WebSocket 要求有效的 `Origin`，首条消息为 `{"type":"auth","token":"…"}`；长期 API Key 和管理员凭据不得放在 WebSocket URL 中。
+
+`code` 为一个大写字母加四位数字（包含前导零），例如 `A1234`。页面显示 `A-1234`，复制得到 `A1234`；加入接口也接受 `a-1234` 与包含空白的形式，统一解析后再匹配。配对仍需创建者确认，且保留有效期、猜测限流和两人席位限制。
+
+页面「自动同意设备加入」默认为关闭；开启后由创建者客户端在收到 `joining` 时自动发送原有 `confirm` 消息，不增加新的接口字段或绕过服务端配对检查。
 
 创建者收到 `joining` 后发送 `{"type":"confirm"}`，双方收到 `paired` 后方可交流。消息类型包括 `text`、`signal`（WebRTC 协商）、`offer`（`client_id/name/size`）、`accept`（`id/mode`，模式为 `relay`、`p2p` 或 `tool`）、`cancel`、`fail`（客户端传输异常）和 `leave`。服务端通过 `file/state/progress/error` 通知状态。直连接收方用 `progress/complete` 报告已写入字节数，服务端不为直连内容作完整性背书。
 
 服务端广播的 `text` 和 `file` 通知携带 `sent_at`（UTC RFC 3339 时间），表示服务端收到文字或文件发送请求的时间；双方收到同一时间值。客户端提交的时间不会被采用，图片完成接收时不改变其原始发送时间。
+
+### WebSocket 连接与认证
+
+连接地址为 `ws://后端地址/api/transfer/socket`，HTTPS 部署使用 `wss://后端地址/api/transfer/socket`。管理员和 API Key 用户均连接此普通路径，没有 `/api/admin/transfer/socket` 入口。
+
+连接前先调用创建或加入接口，取得响应 `data.token`。它是当前房间某一成员的临时凭证，与管理员会话、API Key、HTTP 上传票据和下载票据各自独立。
+
+握手要求 `Origin` 为后端同主机及端口的 HTTP/HTTPS 来源，或精确匹配 `ALLOWED_ORIGINS` 中的来源。浏览器自动附带 `Origin`。握手请求不得携带 `Authorization`；成员凭证只在连接成功后的第一条消息中提交：
+
+```json
+{ "type": "auth", "token": "创建或加入接口返回的成员凭证" }
+```
+
+第一条消息必须在连接成功后 10 秒内发送，并且是有效的 JSON 文本消息；`token` 必须是服务端返回的完整 43 字符凭证。认证成功后返回：
+
+```json
+{ "type": "ready", "member": 0 }
+```
+
+`member:0` 为创建者，`member:1` 为加入者。同一成员不能同时连接两条 WebSocket。房间不提供断线恢复，任一已认证成员断开即结束房间，再次使用需要重新创建和配对。
+
+前端连接示例，`data` 为创建或加入接口返回的 `data` 对象，`backendBase` 为后端 HTTP 地址：
+
+```javascript
+// 临时成员凭证通过首条消息发送，避免写入 URL 或浏览器存储。
+const url = new URL("/api/transfer/socket", backendBase);
+url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+const socket = new WebSocket(url);
+socket.addEventListener("open", () => {
+  socket.send(JSON.stringify({ type: "auth", token: data.token }));
+});
+```
+
+### WebSocket 消息格式
+
+应用消息均使用 UTF-8 JSON 文本，顶层 `type` 区分操作。WebSocket 不使用 HTTP API 的 `success/code/message/data` 响应包装。文件内容通过 HTTP 中继或 WebRTC DataChannel 传输，不发送 WebSocket 二进制消息。
+
+`id` 为服务端通过 `file` 通知生成的文件任务 ID；`client_id` 为发送端自选的请求关联 ID。`size`、`bytes`、`start`、`end` 的单位均为字节，成员编号和字节数均使用 JSON 整数。
+
+#### 客户端 → 服务端
+
+| `type`            | 字段                                           | 发送者与生效条件                                                                     |
+| ----------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `auth`            | `token`                                        | 连接后的第一条消息；后续不重复认证                                                   |
+| `confirm`         | 无                                             | 仅创建者，在加入者连接且收到 `joining` 后确认配对                                    |
+| `reject`          | 无                                             | 任一成员均可结束整个房间；没有仅移除加入者的操作                                     |
+| `leave`           | 无                                             | 任一成员主动结束整个房间                                                             |
+| `text`            | `text`                                         | 配对后任一成员发送；长度为 1–4096 UTF-8 字节                                         |
+| `signal`          | `data`                                         | 配对后发送 WebRTC 协商数据；仅非强制中继房间可用，`data` 最大 12000 字节             |
+| `offer`           | `client_id`、`name`、`size`，可选 `image_type` | 配对后发送文件申请；`client_id` 长度为 1–64 字节，普通文件允许 0 字节                |
+| `accept`          | `id`、`mode`                                   | 仅该文件的接收方，在 `offered` 状态接受；`mode` 为 `relay`、`p2p` 或 `tool`          |
+| `cancel`          | `id`                                           | 任一成员取消指定文件；活动或待接收任务变为 `cancelled`                               |
+| `fail`            | `id`                                           | 任一成员报告指定活动文件异常，任务变为 `failed`                                      |
+| `progress`        | `id`、`bytes`                                  | 仅 P2P 接收方报告累计写入量；不得倒退或超过文件大小                                  |
+| `complete`        | `id`、`bytes`                                  | 仅 P2P 接收方确认完成；`bytes` 必须等于文件大小                                      |
+| `range-failed`    | `id`、`request_id`                             | 仅下载工具模式的发送方取消失败分段，其余分段和任务仍可继续                           |
+| `finish-download` | `id`                                           | 仅下载工具模式的接收方确认完成；服务端必须已经转发完整文件，且至少开始过一轮实际 GET |
+
+`reject`、`leave`、`confirm` 在配对前即可发送；其他操作需要双方已经收到 `paired`。一个房间同时只能有一个 `active` 文件任务。文件名经去除首尾空白后应为 1–180 字节，不能包含路径分隔符、控制字符或双向文字覆盖控制符。
+
+#### 服务端 → 客户端
+
+| `type`          | 字段                                                                        | 接收者与含义                                                           |
+| --------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `ready`         | `member`                                                                    | 当前成员，首帧认证成功                                                 |
+| `joining`       | `name`                                                                      | 仅创建者，加入者已经连接，等待确认                                     |
+| `paired`        | `names`、`relay_only`、`stun`                                               | 双方；`names[0]`、`names[1]` 分别为两端名称，空 `stun` 表示未配置 STUN |
+| `text`          | `text`、`from`、`sent_at`                                                   | 双方，包括发送者；`from` 为发送成员编号                                |
+| `signal`        | `data`                                                                      | 仅对端，原样转发协商数据                                               |
+| `file`          | `id`、`client_id`、`name`、`size`、`from`、`state`、`image_type`、`sent_at` | 双方，新任务初始 `state:"offered"`，非图片的 `image_type` 为空字符串   |
+| `state`         | `id`、`state`、`mode`，终态带 `bytes`                                       | 双方，文件状态变化                                                     |
+| `progress`      | `id`、`bytes`，下载工具模式另带 `round`                                     | 双方，累计进度；`round` 为下载工具的当前下载轮次                       |
+| `download`      | `id`、`url`                                                                 | 仅接收方，普通中继的一次性 HTTP 下载地址                               |
+| `download-tool` | `id`、`url`、`expires_at`、`max_connections`                                | 仅接收方，可重试和分段的下载工具地址                                   |
+| `start`         | `id`、`mode`，普通中继另带 `token`                                          | 仅发送方；P2P 开始直传，普通中继开始 PUT 上传                          |
+| `range-start`   | `id`、`request_id`、`token`、`start`、`end`                                 | 仅发送方，下载工具请求的文件区间，`end` 不包含在区间内                 |
+| `range-stop`    | `id`、`request_id`                                                          | 仅发送方，该 HTTP 分段请求已结束或中止，释放对应上传                   |
+| `error`         | `message`、`id`、`client_id`                                                | 仅当前操作发送者，业务操作被拒绝；无关联文件或申请时相应 ID 为空字符串 |
+
+`created`、`direct`、`image`、`retry` 等是前端 `TransferClient` 生成的本地事件，不是服务端 WebSocket 消息。时间字段使用 UTC RFC 3339，可包含小数秒。客户端不应假定每一小块文件数据都对应一个进度消息。
+
+### WebSocket 配对与文件状态
+
+配对流程如下：
+
+1. 创建者调用 `create`，取得配对码和成员凭证，立即连接并发送 `auth`，收到 `ready`。
+2. 加入者调用 `join`，取得第二席的凭证，连接并发送 `auth`，收到 `ready`；创建者收到 `joining`。
+3. 创建者发送 `{"type":"confirm"}`，双方收到 `paired`，配对码随即失效。
+4. 此后双方可发送文字、协商直连、申请文件或主动离开。
+
+成功配对通知示例：
+
+```json
+{
+  "type": "paired",
+  "names": ["设备 A", "设备 B"],
+  "relay_only": false,
+  "stun": ""
+}
+```
+
+文件申请及接收示例，消息分开发送：
+
+```json
+{
+  "type": "offer",
+  "client_id": "local-request-1",
+  "name": "示例.txt",
+  "size": 1024
+}
+```
+
+服务端向双方返回任务 ID：
+
+```json
+{
+  "type": "file",
+  "id": "服务端任务ID",
+  "client_id": "local-request-1",
+  "name": "示例.txt",
+  "size": 1024,
+  "from": 0,
+  "state": "offered",
+  "image_type": "",
+  "sent_at": "2026-10-14T08:00:00Z"
+}
+```
+
+接收方使用此 `id` 接受普通中继：
+
+```json
+{ "type": "accept", "id": "服务端任务ID", "mode": "relay" }
+```
+
+文件状态为 `offered → active → complete / failed / cancelled`，待接收任务也可直接进入 `cancelled`。终态不能重新启动；重发需新的 `offer/client_id`，并继续计入房间的累计额度。普通中继的 `complete` 表示服务端已转发完整文件；P2P 的 `complete` 来自接收方报告；下载工具的 `complete` 还要求接收方发送 `finish-download`。服务端不能证明浏览器或外部下载软件最终落盘成功。
+
+### WebSocket 错误、心跳与关闭
+
+握手阶段仍返回 HTTP 错误响应：无效或缺少 `Origin`、附带 `Authorization`、功能被关闭时返回 `403 / FORBIDDEN`；连接或连接尝试超额时返回 `429 / TRANSFER_BUSY`。Upgrade 后的首帧超时、认证失败、非 JSON 或非文本消息会直接断开，不保证收到 `error` 消息或指定的关闭码。
+
+已认证连接中的业务错误使用以下格式，连接通常仍可继续使用，客户端应按关联 ID 更新该次操作：
+
+```json
+{
+  "type": "error",
+  "message": "请先完成当前文件传输",
+  "id": "服务端任务ID",
+  "client_id": ""
+}
+```
+
+WebSocket `error` 消息不包含 HTTP 状态或 `code`。HTTP 创建、加入与文件传输请求的错误仍按 HTTP API 格式返回；客户端应分别处理两种错误来源。
+
+服务端每 20 秒发送一次协议级 Ping，等待 Pong 最长 8 秒；浏览器自动回应，不需要发送 `{"type":"ping"}`。发送一条服务端消息的期限为 10 秒，单成员待发送队列最多 64 条。队列已满、写入失败或心跳失败会结束整个房间。
+
+单条 JSON 文本消息最大 16 KiB，认证后每成员每分钟默认最多 240 条应用消息，可通过 `TRANSFER_WS_MESSAGES_PER_MINUTE` 调整，超额会直接断开。房间从创建起最多存活 2 小时，配对码最多有效 5 分钟；创建者应在创建后 15 秒内连接，加入者取得第二席后应在 1 分钟内完成配对确认。期限由定时清理处理，不能依赖精确的关闭时刻。任一成员离开、拒绝或断线后，另一端也会断开，未完成文件被取消，相关 HTTP 票据失效；关闭前不保证送达所有状态通知。
+
+### 传输模式与 HTTP 配合
 
 直连客户端在 `signal.data.description` 的同级字段 `max_chunk_size` 声明应用可接收的分块上限，`receive_window` 声明待写盘数据窗口。双方支持时使用最高 256 KiB 分块；对方未声明分块上限时兼容旧页面的 64 KiB 上限，并始终遵守 SCTP 协商的消息上限。发送缓冲限制为 4 MiB，等待接收端写盘确认的数据不超过双方窗口中的较小值，最高 8 MiB；对方未声明窗口时兼容旧页面的 2 MiB 窗口。以上限制不随文件总大小增长，并非浏览器进程总内存上限。
 
@@ -187,11 +327,13 @@ curl --fail-with-body -X PUT 'http://127.0.0.1:8081/api/fs/upload?path=/local' \
 
 下载工具链接最长 30 分钟有效，受房间有效期约束，闲置 10 分钟失效。每文件最多 4 个并发请求，并共享 `transfer_max_relays`，最多 256 次实际 GET，累计转发额度为 `max(1 MiB, 文件大小×4)`；HEAD 和非法 Range 不消耗 GET 额度。每请求停滞上限 1 分钟，上传、下载各使用 32 KiB 固定缓冲，服务器不缓存文件。进度按当前轮次合并已转发区间，单轮内重试不重复计数；完整下载后再次 GET 开启新一轮，`progress.round` 递增，双方清零显示进度和速率。HEAD 不开启新轮次，历史流量和请求额度不清零；上一轮 HTTP 请求的迟到退出不会影响新一轮进度。服务器无法确认下载工具最终落盘。
 
-单帧最大 16 KiB，单条文字最大 4096 字节。配对码猜测、连接数、房间数、文件并发、带宽和传输停滞均有限制，详见 [部署指南](deployment.md#设备互传与实时中继)。连接失效或不可用统一返回 `404 / TRANSFER_UNAVAILABLE`，超额返回 `429 / TRANSFER_BUSY`。
+单帧最大 16 KiB，单条文字最大 4096 字节。配对码猜测、连接数、房间数、文件并发、带宽和传输停滞均有限制，详见 [部署指南](deployment.md#设备互传与实时中继)。HTTP 加入或文件传输入口的连接、票据失效返回 `404 / TRANSFER_UNAVAILABLE`，超额返回 `429 / TRANSFER_BUSY`；WebSocket 握手错误与连接后的业务错误分别按上文处理。
 
 ## 自定义分享链接
 
-`POST /api/paste` 的 JSON 或文件上传选项中的 `slug` 用于自定义链接末尾名称，例如 `my-note` 对应前端 `/paste/my-note`，文件则对应 `/file/my-note`。留空自动生成；只允许 1–100 个英文字母、数字、短横线和下划线。同类分享名称重复会返回错误，不覆盖原分享。
+`POST /api/paste` 的 JSON 或文件上传选项中的 `slug` 用于自定义链接末尾名称，例如 `my-note` 对应前端 `/paste/my-note`，文件则对应 `/file/my-note`。留空自动生成；只允许 1–100 个英文字母、数字、短横线和下划线。有效分享仍占用后缀，包括隐藏或有密码的分享。已过期或查看次数耗尽的后缀可在创建、改名时重新使用；文件与合集共用后缀空间，文本独立。
+
+回收时保留旧分享记录与文件，为旧记录分配随机后缀，再把原后缀交给新分享。原地址此后指向新分享；旧解锁凭证和下载票据不能访问新记录。文本修改请求 `PUT /api/pastes/{slug}` 可携带 `id`，前端编辑窗口始终携带此字段，防止后缀复用后误改新记录。
 
 文本使用 `expires_at`（RFC 3339 时间或 `null`），文件上传使用 `expires_in`（小时，0 表示不过期）。`max_views:0` 表示不限次数，正整数表示查看上限；前端直接显示访问密码和查看次数，不需要展开更多选项。批量上传按每个文件独立创建分享。
 

@@ -31,8 +31,8 @@ LOCAL_FILES_READ_ONLY=false
 GOMEMLIMIT=80MiB
 MAX_DOWNLOADS=8
 MAX_UPLOADS=2
-MAX_UPLOAD_SIZE_MB=100
-MAX_STAGED_SIZE_MB=1024
+MAX_UPLOAD_SIZE_MB=10240
+MAX_STAGED_SIZE_MB=20480
 
 # 设备互传：授权用户创建，访客用配对码加入。
 TRANSFER_ENABLED=true
@@ -40,6 +40,15 @@ TRANSFER_MAX_FILE_MB=10240
 TRANSFER_RATE_MB=64
 # 可选 STUN 地址，格式 stun:主机:端口。
 TRANSFER_STUN=
+
+# 每分钟限频：除 WebSocket 消息按成员外，其余按真实来源 IP。
+PASSWORD_ATTEMPTS_PER_MINUTE=10
+TRANSFER_CREATE_PER_MINUTE=30
+TRANSFER_JOIN_PER_MINUTE=30
+TRANSFER_RELAY_PER_MINUTE=180
+TRANSFER_WS_CONNECT_PER_MINUTE=30
+TRANSFER_WS_MESSAGES_PER_MINUTE=240
+TRANSFER_TOOL_PER_MINUTE=240
 
 # 可信反向代理：直接访问时留空；只填实际可信代理 IP、CIDR 或主机名。
 # 多容器后端由 Compose 固定信任 frontend，此项用于单容器。
@@ -59,7 +68,7 @@ Linux 上，新建的专用目录执行 `sudo chown 65532:65532 data files`。�
 docker compose up -d --pull always
 ```
 
-此命令使用 [docker-compose.yml](../docker-compose.yml)，默认拉取 `ghcr.io/qwerto107/cloudpaste:0.7.0`。镜像已包含前后端，无需安装 Go、Node.js 或本地打包。
+此命令使用 [docker-compose.yml](../docker-compose.yml)，默认拉取 `ghcr.io/qwerto107/cloudpaste:0.8.0`。镜像已包含前后端，无需安装 Go、Node.js 或本地打包。
 
 单容器镜像支持 Linux amd64、arm64、arm/v6、arm/v5、loong64，Docker 按宿主机架构选择。Windows 和 macOS 的原生单文件程序见 [二进制部署](binary.md)；Apple Silicon 上的 Docker 使用 Linux arm64 镜像。
 
@@ -84,7 +93,7 @@ curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-comp
 docker compose up -d --pull always
 ```
 
-默认拉取 `cloudpaste-frontend:0.7.0`、`cloudpaste-backend:0.7.0` 两个 GHCR 镜像。前端 Nginx 提供页面并转发 API，浏览器入口仍为 `http://127.0.0.1:8081`。
+默认拉取 `cloudpaste-frontend:0.8.0`、`cloudpaste-backend:0.8.0` 两个 GHCR 镜像。前端 Nginx 提供页面并转发 API，浏览器入口仍为 `http://127.0.0.1:8081`。
 
 分离版的镜像和独立后端二进制仅提供 Linux amd64、arm64；ARMv5、ARMv6 和 Loong64 使用单容器或完整程序。
 
@@ -114,14 +123,14 @@ docker compose up -d --pull always
 
 **应用参数改 `.env`，镜像和端口改 Compose。** Compose 自动读取同目录 `.env` 以解析文件挂载路径、校验密码及 GC 目标；服务的 `env_file: .env` 将应用参数传给容器。`environment` 仅保留这些启动约束、容器内 `/data` 与 `8787`，以及分离模式的可信内部代理。参考 [Docker 环境文件说明](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/)。
 
-| 要调整什么 | 修改位置 | 示例 |
-| --- | --- | --- |
-| 管理员账号 | `.env` | `ADMIN_USERNAME`、`ADMIN_PASSWORD`（首次初始化使用；之后在后台修改） |
-| 单容器镜像版本 | `docker-compose.yml` 的 `image` | `ghcr.io/qwerto107/cloudpaste:版本号` |
-| 多容器镜像版本 | 运行目录的 `docker-compose.yml` 中两处 `image` | 前后端填写相同版本 |
-| 监听地址和宿主机端口 | 对应 Compose 的 `ports` | 单容器 `127.0.0.1:8081:8787`，多容器前端 `127.0.0.1:8081:8080` |
-| 文件目录 | `.env` | `LOCAL_FILES_DIR=./files`，后台仍填 `/files` |
-| 上传与互传限制 | `.env` | `MAX_*`、`TRANSFER_*`；可在后台调整的项目见下文 |
+| 要调整什么           | 修改位置                                       | 示例                                                                 |
+| -------------------- | ---------------------------------------------- | -------------------------------------------------------------------- |
+| 管理员账号           | `.env`                                         | `ADMIN_USERNAME`、`ADMIN_PASSWORD`（首次初始化使用；之后在后台修改） |
+| 单容器镜像版本       | `docker-compose.yml` 的 `image`                | `ghcr.io/qwerto107/cloudpaste:版本号`                                |
+| 多容器镜像版本       | 运行目录的 `docker-compose.yml` 中两处 `image` | 前后端填写相同版本                                                   |
+| 监听地址和宿主机端口 | 对应 Compose 的 `ports`                        | 单容器 `127.0.0.1:8081:8787`，多容器前端 `127.0.0.1:8081:8080`       |
+| 文件目录             | `.env`                                         | `LOCAL_FILES_DIR=./files`，后台仍填 `/files`                         |
+| 上传与互传限制       | `.env`                                         | `MAX_*`、`TRANSFER_*`；可在后台调整的项目见下文                      |
 
 修改后重新执行对应模式的启动命令；环境变量仅在创建或重建容器时更新，`restart` 不会加载新配置。密码含 `$` 或 `#` 时可用单引号包住值，例如 `ADMIN_PASSWORD='你的长随机密码'`。局域网访问时，把端口映射中的 `127.0.0.1` 改为服务器的局域网 IP；公网使用 HTTPS。
 
@@ -129,24 +138,31 @@ docker compose up -d --pull always
 
 ### `.env` 参数说明
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `ADMIN_USERNAME` | `admin` | 首次创建管理员的用户名；已有账号不随此值更新 |
-| `ADMIN_PASSWORD` | 无，必填 | 首次创建管理员的密码，12–72 字节；已有密码在后台修改，Compose 仍要求此项非空 |
-| `LOCAL_FILES_DIR` | `./files` | 宿主机文件目录；启动前创建，Linux 上授权 UID/GID `65532` 读写 |
-| `LOCAL_FILES_READ_ONLY` | `false` | 设为 `true` 只读挂载文件目录；后台相应存储也应设置只读，不影响 `./data` |
-| `GOMEMLIMIT` | `80MiB` | Go GC 软目标；容器内存上限仍由 Compose 的 `mem_limit` 控制 |
-| `MAX_DOWNLOADS` | `8` | 普通文件下载总并发，范围 1–128；设备互传的中继并发独立设置 |
-| `MAX_UPLOADS` | `2` | 普通文件上传并发，范围 1–8 |
-| `MAX_UPLOAD_SIZE_MB` | `100` | 单文件上传硬上限，范围 1–10240 MiB；后台上传大小不能高于此值 |
-| `MAX_STAGED_SIZE_MB` | `1024` | 上传暂存总额度，范围 1–102400 MiB，不能小于单文件上传上限 |
-| `TRANSFER_ENABLED` | `true` | 设为 `false` 关闭设备互传 |
-| `TRANSFER_MAX_FILE_MB` | `10240` | 互传文件硬上限，范围 1–10240 MiB；后台只能设置不高于此值的上限 |
-| `TRANSFER_RATE_MB` | `64` | 初始中继总速率，范围 0–10240 MiB/s，0 表示不限速；后台保存的值优先 |
-| `TRANSFER_STUN` | 空 | 可选 `stun:主机:端口`，用于跨网络直连；留空不联系第三方 STUN |
-| `TRUSTED_PROXIES` | 空 | 单容器的可信代理 IP、CIDR 或主机名，多值逗号分隔；多容器由 Compose 固定为 `frontend` |
-| `ALLOWED_ORIGINS` | 空 | 额外允许的浏览器页面 Origin，例如 `https://share.example.com`；多个值逗号分隔，同源部署留空 |
-| `ENCRYPTION_SECRET` | 空 | 可选加密密钥，必须是 32 字节随机值的 Base64；留空生成 `./data/encryption.key`，备份时连同数据库保存 |
+| 变量                              | 默认值    | 说明                                                                                                |
+| --------------------------------- | --------- | --------------------------------------------------------------------------------------------------- |
+| `ADMIN_USERNAME`                  | `admin`   | 首次创建管理员的用户名；已有账号不随此值更新                                                        |
+| `ADMIN_PASSWORD`                  | 无，必填  | 首次创建管理员的密码，12–72 字节；已有密码在后台修改，Compose 仍要求此项非空                        |
+| `LOCAL_FILES_DIR`                 | `./files` | 宿主机文件目录；启动前创建，Linux 上授权 UID/GID `65532` 读写                                       |
+| `LOCAL_FILES_READ_ONLY`           | `false`   | 设为 `true` 只读挂载文件目录；后台相应存储也应设置只读，不影响 `./data`                             |
+| `GOMEMLIMIT`                      | `80MiB`   | Go GC 软目标；容器内存上限仍由 Compose 的 `mem_limit` 控制                                          |
+| `MAX_DOWNLOADS`                   | `8`       | 普通文件下载总并发，范围 1–128；设备互传的中继并发独立设置                                          |
+| `MAX_UPLOADS`                     | `2`       | 普通文件上传并发，范围 1–8                                                                          |
+| `MAX_UPLOAD_SIZE_MB`              | `10240`   | 单文件上传硬上限，默认 10 GiB，范围 1–10240 MiB；后台上传大小不能高于此值                           |
+| `MAX_STAGED_SIZE_MB`              | `20480`   | 上传暂存总额度，默认 20 GiB，范围 1–102400 MiB，不能小于单文件上传上限                              |
+| `TRANSFER_ENABLED`                | `true`    | 设为 `false` 关闭设备互传                                                                           |
+| `TRANSFER_MAX_FILE_MB`            | `10240`   | 互传文件硬上限，范围 1–10240 MiB；后台只能设置不高于此值的上限                                      |
+| `TRANSFER_RATE_MB`                | `64`      | 初始中继总速率，范围 0–10240 MiB/s，0 表示不限速；后台保存的值优先                                  |
+| `TRANSFER_STUN`                   | 空        | 可选 `stun:主机:端口`，用于跨网络直连；留空不联系第三方 STUN                                        |
+| `PASSWORD_ATTEMPTS_PER_MINUTE`    | `10`      | 每 IP 的密码验证次数；管理入口和访客入口分别计数                                                    |
+| `TRANSFER_CREATE_PER_MINUTE`      | `30`      | 每 IP 创建互传连接次数                                                                              |
+| `TRANSFER_JOIN_PER_MINUTE`        | `30`      | 每 IP 输入配对码加入连接次数                                                                        |
+| `TRANSFER_RELAY_PER_MINUTE`       | `180`     | 每 IP 普通中继上传、下载共享次数                                                                    |
+| `TRANSFER_WS_CONNECT_PER_MINUTE`  | `30`      | 每 IP 的 WebSocket 连接尝试次数                                                                     |
+| `TRANSFER_WS_MESSAGES_PER_MINUTE` | `240`     | 每个已认证成员发送 WebSocket 应用消息的次数                                                         |
+| `TRANSFER_TOOL_PER_MINUTE`        | `240`     | 每 IP 的下载工具 HEAD、GET 和分段 GET 共享次数                                                      |
+| `TRUSTED_PROXIES`                 | 空        | 单容器的可信代理 IP、CIDR 或主机名，多值逗号分隔；多容器由 Compose 固定为 `frontend`                |
+| `ALLOWED_ORIGINS`                 | 空        | 额外允许的浏览器页面 Origin，例如 `https://share.example.com`；多个值逗号分隔，同源部署留空         |
+| `ENCRYPTION_SECRET`               | 空        | 可选加密密钥，必须是 32 字节随机值的 Base64；留空生成 `./data/encryption.key`，备份时连同数据库保存 |
 
 `DATA_DIR` 和 `PORT` 也是后端支持的变量，但容器配置固定为 `/data` 和 `8787`，在 `.env` 中填写其他值会被 Compose 覆盖。宿主机数据路径修改 `volumes`，对外访问端口修改 `ports`。容器项目名、镜像版本、内存硬限制和日志配置也直接在 `docker-compose.yml` 修改。
 
@@ -167,15 +183,15 @@ docker compose up -d --pull always
 
 ## 端口与目录
 
-| 项目 | 默认值 | 说明 |
-| --- | --- | --- |
-| 宿主机入口 | `127.0.0.1:8081` | 在对应 Compose 的 `ports` 中修改 |
-| 前端容器端口 | `8080` | Nginx 提供页面和同源 API 转发 |
-| 后端容器端口 | `8787` | Compose 不单独公开宿主机端口 |
-| 合并版容器端口 | `8787` | 同时提供页面和 API，映射到宿主机 `8081` |
-| 数据目录 | `/data` | 直接挂载运行目录下的 `./data` |
-| 本地文件目录 | `/files` | 来自 `LOCAL_FILES_DIR`，宿主机目录必须存在 |
-| Compose 项目名 | `cloudpaste` | 两种部署模式使用相同名称 |
+| 项目           | 默认值           | 说明                                       |
+| -------------- | ---------------- | ------------------------------------------ |
+| 宿主机入口     | `127.0.0.1:8081` | 在对应 Compose 的 `ports` 中修改           |
+| 前端容器端口   | `8080`           | Nginx 提供页面和同源 API 转发              |
+| 后端容器端口   | `8787`           | Compose 不单独公开宿主机端口               |
+| 合并版容器端口 | `8787`           | 同时提供页面和 API，映射到宿主机 `8081`    |
+| 数据目录       | `/data`          | 直接挂载运行目录下的 `./data`              |
+| 本地文件目录   | `/files`         | 来自 `LOCAL_FILES_DIR`，宿主机目录必须存在 |
+| Compose 项目名 | `cloudpaste`     | 两种部署模式使用相同名称                   |
 
 `data` 和文件目录必须在启动前创建。Linux 上需授予 UID/GID `65532` 读写权限；现有数据库、WAL 及加密密钥也需可读写。出现 `permission denied` 时优先核对挂载路径与所有权，不要用全局可写权限替代排查。
 
@@ -183,13 +199,13 @@ docker compose up -d --pull always
 
 ## 资源配置
 
-| 环境变量 | 默认值 | 含义 |
-| --- | --- | --- |
-| `MAX_UPLOAD_SIZE_MB` | `100` | 单文件硬上限，单位 MiB |
-| `MAX_STAGED_SIZE_MB` | `1024` | 上传暂存总额度，不能小于单文件上限 |
-| `MAX_UPLOADS` | `2` | 同时上传数量，范围 1–8 |
-| `MAX_DOWNLOADS` | `8` | 同时下载数量，范围 1–128 |
-| `GOMEMLIMIT` | `80MiB` | Go GC 软目标，不是进程内存硬限制 |
+| 环境变量             | 默认值  | 含义                                            |
+| -------------------- | ------- | ----------------------------------------------- |
+| `MAX_UPLOAD_SIZE_MB` | `10240` | 单文件硬上限，单位 MiB，默认 10 GiB             |
+| `MAX_STAGED_SIZE_MB` | `20480` | 上传暂存总额度，默认 20 GiB，不能小于单文件上限 |
+| `MAX_UPLOADS`        | `2`     | 同时上传数量，范围 1–8                          |
+| `MAX_DOWNLOADS`      | `8`     | 同时下载数量，范围 1–128                        |
+| `GOMEMLIMIT`         | `80MiB` | Go GC 软目标，不是进程内存硬限制                |
 
 分离版 Compose 另设后端 `128m`、前端 `64m` 容器内存限制，合并版为单容器 `128m`。系统设置的上传大小只能降低环境硬上限。按实际负载使用 `docker stats` 观察内存、CPU 和 I/O。
 
@@ -201,12 +217,12 @@ Windows 的 LOCAL 存储只接受与磁盘实际名称一致的路径，拒绝�
 
 单文件程序和合并容器已包含配对、WebSocket 消息与 HTTP 实时中继，全部沿用网站端口，无需开放其他服务端口或部署 TURN。直连由两端浏览器尝试建立；网络不允许直连时选择中继。自建防火墙或浏览器网络策略仍可能限制 WebRTC 的动态连接，中继可通过现有网站入口使用。
 
-| 环境变量 | 默认值 | 含义 |
-| --- | --- | --- |
-| `TRANSFER_ENABLED` | `true` | 设为 `false` 关闭设备互传 |
-| `TRANSFER_MAX_FILE_MB` | `10240` | 单个互传文件硬上限，1–10240 MiB；后台可设置更小的值 |
-| `TRANSFER_RATE_MB` | `64` | 初始中继合计发送速率，0–10240 MiB/s；0 为不限速，后台保存值优先 |
-| `TRANSFER_STUN` | 空 | 可选 `stun:主机:端口`；默认不联系第三方 STUN |
+| 环境变量               | 默认值  | 含义                                                            |
+| ---------------------- | ------- | --------------------------------------------------------------- |
+| `TRANSFER_ENABLED`     | `true`  | 设为 `false` 关闭设备互传                                       |
+| `TRANSFER_MAX_FILE_MB` | `10240` | 单个互传文件硬上限，1–10240 MiB；后台可设置更小的值             |
+| `TRANSFER_RATE_MB`     | `64`    | 初始中继合计发送速率，0–10240 MiB/s；0 为不限速，后台保存值优先 |
+| `TRANSFER_STUN`        | 空      | 可选 `stun:主机:端口`；默认不联系第三方 STUN                    |
 
 管理后台的「系统设置 → 设备互传」可保存中继总速率、并发请求数（默认 4，范围 1–16）和单文件大小。每个分段下载请求各占一路并发。速率保存后立即生效；降低并发只阻止新的超额传输，不中断已有文件；大小限制用于新建配对连接。设置保存到数据库，重启后恢复。设置为不限速仍保留背压、固定缓冲及并发保护，不代表无限制地接收数据。
 
@@ -236,6 +252,16 @@ client_max_body_size 10g;
 
 临时下载链接含下载票据，服务代码不记录票据。普通中继票据仅使用一次，下载工具入口的票据可在 30 分钟内探测、分段和重试，闲置 10 分钟失效，结束任务或房间结束后撤销。自建代理应避免在访问日志中记录此路由的查询串（例如使用 `$uri` 而不是 `$request_uri`）。下载工具分段占用现有中继并发额度，不开启新监听端口，不在服务器缓存文件。公网使用 HTTPS/WSS；若前后端异源，需明确配置 `ALLOWED_ORIGINS`，推荐仍使用同源代理。
 
+## 每分钟限频配置
+
+以上七个 `*_PER_MINUTE` 变量均可自定义，留空或未配置时使用默认值。只接受 1–1000000 的整数，`0` 不表示关闭限频；非法配置会阻止服务启动。容器模式在 `.env` 设置后重建容器，二进制模式设置进程环境后重启服务；后台没有这些次数的设置项，也不会用数据库配置覆盖环境变量。
+
+除 WebSocket 应用消息按已认证成员计数外，其他限频按真实来源 IP 计数。普通中继的上传和下载共用每 IP 每分钟 180 次，下载工具的 HEAD、GET、分段 GET 共用另一份每 IP 每分钟 240 次。密码验证成功和失败均计数，管理与访客入口分别计算。没有跨 IP 的每分钟总次数，多个用户不会消耗彼此的限频额度。
+
+计数为内存中的一分钟固定窗口，从各计数项首次请求起算；进程重启清空，多实例各自计数。HTTP 超限返回 429，WebSocket 应用消息超限断开连接。完整计数规则见 [API 限频策略](api.md#限频策略)。
+
+全站并发、在线房间容量、单文件累计请求和总带宽保护仍然保留，防止同时请求耗尽资源；它们与每分钟限频分开计算。放宽次数不会提高并发容量或带宽。
+
 ## HTTPS 与管理员入口
 
 前端、后端可独立部署。推荐浏览器统一访问站点域名，由反向代理将 `/api` 转发到后端；静态文件请求交给前端。默认 Compose 已配置同源转发。
@@ -248,7 +274,7 @@ client_max_body_size 10g;
 
 ### 真实客户端地址与可信代理
 
-密码尝试按真实来源分别限流，同时保留访客/管理入口隔离和全站总额度。后端默认忽略所有转发头。二进制部署可设置 `TRUSTED_PROXIES`，填写逗号分隔的明确代理 IP、CIDR 或可信 DNS 管理的代理主机名；例如本机代理可使用 `127.0.0.1,::1`。不要填写包含普通客户端的宽泛网段，后端拒绝 `/0` 和 `*`。解析主机名最多等待一秒，地址缓存 30 秒；DNS 失败时不继续使用已过期的信任地址。
+密码尝试按真实来源分别限流，访客与管理入口独立计数，没有跨 IP 的每分钟总额度。后端默认忽略所有转发头。二进制部署可设置 `TRUSTED_PROXIES`，填写逗号分隔的明确代理 IP、CIDR 或可信 DNS 管理的代理主机名；例如本机代理可使用 `127.0.0.1,::1`。不要填写包含普通客户端的宽泛网段，后端拒绝 `/0` 和 `*`。解析主机名最多等待一秒，地址缓存 30 秒；DNS 失败时不继续使用已过期的信任地址。
 
 多容器 Compose 只信任内部服务名 `frontend`，通过 Docker DNS 识别前端容器，无需固定 Docker 子网。前端 Nginx 用自己的 `$remote_addr` **覆盖** `X-Forwarded-For`，客户端自行发送该头不能伪造限流身份。后端仅接受可信 TCP 对端提供的转发链，并从右向左取首个不受信的地址。容器网络与配置中的 DNS 服务均属于信任边界，不应接入不受信任的容器。
 
@@ -281,7 +307,7 @@ real_ip_recursive on;
 docker compose up -d --pull always
 ```
 
-继续使用同一运行目录和数据、文件路径。升级不需要重新初始化数据库；停止或删除容器不会删除宿主机的 `./data`。分享过期或删除记录只撤销访问，不会清除原文件。更新镜像标签时无需重新下载 Compose，以免覆盖自定义端口或挂载路径。
+继续使用同一运行目录和数据、文件路径。升级不需要重新初始化数据库；停止或删除容器不会删除宿主机的 `./data`。分享过期不清除原文件；删除分享时默认同时删除原文件，可选择仅删除记录。原部署若配置了较小上传上限，需同步调整 `MAX_UPLOAD_SIZE_MB`、`MAX_STAGED_SIZE_MB` 与后台上传设置，才能使用 10 GiB 上限。更新镜像标签时无需重新下载 Compose，以免覆盖自定义端口或挂载路径。
 
 ## 常见问题
 

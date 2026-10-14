@@ -21,6 +21,10 @@ const temporary = await mkdtemp(resolve(root, "backend/bin/sharing-test-"));
 const filesDirectory = resolve(temporary, "files");
 await mkdir(filesDirectory);
 const password = "isolated-sharing-test-password";
+const editorPNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=",
+  "base64",
+);
 let service, browser, page;
 // 使用独立临时库和端口，测试不会连接用户部署或读取已有数据。
 const reservation = createServer();
@@ -53,7 +57,7 @@ const frontend = createServer(async (request, response) => {
     const nonce = randomBytes(18).toString("base64");
     response.setHeader(
       "Content-Security-Policy",
-      `default-src 'self'; script-src 'self'; style-src 'self' 'nonce-${nonce}'; img-src 'self' blob: https: http:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
+      `default-src 'self'; script-src 'self'; style-src 'self' 'nonce-${nonce}'; img-src 'self' blob: data: https: http:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
     );
     let target = resolve(staticRoot, "." + pathname);
     if (
@@ -155,6 +159,7 @@ try {
     ...(installed ? { executablePath: installed } : {}),
   });
   const context = await browser.newContext({
+    permissions: ["clipboard-read", "clipboard-write"],
     colorScheme: "dark",
     viewport: { width: 1440, height: 1000 },
   });
@@ -243,6 +248,50 @@ try {
     false,
   );
   await page.getByLabel(/自定义链接名称/).fill("mint-text-demo");
+  // 独立图片按钮已移除；粘贴和工具栏链接仍经过真实编辑器保存与预览。
+  assert.equal(
+    await page
+      .getByRole("button", { name: "插入本地图片", exact: true })
+      .count(),
+    0,
+  );
+  await page.getByLabel("Markdown 内容").press("Control+End");
+  await page.keyboard.insertText("\n\n");
+  for (let count = 1; count <= 2; count++) {
+    await page.getByLabel("Markdown 内容").evaluate((element, bytes) => {
+      const clipboard = new DataTransfer();
+      clipboard.items.add(
+        new File([new Uint8Array(bytes)], "pasted.png", { type: "image/png" }),
+      );
+      element.dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData: clipboard,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, Array.from(editorPNG));
+    await page.waitForFunction(
+      (count) =>
+        (
+          document
+            .querySelector('[aria-label="Markdown 内容"]')
+            .textContent.match(/!\[/g) || []
+        ).length === count,
+      count,
+    );
+  }
+  await page.getByRole("button", { name: "图片", exact: true }).click();
+  // 基础图片按钮插入 Markdown 并将光标放在地址处，直接填写图片链接。
+  await page.keyboard.insertText(origin + "/favicon.ico");
+  await page.waitForFunction(
+    () =>
+      (
+        document
+          .querySelector('[aria-label="Markdown 内容"]')
+          .textContent.match(/!\[/g) || []
+      ).length === 3,
+  );
   // 查看上限无需展开；分钟有效期写入真实记录，防止只改了下拉文案。
   assert.ok(await page.getByLabel(/最多查看次数/).isVisible());
   await page.getByLabel(/最多查看次数/).fill("20");
@@ -253,28 +302,93 @@ try {
       response.url().endsWith("/api/admin/paste") &&
       response.request().method() === "POST",
   );
+  await page.getByLabel(/^访问密码/).fill("text-share-password");
   await page.getByRole("button", { name: "创建分享", exact: true }).click();
-  const textRecord = (await (await textCreated).json()).data;
+  const textResponse = await textCreated;
+  assert.ok(
+    textResponse
+      .request()
+      .postDataJSON()
+      .content.includes(`![](${origin}/favicon.ico)`),
+  );
+  assert.equal(
+    textResponse
+      .request()
+      .postDataJSON()
+      .content.split("data:image/png;base64,").length,
+    3,
+  );
+  const textRecord = (await textResponse.json()).data;
   assert.equal(textRecord.max_views, 20);
   assert.ok(
     Math.abs(Date.parse(textRecord.expires_at) - Date.now() - 300000) < 10000,
   );
-  const sharedText = page.getByLabel("分享链接");
+  const sharedText = page.getByLabel("分享文字");
   await sharedText.waitFor();
-  const textURL = await sharedText.inputValue();
+  const manualText = await sharedText.inputValue();
+  const textURL = manualText.split("\n")[0].replace("链接：", "");
+  assert.equal(manualText, `链接：${textURL}\n密码：text-share-password`);
+  assert.equal(await sharedText.getAttribute("readonly"), "");
+  // 文本框可全选并手动复制，用户不必依赖复制按钮。
+  await sharedText.focus();
+  await sharedText.press("Control+A");
+  await sharedText.press("Control+C");
+  assert.equal(
+    (await page.evaluate(() => navigator.clipboard.readText())).replaceAll(
+      "\r\n",
+      "\n",
+    ),
+    manualText,
+  );
   assert.ok(textURL.endsWith("/paste/mint-text-demo"));
+  // 复制使用创建时的密码，后续编辑表单不能改变结果中的分享文字。
+  await page.getByLabel(/^访问密码/).fill("draft-password");
+  await page.getByRole("button", { name: "复制分享文字", exact: true }).click();
+  assert.equal(
+    (await page.evaluate(() => navigator.clipboard.readText())).replaceAll(
+      "\r\n",
+      "\n",
+    ),
+    `链接：${textURL}\n密码：text-share-password`,
+  );
+  await page.setViewportSize({ width: 320, height: 844 });
+  assert.ok(
+    await page.locator(".result").evaluate((panel) => {
+      const box = panel.getBoundingClientRect();
+      return (
+        box.right <= innerWidth &&
+        [...panel.querySelectorAll(".result-actions .ui-button")].every(
+          (button) => button.getBoundingClientRect().right <= box.right,
+        )
+      );
+    }),
+  );
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.locator(".result").screenshot({
+    path: resolve(root, "backend/bin/share-result-unified.png"),
+  });
   await page.goto(origin + "/");
   await page.getByLabel("Markdown 内容").fill("不能覆盖原分享");
   await page.getByLabel(/自定义链接名称/).fill("mint-text-demo");
   await page.getByRole("button", { name: "创建分享", exact: true }).click();
   await page.getByText("链接后缀已被占用", { exact: true }).waitFor();
   await page.goto(textURL);
+  assert.equal(await page.getByText(/^分享密码：/).count(), 0);
   await page.getByRole("heading", { name: "本站预览" }).waitFor();
+  await page.waitForFunction(
+    () =>
+      [
+        ...document.querySelectorAll(
+          '.markdown-body img[src^="data:image/png"]',
+        ),
+      ].filter((image) => image.naturalWidth === 1).length === 2,
+  );
   assert.equal(await page.evaluate(() => window.compromised), undefined);
   assert.equal(await page.locator(".markdown-body [background]").count(), 0);
   assert.equal(await page.locator(".markdown-body td").textContent(), "正文");
   assert.deepEqual(external, []);
   await page.goto(origin + "/upload");
+  await page.getByText(/单文件不超过 10 GiB/).waitFor();
   await page.locator('input[type="file"]').setInputFiles({
     name: "中文预览.txt",
     mimeType: "text/plain",
@@ -298,7 +412,9 @@ try {
     Math.abs(Date.parse(fileRecord.expires_at) - Date.now() - 600000) < 10000,
   );
   await page.getByRole("heading", { name: "分享链接", exact: true }).waitFor();
-  const fileURL = await page.locator(".share-result input").inputValue();
+  const fileURL = (
+    await page.locator(".share-result textarea").inputValue()
+  ).replace("链接：", "");
   assert.ok(fileURL.endsWith("/file/mint-file-demo"));
   await page.goto(fileURL);
   await page
@@ -311,11 +427,90 @@ try {
   const range = await fetch(download, { headers: { Range: "bytes=0-2" } });
   assert.equal(range.status, 206);
   assert.equal((await range.arrayBuffer()).byteLength, 3);
+  // 管理员打开失效链接可以读取且不计次，访客仍只收到统一失效提示。
+  const past = new Date(Date.now() - 60000).toISOString();
+  await api(
+    "/api/admin/files/" + fileRecord.id,
+    "PUT",
+    { expires_at: past },
+    admin,
+  );
+  await page.reload();
+  await page.getByText(/分享已失效：已过期/).waitFor();
+  await page
+    .locator(".plain-preview")
+    .filter({ hasText: "中文文件内容" })
+    .waitFor();
+  const visitor = await browser.newContext();
+  const visitorPage = await visitor.newPage();
+  await visitorPage.goto(fileURL);
+  await visitorPage.getByText("分享已失效或不存在", { exact: true }).waitFor();
+  await visitor.close();
   await page.goto(origin + "/admin/file-management");
   await page.getByRole("button", { name: "编辑", exact: true }).click();
+  await page.getByLabel(/^访问密码/).fill("file-new-password");
   await page.getByLabel("文件名称", { exact: true }).fill("新的名称.txt");
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await page.getByText("新的名称.txt", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  assert.equal(
+    await page.getByLabel(/^访问密码/).inputValue(),
+    "file-new-password",
+  );
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  // 取消和仅删除记录都不删除原件；另一分享使用默认模式真正删除原件。
+  await page
+    .locator(".row-actions")
+    .getByRole("button", { name: "删除", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "取消", exact: true })
+    .click();
+  await page.getByText("新的名称.txt", { exact: true }).waitFor();
+  await page
+    .locator(".row-actions")
+    .getByRole("button", { name: "删除", exact: true })
+    .click();
+  await page
+    .getByRole("checkbox", { name: "同时删除存储中的原文件", exact: true })
+    .uncheck();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "删除", exact: true })
+    .click();
+  await page.getByText("已删除", { exact: true }).waitFor();
+  assert.equal((await readdir(filesDirectory)).length, 1);
+  const deleteResponse = await fetch(backend + "/api/admin/share/upload", {
+    method: "PUT",
+    headers: {
+      Authorization: admin,
+      "Content-Type": "text/plain",
+      "X-Share-Filename": encodeURIComponent("物理删除.txt"),
+      "X-Share-Options": Buffer.from(
+        JSON.stringify({ storage_config_id: storage.id }),
+      ).toString("base64"),
+    },
+    body: "to delete",
+  });
+  assert.equal(deleteResponse.status, 201);
+  await page.reload();
+  await page.getByText("物理删除.txt", { exact: true }).waitFor();
+  await page
+    .locator(".row-actions")
+    .getByRole("button", { name: "删除", exact: true })
+    .click();
+  assert.ok(
+    await page
+      .getByRole("checkbox", { name: "同时删除存储中的原文件", exact: true })
+      .isChecked(),
+  );
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "删除", exact: true })
+    .click();
+  await page.getByText("已删除", { exact: true }).waitFor();
+  assert.equal((await readdir(filesDirectory)).length, 1);
   await page.goto(origin + "/admin/settings/global");
   await page.getByLabel(/新分享默认有效期/).fill("2");
   await page.getByText("有未保存的修改", { exact: true }).waitFor();
@@ -402,6 +597,81 @@ try {
   await page.getByRole("button", { name: "保存设置" }).click();
   await page.getByText("设置已保存", { exact: true }).waitFor();
   await page.locator("summary").click();
+  // GitHub 使用本站内置图标，地址和可见性由真实设置控制。
+  assert.equal(
+    await page
+      .getByRole("link", { name: "GitHub", exact: true })
+      .getAttribute("href"),
+    "https://github.com/Qwerto107/CloudPaste",
+  );
+  await page.getByLabel("显示 GitHub 链接", { exact: true }).uncheck();
+  await page.getByRole("button", { name: "保存设置", exact: true }).click();
+  await page.getByText("设置已保存", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole("link", { name: "GitHub", exact: true }).count(),
+    0,
+  );
+  await page.getByLabel("显示 GitHub 链接", { exact: true }).check();
+  await page
+    .getByLabel("GitHub 地址", { exact: true })
+    .fill("https://github.com/Qwerto107/CloudPaste/issues");
+  await page.getByLabel("显示站点公告", { exact: true }).check();
+  const announcementCard = page
+    .locator(".settings-card")
+    .filter({
+      has: page.getByRole("heading", { name: "站点公告", exact: true }),
+    });
+  await announcementCard
+    .getByLabel("Markdown 内容")
+    .fill("**维护通知**：请及时保存所需文件。\n欢迎使用本站。");
+  await page.getByRole("button", { name: "保存设置", exact: true }).click();
+  await page.getByText("设置已保存", { exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("link", { name: "GitHub", exact: true })
+      .getAttribute("href"),
+    "https://github.com/Qwerto107/CloudPaste/issues",
+  );
+  assert.equal(await page.locator(".site-announcement").count(), 0);
+  await page.getByRole("button", { name: "站点公告", exact: true }).click();
+  await page
+    .locator(".site-announcement")
+    .getByText("维护通知", { exact: true })
+    .waitFor();
+  assert.equal(
+    await page
+      .locator(".site-announcement")
+      .getByRole("heading", { name: "站点公告", exact: true })
+      .count(),
+    0,
+  );
+  await page.getByLabel("默认显示公告", { exact: true }).check();
+  await page.getByRole("button", { name: "保存设置", exact: true }).click();
+  await page.getByText("设置已保存", { exact: true }).waitFor();
+  await page.reload();
+  await page
+    .locator(".site-announcement")
+    .getByText("维护通知", { exact: true })
+    .waitFor();
+  const compactAnnouncement = await page
+    .locator(".site-announcement")
+    .evaluate((panel) => ({
+      padding: parseFloat(getComputedStyle(panel).paddingTop),
+      height: panel.getBoundingClientRect().height,
+    }));
+  assert.ok(
+    compactAnnouncement.padding <= 12 && compactAnnouncement.height < 120,
+    JSON.stringify(compactAnnouncement),
+  );
+  await page.getByRole("button", { name: "站点公告", exact: true }).click();
+  await page.getByRole("link", { name: "常规", exact: true }).click();
+  assert.equal(await page.locator(".site-announcement").count(), 0);
+  await page.reload();
+  await page
+    .locator(".site-announcement")
+    .getByText("维护通知", { exact: true })
+    .waitFor();
+  await page.getByRole("link", { name: "站点外观", exact: true }).click();
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     assert.ok(
@@ -515,7 +785,10 @@ try {
         "Content-Type": type,
         "X-Share-Filename": name,
         "X-Share-Options": Buffer.from(
-          JSON.stringify({ storage_config_id: storage.id }),
+          JSON.stringify({
+            storage_config_id: storage.id,
+            slug: name === "picture.png" ? "mint-file-active" : "",
+          }),
         ).toString("base64"),
       },
       body: bytes,
@@ -709,7 +982,8 @@ try {
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.getByLabel(/自定义链接名称/).fill("mint-file-demo");
+  // 使用仍有效的媒体分享后缀；前面的 mint-file-demo 已在删除模式验证中释放。
+  await page.getByLabel(/自定义链接名称/).fill("mint-file-active");
   await page.getByLabel(/合集名称/).fill("批量文件合集");
   const uploadsBefore = userRequests.filter((url) =>
     url.endsWith("/api/share/upload"),
@@ -720,21 +994,48 @@ try {
     userRequests.filter((url) => url.endsWith("/api/share/upload")).length,
     uploadsBefore + 2,
   );
-  assert.equal(await page.locator(".share-result input").count(), 0);
+  assert.equal(await page.locator(".share-result textarea").count(), 0);
   await page.getByLabel(/自定义链接名称/).fill("batch-collection");
   await page.getByRole("button", { name: "生成合集链接" }).click();
   await page.waitForFunction(
-    () => document.querySelectorAll(".share-result input").length === 1,
+    () => document.querySelectorAll(".share-result textarea").length === 1,
   );
   assert.equal(
     userRequests.filter((url) => url.endsWith("/api/share/upload")).length,
     uploadsBefore + 2,
   );
-  const collectionURL = await page.locator(".share-result input").inputValue();
+  const collectionText = await page
+    .locator(".share-result textarea")
+    .inputValue();
+  const collectionURL = collectionText.split("\n")[0].replace("链接：", "");
+  assert.equal(
+    collectionText,
+    `链接：${collectionURL}\n密码：temporary-password`,
+  );
   assert.ok(collectionURL.endsWith("/file/batch-collection"));
+  await page.getByRole("button", { name: "复制分享文字", exact: true }).click();
+  assert.equal(
+    (await page.evaluate(() => navigator.clipboard.readText())).replaceAll(
+      "\r\n",
+      "\n",
+    ),
+    `链接：${collectionURL}\n密码：temporary-password`,
+  );
+  const userAuth = "ApiKey " + user.key;
+  const userFiles = (await api("/api/files", "GET", undefined, userAuth)).files;
+  const userCollection = userFiles.find(
+    (file) => file.slug === "batch-collection",
+  );
+  await api(
+    "/api/files/" + userCollection.id,
+    "PUT",
+    { expires_at: new Date(Date.now() - 60000).toISOString() },
+    userAuth,
+  );
   await page.goto(collectionURL);
-  await page.getByLabel(/^访问密码/).fill("temporary-password");
-  await page.getByRole("button", { name: "打开分享" }).click();
+  await page.getByText(/创建者查看/).waitFor();
+  await page.getByText(/分享已失效：已过期/).waitFor();
+  assert.equal(await page.getByText(/^分享密码：/).count(), 0);
   await page
     .getByRole("heading", { name: "批量文件合集", exact: true })
     .waitFor();
@@ -757,6 +1058,27 @@ try {
   assert.equal(archive.readUInt32LE(0), 0x04034b50);
   assert.equal(archive.readUInt32LE(archive.length - 22), 0x06054b50);
   assert.equal(archive.readUInt16LE(archive.length - 12), 2);
+  const afterOwner = (
+    await api("/api/files", "GET", undefined, userAuth)
+  ).files.find((file) => file.id === userCollection.id);
+  assert.equal(afterOwner.views, userCollection.views);
+  await page.goto(origin + "/manage/file-management");
+  const collectionRow = page
+    .getByRole("row")
+    .filter({ hasText: "batch-collection" });
+  await collectionRow
+    .getByRole("button", { name: "编辑", exact: true })
+    .click();
+  assert.equal(
+    await page.getByLabel(/^访问密码/).inputValue(),
+    "temporary-password",
+  );
+  await page.getByLabel(/^访问密码/).fill("changed-owner-password");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await page.getByText("已保存", { exact: true }).waitFor();
+  await page.goto(collectionURL);
+  await page.getByText(/创建者查看/).waitFor();
+  assert.equal(await page.getByText(/^分享密码：/).count(), 0);
   assert.ok(
     !userRequests.some((url) =>
       new URL(url).pathname.startsWith("/api/admin/"),
@@ -768,6 +1090,22 @@ try {
   await page.screenshot({
     path: resolve(root, "backend/bin/sharing-home.png"),
     fullPage: true,
+  });
+  await page
+    .locator(".site-announcement")
+    .getByText("维护通知", { exact: true })
+    .waitFor();
+  const announcementBox = await page
+    .locator(".site-announcement")
+    .boundingBox();
+  await page.screenshot({
+    path: resolve(root, "backend/bin/announcement-github-desktop.png"),
+    clip: {
+      x: 0,
+      y: 0,
+      width: 1440,
+      height: Math.ceil(announcementBox.y + announcementBox.height + 20),
+    },
   });
   assert.deepEqual(external, []);
   assert.deepEqual(errors, []);
