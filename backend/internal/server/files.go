@@ -10,10 +10,18 @@ import (
 
 func (a *App) registerFiles(mux *apiMux) {
 	mux.HandleFunc("POST /api/share/collection", a.protected(FileShare, false, a.createCollection))
-	mux.HandleFunc("GET /api/share/get/{slug}", a.handleShare(a.publicShare))
-	mux.HandleFunc("POST /api/share/verify/{slug}", a.handleShare(a.publicShare))
-	mux.HandleFunc("GET /api/s/{slug}", a.handleShare(a.shareContent))
-	mux.HandleFunc("GET /api/s/{slug}/{filename}", a.handleShare(a.shareContent))
+	// 公开分享只提供普通路径，前端不会附带管理身份。
+	mux.ServeMux.HandleFunc("GET /api/share/get/{slug}", a.handleShare(a.publicShare))
+	mux.ServeMux.HandleFunc("POST /api/share/verify/{slug}", a.handleShare(a.publicShare))
+	mux.ServeMux.HandleFunc("GET /api/s/{slug}", a.handleShare(a.shareContent))
+	mux.ServeMux.HandleFunc("GET /api/s/{slug}/{filename}", a.handleShare(a.shareContent))
+	mux.HandleFunc("GET /api/admin/share/get/{slug}", a.protected(0, true, a.publicShare))
+	mux.HandleFunc("GET /api/admin/s/{slug}", a.protected(0, true, a.shareContent))
+	mux.HandleFunc("GET /api/admin/s/{slug}/{filename}", a.protected(0, true, a.shareContent))
+	// 创建者入口与公开入口隔离，不能凭其他人的票据查看失效内容。
+	mux.ServeMux.HandleFunc("GET /api/owner/share/get/{slug}", a.protected(0, false, a.publicShare))
+	mux.ServeMux.HandleFunc("GET /api/owner/s/{slug}", a.protected(0, false, a.shareContent))
+	mux.ServeMux.HandleFunc("GET /api/owner/s/{slug}/{filename}", a.protected(0, false, a.shareContent))
 	mux.HandleFunc("GET /api/files", a.protected(FileManage, false, a.listShares))
 	mux.HandleFunc("PUT /api/files/{id}", a.protected(FileManage, false, a.updateShare))
 	mux.HandleFunc("DELETE /api/files/batch-delete", a.protected(FileManage, false, a.deleteShares))

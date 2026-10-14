@@ -129,6 +129,8 @@ type Ticket struct {
 	Path    string `json:"path"`
 	Subject string `json:"subject"`
 	Version string `json:"version,omitempty"`
+	// 管理员绑定会话、创建者绑定 API Key 摘要，复核时不需要在链接中暴露登录凭据。
+	Session string `json:"session,omitempty"`
 	Expires int64  `json:"exp"`
 }
 

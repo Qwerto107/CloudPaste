@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -293,6 +294,13 @@ func (a *App) Handler() http.Handler {
 			return
 		}
 		p, err := a.authenticate(r)
+		// 浏览器原生媒体请求不能附带登录头，仅在管理员读取入口接受会话绑定的短期票据。
+		if err == nil && p == nil && adminScope && (r.Method == "GET" || r.Method == "HEAD") && strings.HasPrefix(r.URL.Path, "/api/admin/s/") {
+			p, err = a.adminDownloadPrincipal(r)
+		}
+		if err == nil && p == nil && !adminScope && (r.Method == "GET" || r.Method == "HEAD") && strings.HasPrefix(r.URL.Path, "/api/owner/s/") {
+			p, err = a.ownerDownloadPrincipal(r)
+		}
 		if err != nil {
 			a.fail(w, err)
 			return

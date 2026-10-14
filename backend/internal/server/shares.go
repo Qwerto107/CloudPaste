@@ -119,27 +119,36 @@ func (a *App) revalidateShare(r *http.Request, previous Share) (Share, error) {
 	if shareVersion(current) != shareVersion(previous) {
 		return current, forbidden()
 	}
-	if err := shareGone(current); err != nil {
-		return current, err
+	if !managedFileRead(r, current) {
+		if err := shareGone(current); err != nil {
+			return current, err
+		}
 	}
 	return current, a.validateShareSources(r, current)
 }
 
 func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
+	admin := adminShareRead(r)
 	var s Share
 	if err := a.resource(r.Context(), "shares", "slug", r.PathValue("slug"), &s); err != nil {
 		return err
 	}
-	if err := shareGone(s); err != nil {
-		return err
+	if ownerShareRoute(r) && !ownerShareRead(r, s.Owner, FileManage) {
+		return notFound()
+	}
+	managed := managedFileRead(r, s)
+	if !managed {
+		if err := shareGone(s); err != nil {
+			return err
+		}
 	}
 	// 查看上限在密码提示前检查，失效分享不再要求输入密码。
-	if s.MaxViews > 0 && s.Views >= s.MaxViews {
+	if !managed && s.MaxViews > 0 && s.Views >= s.MaxViews {
 		return &apiError{410, "SHARE_GONE", "文件分享已达到最大查看次数"}
 	}
 	access := a.readShareAccess(r, "share-access", s.Slug, s.ID, shareVersion(s))
 	hasAccess := s.Password != "" && access.Expires > 0
-	if s.Password != "" && !hasAccess {
+	if !managed && s.Password != "" && !hasAccess {
 		if r.Method == "GET" {
 			a.write(w, 200, map[string]any{"slug": s.Slug, "requires_password": true}, "需要密码验证")
 			return nil
@@ -176,12 +185,14 @@ func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
 		if hasAccess && access.Expires <= time.Now().Unix() {
 			return current, forbidden()
 		}
-		if current.MaxViews > 0 && current.Views >= current.MaxViews {
+		if !managed && current.MaxViews > 0 && current.Views >= current.MaxViews {
 			return current, &apiError{410, "SHARE_GONE", "文件分享已达到最大查看次数"}
 		}
 		// 解锁凭证只免除密码验证，每次成功打开或刷新仍消耗查看额度。
-		current.Views++
-		err = a.saveResource(r.Context(), "shares", current.ID, current.Slug, current.Owner, current)
+		if !managed {
+			current.Views++
+			err = a.saveResource(r.Context(), "shares", current.ID, current.Slug, current.Owner, current)
+		}
 		return current, err
 	}()
 	if err != nil {
@@ -194,15 +205,32 @@ func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
 		// 刷新不能延长凭证寿命，下载链接也受同一访问期限约束。
 		leaseExpires = access.Expires
 	}
-	token := a.ticket(Ticket{Purpose: "share", Path: s.Slug, Subject: s.ID, Version: shareVersion(s), Expires: leaseExpires})
-	link := "/api/s/" + s.Slug + "/" + url.PathEscape(s.Filename) + "?token=" + url.QueryEscape(token)
+	lease := Ticket{Purpose: "share", Path: s.Slug, Subject: s.ID, Version: shareVersion(s), Expires: leaseExpires}
+	contentBase := "/api/s/"
+	if admin {
+		lease.Purpose = "admin-share"
+		lease.Session = principal(r).CredentialHash
+		contentBase = "/api/admin/s/"
+	}
+	if managed && !admin {
+		lease.Purpose = "owner-share"
+		lease.Session = principal(r).CredentialHash
+		contentBase = "/api/owner/s/"
+	}
+	token := a.ticket(lease)
+	link := contentBase + s.Slug + "/" + url.PathEscape(s.Filename) + "?token=" + url.QueryEscape(token)
 	v := shareView(s)
 	v["requires_password"] = false
+	if managed {
+		v["admin_preview"] = admin
+		v["owner_preview"] = !admin
+		v["expiry_reason"] = shareExpiryReason(s.ExpiresAt, s.MaxViews, s.Views)
+	}
 	v["previewUrl"] = link
 	v["downloadUrl"] = link + "&download=true"
 	v["contentUrl"] = link
 	v["isLastView"] = s.MaxViews > 0 && s.Views == s.MaxViews
-	if s.Password != "" {
+	if !managed && s.Password != "" {
 		if !hasAccess {
 			access = Ticket{Purpose: "share-access", Path: s.Slug, Subject: s.ID, Version: shareVersion(s), Expires: leaseExpires}
 		}
@@ -211,11 +239,11 @@ func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
 	if len(s.Files) > 0 {
 		items := v["files"].([]map[string]any)
 		for _, item := range items {
-			fileLink := "/api/s/" + s.Slug + "?file=" + url.QueryEscape(item["id"].(string)) + "&token=" + url.QueryEscape(token)
+			fileLink := contentBase + s.Slug + "?file=" + url.QueryEscape(item["id"].(string)) + "&token=" + url.QueryEscape(token)
 			item["contentUrl"] = fileLink
 			item["downloadUrl"] = fileLink + "&download=true"
 		}
-		v["archiveUrl"] = "/api/s/" + s.Slug + "?archive=true&token=" + url.QueryEscape(token)
+		v["archiveUrl"] = contentBase + s.Slug + "?archive=true&token=" + url.QueryEscape(token)
 		delete(v, "contentUrl")
 		v["previewUrl"] = nil
 		v["downloadUrl"] = nil
@@ -226,6 +254,27 @@ func (a *App) publicShare(w http.ResponseWriter, r *http.Request) error {
 
 // 内容入口先检查票据或匿名查看额度，避免无效请求触发远程存储查询。
 func (a *App) shareContentAccess(r *http.Request, s Share) (bool, error) {
+	if ownerShareRoute(r) && !ownerShareRead(r, s.Owner, FileManage) {
+		return false, notFound()
+	}
+	if managedFileRead(r, s) {
+		// 原生下载必须持有本记录的管理员票据；不能只借另一记录的票据登录。
+		token := r.URL.Query().Get("token")
+		purpose := "admin-share"
+		if !adminShareRead(r) {
+			purpose = "owner-share"
+		}
+		if token != "" && !a.verifyTicket(token, purpose, s.Slug, s.ID, shareVersion(s)) {
+			return false, forbidden()
+		}
+		if token != "" && purpose == "owner-share" {
+			lease, err := a.parseTicket(token, purpose, s.Slug)
+			if err != nil || lease.Session != principal(r).CredentialHash {
+				return false, forbidden()
+			}
+		}
+		return false, nil
+	}
 	if err := shareGone(s); err != nil {
 		return false, err
 	}

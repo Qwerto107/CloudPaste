@@ -33,8 +33,11 @@ func validateExpiry(expires *string, maxViews int) error {
 
 func (a *App) registerPastes(mux *apiMux) {
 	mux.HandleFunc("POST /api/paste", a.protected(TextShare, false, a.createPaste))
-	mux.HandleFunc("GET /api/paste/{slug}", a.handleShare(a.publicPaste))
-	mux.HandleFunc("POST /api/paste/{slug}", a.handleShare(a.publicPaste))
+	mux.ServeMux.HandleFunc("GET /api/paste/{slug}", a.handleShare(a.publicPaste))
+	mux.ServeMux.HandleFunc("POST /api/paste/{slug}", a.handleShare(a.publicPaste))
+	// 管理员通过独立入口查看失效内容，公开入口仍保持原有约束。
+	mux.HandleFunc("GET /api/admin/paste/{slug}", a.protected(0, true, a.publicPaste))
+	mux.ServeMux.HandleFunc("GET /api/owner/paste/{slug}", a.protected(0, false, a.publicPaste))
 	mux.HandleFunc("GET /api/pastes", a.protected(TextManage, false, a.listPastes))
 	mux.HandleFunc("GET /api/pastes/{id}", a.protected(TextManage, false, a.pasteDetail))
 	mux.HandleFunc("PUT /api/pastes/{slug}", a.protected(TextManage, false, a.updatePaste))
@@ -120,11 +123,16 @@ func (a *App) publicPaste(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	actor := principal(r)
+	admin := adminShareRead(r)
+	if ownerShareRoute(r) && !ownerShareRead(r, p.Owner, TextManage) {
+		return notFound()
+	}
+	managed := admin || ownerShareRead(r, p.Owner, TextManage)
 	if p.Public != 1 && (actor == nil || (!actor.Admin && actor.Owner() != p.Owner)) {
 		return notFound()
 	}
 	// 先检查有效期和查看上限，失效分享无需再验证密码。
-	if expired(p.ExpiresAt) || (p.MaxViews > 0 && p.Views >= p.MaxViews) {
+	if !managed && (expired(p.ExpiresAt) || (p.MaxViews > 0 && p.Views >= p.MaxViews)) {
 		return &apiError{410, "PASTE_GONE", "文本分享已过期或达到最大查看次数"}
 	}
 	password := r.URL.Query().Get("password")
@@ -137,7 +145,7 @@ func (a *App) publicPaste(w http.ResponseWriter, r *http.Request) error {
 	}
 	access := a.readShareAccess(r, "paste-access", p.Slug, p.ID, pasteVersion(p))
 	hasAccess := p.Password != "" && access.Expires > 0
-	if p.Password != "" && !hasAccess {
+	if !managed && p.Password != "" && !hasAccess {
 		if password == "" {
 			a.write(w, 200, map[string]any{"slug": p.Slug, "hasPassword": true, "requiresPassword": true}, "需要密码验证")
 			return nil
@@ -164,21 +172,29 @@ func (a *App) publicPaste(w http.ResponseWriter, r *http.Request) error {
 		a.mutationMu.Unlock()
 		return notFound()
 	}
-	if expired(p.ExpiresAt) || (p.MaxViews > 0 && p.Views >= p.MaxViews) {
+	if !managed && (expired(p.ExpiresAt) || (p.MaxViews > 0 && p.Views >= p.MaxViews)) {
 		a.mutationMu.Unlock()
 		return &apiError{410, "PASTE_GONE", "文本分享已过期或达到最大查看次数"}
 	}
 	// 解锁凭证只免除密码验证，每次成功打开或刷新仍消耗查看额度。
-	p.Views++
-	err := a.saveResource(r.Context(), "pastes", p.ID, p.Slug, p.Owner, p)
+	var err error
+	if !managed {
+		p.Views++
+		err = a.saveResource(r.Context(), "pastes", p.ID, p.Slug, p.Owner, p)
+	}
 	a.mutationMu.Unlock()
 	if err != nil {
 		return err
 	}
 	view := pasteView(p, true)
 	view["requiresPassword"] = false
+	if managed {
+		view["admin_preview"] = admin
+		view["owner_preview"] = !admin
+		view["expiry_reason"] = shareExpiryReason(p.ExpiresAt, p.MaxViews, p.Views)
+	}
 	view["isLastView"] = p.MaxViews > 0 && p.Views == p.MaxViews
-	if p.Password != "" {
+	if !managed && p.Password != "" {
 		if !hasAccess {
 			access = Ticket{Purpose: "paste-access", Path: p.Slug, Subject: p.ID, Version: pasteVersion(p), Expires: time.Now().Add(shareAccessDuration).Unix()}
 		}

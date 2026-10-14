@@ -10,6 +10,7 @@ import {
 import { useRoute } from "vue-router";
 import { request, contentURL } from "./api.js";
 import { settings } from "./settings.js";
+import { session } from "./session.js";
 import {
   readShareAccess,
   saveShareAccess,
@@ -130,14 +131,26 @@ async function load(verify = false) {
   if (!verify) needsPassword.value = false;
   try {
     const slug = encodeURIComponent(route.params.slug);
+    // 管理员查看使用认证入口，普通用户和访客继续使用公开分享协议。
+    const admin = session.type === "admin";
     const endpoint = isFile.value
-      ? `/share/${verify ? "verify" : "get"}/${slug}`
+      ? `/share/${!admin && verify ? "verify" : "get"}/${slug}`
       : `/paste/${slug}`;
-    const data = await request(endpoint, {
-      public: true,
-      method: verify ? "POST" : "GET",
-      body: verify ? { password: password.value } : undefined,
-      shareToken: verify ? "" : readShareAccess(accessType, accessSlug),
+    let data;
+    if (session.type === "apikey" && !verify) {
+      try {
+        // 创建者读取走认证入口，其他人的分享仍使用公开协议。
+        data = await request(`/owner${endpoint}`, { signal: active.signal });
+      } catch (reason) {
+        if (![403, 404].includes(reason.status)) throw reason;
+      }
+    }
+    data ??= await request(endpoint, {
+      public: !admin,
+      method: !admin && verify ? "POST" : "GET",
+      body: !admin && verify ? { password: password.value } : undefined,
+      shareToken:
+        !admin && !verify ? readShareAccess(accessType, accessSlug) : "",
       signal: active.signal,
     });
     if (active !== controller) return;
@@ -148,7 +161,8 @@ async function load(verify = false) {
       clearShareAccess(accessType, accessSlug);
       return;
     }
-    saveShareAccess(accessType, accessSlug, data);
+    if (!admin && !data.owner_preview)
+      saveShareAccess(accessType, accessSlug, data);
     password.value = "";
     record.value = data;
     // 普通文本文件默认显示原文，只有 Markdown 文件才加载 Markdown 解析器。
@@ -239,6 +253,16 @@ onBeforeUnmount(() => controller?.abort());
       </p>
     </div>
     <section class="panel">
+      <p
+        v-if="record.admin_preview || record.owner_preview"
+        class="notice"
+        role="status"
+      >
+        {{ record.admin_preview ? "管理员查看" : "创建者查看"
+        }}{{
+          record.expiry_reason ? " · 分享已失效：" + record.expiry_reason : ""
+        }}，本次查看不消耗分享次数。
+      </p>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <template v-if="isCollection">
         <div class="collection-toolbar">

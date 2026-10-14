@@ -12,6 +12,84 @@ import (
 	"time"
 )
 
+func TestAdminExpiredSharePreview(t *testing.T) {
+	for _, kind := range []string{"text", "file", "collection"} {
+		for _, reason := range []string{"expired", "exhausted"} {
+			t.Run(kind+"/"+reason, func(t *testing.T) {
+				f := newFixture(t)
+				storage := ""
+				if kind != "text" {
+					storage, _ = f.local(t, t.TempDir(), "/disk")
+				}
+				created := createSlugTestShare(t, f, kind, f.admin, storage, "admin-preview", 201)
+				get, verify, update := "/api/paste/admin-preview", "/api/paste/admin-preview", "/api/pastes/admin-preview"
+				if kind != "text" {
+					get, verify, update = "/api/share/get/admin-preview", "/api/share/verify/admin-preview", "/api/files/"+created["id"].(string)
+				}
+				if reason == "expired" {
+					past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+					f.request(t, "PUT", update, f.admin, map[string]any{"expires_at": past}, nil, 200)
+				} else {
+					f.request(t, "POST", verify, "", map[string]any{"password": "share-password"}, nil, 200)
+				}
+				f.request(t, "GET", get, "", nil, nil, 404)
+				key, _ := f.key(t, "ordinary", "/", TextManage|FileManage)
+				adminGet := "/api/admin" + strings.TrimPrefix(get, "/api")
+				namespaceRequest(t, f, "GET", adminGet, key, nil, 403)
+				namespaceRequest(t, f, "GET", adminGet, "", nil, 401)
+				view := dataMap(t, f.request(t, "GET", get, f.admin, nil, nil, 200))
+				views := float64(0)
+				message := "已过期"
+				if reason == "exhausted" {
+					views, message = 1, "查看次数已用完"
+				}
+				if view["views"] != views || view["expiry_reason"] != message || view["admin_preview"] != true {
+					t.Fatalf("管理员查看未标明失效原因或消耗了查看次数: %v", view)
+				}
+				if kind == "text" {
+					if view["content"] != "text contents" || view["requiresPassword"] != false {
+						t.Fatal("管理员没有读取到文本")
+					}
+				} else {
+					link := view["downloadUrl"]
+					if kind == "collection" {
+						link = view["archiveUrl"]
+						file := view["files"].([]any)[0].(map[string]any)
+						w := f.request(t, "GET", file["contentUrl"].(string), "", nil, nil, 200)
+						if w.Body.String() != "collection contents" {
+							t.Fatal("失效合集文件无法读取")
+						}
+					} else {
+						f.request(t, "GET", view["contentUrl"].(string), "", nil, map[string]string{"Range": "bytes=0-3"}, 206)
+					}
+					f.request(t, "GET", link.(string), "", nil, nil, 200)
+					// 管理员票据不能转成公开读取票据，也不能授权另一分享。
+					publicStatus := 404
+					if reason == "exhausted" {
+						publicStatus = 403
+					}
+					f.request(t, "GET", strings.Replace(link.(string), "/api/admin/s/", "/api/s/", 1), "", nil, nil, publicStatus)
+					f.request(t, "GET", strings.Replace(link.(string), "admin-preview", "another-share", 1), "", nil, nil, 403)
+					f.request(t, "POST", "/api/admin/logout", f.admin, nil, nil, 200)
+					f.request(t, "GET", link.(string), "", nil, nil, 403)
+				}
+			})
+		}
+	}
+}
+
+func TestAdminShareTicketRevokedByReplacement(t *testing.T) {
+	f := newFixture(t)
+	storage, _ := f.local(t, t.TempDir(), "/disk")
+	old := createSlugTestShare(t, f, "file", f.admin, storage, "reused-admin", 201)
+	view := dataMap(t, f.request(t, "GET", "/api/share/get/reused-admin", f.admin, nil, nil, 200))
+	past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	f.request(t, "PUT", "/api/files/"+old["id"].(string), f.admin, map[string]any{"expires_at": past}, nil, 200)
+	createSlugTestShare(t, f, "file", f.admin, storage, "reused-admin", 201)
+	f.request(t, "GET", view["downloadUrl"].(string), "", nil, nil, 403)
+}
+
+// 验证真正的文件删除和记录删除两个模式，合集需要处理所有来源快照。
 func TestShareFileDeletionModes(t *testing.T) {
 	for _, kind := range []string{"file", "collection"} {
 		for _, mode := range []string{"", "both", "record_only"} {
