@@ -160,7 +160,6 @@ func TestTransferChatImageLimits(t *testing.T) {
 // 模拟取消回调尚未结束时处理器已经发送响应，验证不会把回调留给下一个复用请求。
 type transferDeadlineRecorder struct {
 	*httptest.ResponseRecorder
-	cancel               context.CancelFunc
 	interrupted, release chan struct{}
 	restored             bool
 }
@@ -175,42 +174,32 @@ func (w *transferDeadlineRecorder) SetReadDeadline(deadline time.Time) error {
 	return nil
 }
 
-func (w *transferDeadlineRecorder) Write(data []byte) (int, error) {
-	w.cancel()
-	<-w.interrupted
-	return w.ResponseRecorder.Write(data)
+type transferInterruptedBody struct {
+	cancel      context.CancelFunc
+	interrupted <-chan struct{}
 }
 
+func (b transferInterruptedBody) Read([]byte) (int, error) {
+	b.cancel()
+	<-b.interrupted
+	return 0, io.ErrUnexpectedEOF
+}
+func (transferInterruptedBody) Close() error { return nil }
+
 func TestTransferUploadWaitsForCancellationCleanup(t *testing.T) {
-	f, s, a, b := transferPair(t)
-	id, download := offerRelay(t, a, b, 1)
-	response, err := http.Get(s.URL + download)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	start := a.next("start")
-	h := f.app.transfers
-	h.mu.Lock()
-	var file *transferFile
-	for _, room := range h.rooms {
-		if room.files[id] != nil {
-			file = room.files[id]
-		}
-	}
-	h.mu.Unlock()
-	if file == nil {
-		t.Fatal("missing file")
-	}
-	w := &transferDeadlineRecorder{ResponseRecorder: httptest.NewRecorder(), cancel: file.cancel, interrupted: make(chan struct{}), release: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := &transferDeadlineRecorder{ResponseRecorder: httptest.NewRecorder(), interrupted: make(chan struct{}), release: make(chan struct{})}
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(w.release) }) }
 	defer release()
-	r := httptest.NewRequest("PUT", "/api/transfer/upload/"+id, bytes.NewReader([]byte{42}))
-	r.SetPathValue("id", id)
-	r.Header.Set("Authorization", "Transfer "+start["token"].(string))
+	r := httptest.NewRequest("PUT", "/upload", nil)
+	r.Body = transferInterruptedBody{cancel: cancel, interrupted: w.interrupted}
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
 	done := make(chan error, 1)
-	go func() { done <- f.app.transferUpload(w, r) }()
+	go func() { done <- streamTransferUpload(w, r, ctx, writer, 1, func() {}) }()
 	select {
 	case <-w.interrupted:
 	case <-time.After(3 * time.Second):
@@ -224,14 +213,43 @@ func TestTransferUploadWaitsForCancellationCleanup(t *testing.T) {
 	release()
 	select {
 	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
+		if err == nil {
+			t.Fatal("interrupted body was accepted")
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("handler did not finish cleanup")
 	}
 	if !w.restored {
 		t.Fatal("read deadline was not restored")
+	}
+}
+
+// 正常读完请求体后，结束传输不能再触发连接读超时，空文件也要遵守此规则。
+func TestTransferUploadStopsReadInterruptBeforeCompletion(t *testing.T) {
+	for _, payload := range [][]byte{nil, {42}} {
+		ctx, cancel := context.WithCancel(context.Background())
+		w := &transferDeadlineRecorder{ResponseRecorder: httptest.NewRecorder(), interrupted: make(chan struct{}), release: make(chan struct{})}
+		close(w.release)
+		r := httptest.NewRequest("PUT", "/upload", bytes.NewReader(payload))
+		reader, writer := io.Pipe()
+		drained := make(chan struct{})
+		go func() { _, _ = io.Copy(io.Discard, reader); close(drained) }()
+		err := streamTransferUpload(w, r, ctx, writer, int64(len(payload)), cancel)
+		reader.Close()
+		writer.Close()
+		<-drained
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-w.interrupted:
+			t.Fatal("completed upload interrupted a reusable connection")
+		default:
+		}
+		if !w.restored {
+			t.Fatal("completed upload retained its read deadline")
+		}
 	}
 }
 

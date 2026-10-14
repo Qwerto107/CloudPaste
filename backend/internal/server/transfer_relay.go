@@ -126,13 +126,18 @@ func streamTransferUpload(w http.ResponseWriter, r *http.Request, ctx context.Co
 		_ = control.SetReadDeadline(time.Now())
 		_ = r.Body.Close()
 	})
-	defer func() {
+	stopInterrupt := func() {
+		if stop == nil {
+			return
+		}
 		// stop 不会等待已经开始的回调；退出前等待并清除期限，避免误伤复用连接的下个请求。
 		if !stop() {
 			<-interrupted
 		}
+		stop = nil
 		_ = control.SetReadDeadline(time.Time{})
-	}()
+	}
+	defer stopInterrupt()
 	buffer := make([]byte, 32<<10)
 	remaining := size
 	var err error
@@ -151,6 +156,8 @@ func streamTransferUpload(w http.ResponseWriter, r *http.Request, ctx context.Co
 			if _, err = io.ReadFull(r.Body, extra[:]); err != io.EOF {
 				return badRequest("文件长度不一致")
 			}
+			// 请求体已读完，取消管道不能再打断连接的后台读取或下一个 API 请求。
+			stopInterrupt()
 		}
 		if _, err = writer.Write(buffer[:n]); err != nil {
 			return badRequest("接收已中断")
@@ -162,9 +169,10 @@ func streamTransferUpload(w http.ResponseWriter, r *http.Request, ctx context.Co
 		if _, err = io.ReadFull(r.Body, extra[:]); err != io.EOF {
 			return badRequest("文件长度不一致")
 		}
+		stopInterrupt()
 	}
 	_ = writer.Close()
-	// 响应写出期间也保留取消回调，整个处理器退出前统一等待并清除连接期限。
+	// 完成管道可能取消传输上下文，此时请求体的中断回调已经安全停止。
 	completed()
 	return nil
 }
