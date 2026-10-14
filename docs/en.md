@@ -10,7 +10,10 @@ Self-hosted text and file sharing, with custom links, expiration, passwords and 
 
 [中文](../README.md) · [Documentation](README.md) · [API](api.md) · [Releases](https://github.com/Qwerto107/CloudPaste/releases)
 
-**Go + Vue**　 / 　**LOCAL · S3**　 / 　**Docker · amd64 · arm64**
+**Go + Vue**　 / 　**LOCAL · S3**
+
+**Standalone Docker** · amd64 · arm64 · arm/v5 · arm/v6 · loong64<br>
+**Binaries** · Linux · Windows amd64 · macOS arm64
 
 </div>
 

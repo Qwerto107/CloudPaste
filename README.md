@@ -10,7 +10,10 @@
 
 [快速部署](#快速部署) · [文档中心](docs/README.md) · [API 参考](docs/api.md) · [下载版本](https://github.com/Qwerto107/CloudPaste/releases) · [English](docs/en.md)
 
-**Go + Vue**　 / 　**LOCAL · S3**　 / 　**Docker · amd64 · arm64**
+**Go + Vue**　 / 　**LOCAL · S3**
+
+**Docker 单容器** · amd64 · arm64 · arm/v5 · arm/v6 · loong64<br>
+**独立程序** · Linux · Windows amd64 · macOS arm64
 
 </div>
 
