@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,7 +29,6 @@ func notFound() error                 { return &apiError{404, "NOT_FOUND", "资�
 func unsupported() error {
 	return &apiError{501, "NOT_IMPLEMENTED", "Go 后端本阶段暂不支持此功能"}
 }
-func isNotFound(err error, api **apiError) bool { return errors.As(err, api) && (*api).Status == 404 }
 
 type attemptWindow struct {
 	Started time.Time
@@ -50,7 +48,6 @@ type App struct {
 	db                    *sql.DB
 	key                   []byte
 	logger                *slog.Logger
-	started               time.Time
 	downloads             chan struct{}
 	downloadMu            sync.Mutex
 	downloadsByIP         map[string]int
@@ -93,7 +90,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 	a := &App{
-		cfg: cfg, db: db, logger: logger, started: time.Now(),
+		cfg: cfg, db: db, logger: logger,
 		downloads:      make(chan struct{}, cfg.MaxDownloads),
 		requests:       make(chan struct{}, 16),
 		passwordChecks: make(chan struct{}, 2),
@@ -230,15 +227,10 @@ func (a *App) Handler() http.Handler {
 	a.registerPastes(mux)
 	a.registerStorage(mux)
 	a.registerFiles(mux)
-	a.registerMeta(mux)
 	a.registerSystem(mux)
 	a.registerUploads(mux)
 	a.registerTransfers(mux)
 	mux.HandleFunc("/", a.handle(func(w http.ResponseWriter, r *http.Request) error {
-		// 不支持的上传协议及其他写文件操作明确失败，不产生伪成功。
-		if strings.Contains(r.URL.Path, "upload") || strings.Contains(r.URL.Path, "multipart") || strings.Contains(r.URL.Path, "presign") || strings.Contains(r.URL.Path, "commit") {
-			return unsupported()
-		}
 		return notFound()
 	}))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -310,7 +302,7 @@ func (a *App) Handler() http.Handler {
 			a.fail(w, forbidden())
 			return
 		}
-		if adminScope && p == nil && r.URL.Path != adminAPIPrefix+"/login" && !adminTicketRequest(r) {
+		if adminScope && p == nil && r.URL.Path != adminAPIPrefix+"/login" {
 			a.fail(w, &apiError{401, "UNAUTHORIZED", "管理员接口需要认证"})
 			return
 		}

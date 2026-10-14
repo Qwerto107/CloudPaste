@@ -125,16 +125,11 @@ func (a *App) decrypt(value string) (string, error) {
 }
 
 type Ticket struct {
-	UploadID      string `json:"upload_id,omitempty"`
-	PartNumber    int    `json:"part_number,omitempty"`
-	Purpose       string `json:"purpose"`
-	Path          string `json:"path"`
-	Subject       string `json:"subject"`
-	Version       string `json:"version,omitempty"`
-	Credential    string `json:"credential,omitempty"`
-	MetaVersion   string `json:"meta_version,omitempty"`
-	SourceVersion string `json:"source_version,omitempty"`
-	Expires       int64  `json:"exp"`
+	Purpose string `json:"purpose"`
+	Path    string `json:"path"`
+	Subject string `json:"subject"`
+	Version string `json:"version,omitempty"`
+	Expires int64  `json:"exp"`
 }
 
 func (a *App) ticket(t Ticket) string {

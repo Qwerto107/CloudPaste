@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"mime"
-	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -179,6 +178,12 @@ func (a *App) uploadedShareDriver(r *http.Request, s Share) (Driver, string, err
 	return a.recheckDestination(r, dest, FileShare)
 }
 
+// 旧分片只保留到期清理所需信息，升级时不恢复已移除的上传协议。
+type pendingUpload struct {
+	ID      string
+	Expires int64
+}
+
 func (a *App) initUploads() error {
 	a.uploadDir = filepath.Join(a.cfg.DataDir, "uploads")
 	if err := os.MkdirAll(a.uploadDir, 0700); err != nil {
@@ -195,17 +200,11 @@ func (a *App) initUploads() error {
 	}
 	keep := map[string]bool{}
 	for _, raw := range sessions {
-		var session uploadSession
+		var session pendingUpload
 		if err = json.Unmarshal(raw, &session); err != nil {
 			return err
 		}
 		keep[session.ID] = true
-		if session.Completing {
-			session.Completing = false
-			if err = a.saveResource(context.Background(), "uploads", session.ID, "", session.Owner, session); err != nil {
-				return err
-			}
-		}
 	}
 	root, err := os.OpenRoot(a.uploadDir)
 	if err != nil {
@@ -241,11 +240,11 @@ func (a *App) cleanupUploads(ctx context.Context) error {
 		return err
 	}
 	for _, raw := range raws {
-		var s uploadSession
+		var s pendingUpload
 		if err = json.Unmarshal(raw, &s); err != nil {
 			return err
 		}
-		if s.Expires <= time.Now().Unix() && !s.Completing {
+		if s.Expires <= time.Now().Unix() {
 			if err = a.removeUpload(ctx, s.ID); err != nil {
 				return err
 			}
@@ -337,11 +336,8 @@ type uploadReadCloser struct {
 func (r *uploadReadCloser) Close() error { return r.closer.Close() }
 
 func (a *App) registerUploads(mux *apiMux) {
-	for _, method := range []string{"PUT", "POST"} {
-		mux.HandleFunc(method+" /api/fs/upload", a.protected(MountUpload, false, a.uploadEndpoint(a.uploadFile)))
-		mux.HandleFunc(method+" /api/share/upload", a.protected(MountUpload|FileShare, false, a.uploadEndpoint(a.uploadFile)))
-	}
-	a.registerMultipart(mux)
+	// 当前上传页面只发送原始文件；分享与文件发布共用有界上传额度。
+	mux.HandleFunc("PUT /api/share/upload", a.protected(MountUpload|FileShare, false, a.uploadEndpoint(a.uploadFile)))
 }
 func decodeUploadOptions(header string) (map[string]string, error) {
 	fields := map[string]string{}
@@ -380,96 +376,30 @@ func uploadCopy(ctx context.Context, to io.Writer, from io.Reader, limit int64) 
 	}
 	return n, nil
 }
-func (a *App) readUpload(w http.ResponseWriter, r *http.Request, f *os.File, share bool, maximum int64) (string, string, int64, map[string]string, error) {
-	fields := map[string]string{}
-	name, contentType := "", r.Header.Get("Content-Type")
-	var size int64
-	r.Body = http.MaxBytesReader(w, r.Body, maximum+(128<<10))
-	if r.Method == "PUT" {
-		prefix := "X-FS-"
-		if share {
-			prefix = "X-Share-"
-		}
-		var err error
-		name, err = url.PathUnescape(r.Header.Get(prefix + "Filename"))
-		if err != nil {
-			return "", "", 0, nil, badRequest("文件名编码无效")
-		}
-		if err = validateUploadName(name); err != nil {
-			return "", "", 0, nil, err
-		}
-		fields, err = decodeUploadOptions(r.Header.Get(prefix + "Options"))
-		if err != nil {
-			return "", "", 0, nil, err
-		}
-		if r.ContentLength > maximum {
-			return "", "", 0, nil, uploadTooLarge()
-		}
-		size, err = uploadCopy(r.Context(), f, r.Body, maximum)
-		if err != nil {
-			return "", "", 0, nil, err
-		}
-		if r.ContentLength >= 0 && size != r.ContentLength {
-			return "", "", 0, nil, badRequest("实际文件大小与声明不一致")
-		}
-	} else {
-		media, params, err := mime.ParseMediaType(contentType)
-		if err != nil || media != "multipart/form-data" || params["boundary"] == "" {
-			return "", "", 0, nil, badRequest("需要 multipart/form-data 文件表单")
-		}
-		reader := multipart.NewReader(r.Body, params["boundary"])
-		fieldBytes := int64(0)
-		parts := 0
-		for {
-			part, err := reader.NextRawPart()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				return "", "", 0, nil, badRequest("文件表单不完整")
-			}
-			parts++
-			if parts > 33 {
-				return "", "", 0, nil, badRequest("表单字段过多")
-			}
-			if part.FormName() == "file" {
-				if name != "" {
-					return "", "", 0, nil, badRequest("每个请求只能上传一个文件")
-				}
-				_, parameters, e := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
-				if e != nil {
-					return "", "", 0, nil, badRequest("文件表单无效")
-				}
-				name = parameters["filename"]
-				if err = validateUploadName(name); err != nil {
-					return "", "", 0, nil, err
-				}
-				contentType = part.Header.Get("Content-Type")
-				size, err = uploadCopy(r.Context(), f, part, maximum)
-				if err != nil {
-					return "", "", 0, nil, err
-				}
-			} else {
-				key := part.FormName()
-				if key == "" || len(key) > 100 {
-					return "", "", 0, nil, badRequest("表单字段无效")
-				}
-				if _, exists := fields[key]; exists {
-					return "", "", 0, nil, badRequest("表单字段重复")
-				}
-				b, e := io.ReadAll(io.LimitReader(part, (64<<10)-fieldBytes+1))
-				fieldBytes += int64(len(b))
-				if e != nil || fieldBytes > 64<<10 {
-					return "", "", 0, nil, badRequest("表单参数过长")
-				}
-				fields[key] = string(b)
-			}
-			_ = part.Close()
-		}
-		if name == "" {
-			return "", "", 0, nil, badRequest("缺少 file 文件")
-		}
+func (a *App) readUpload(w http.ResponseWriter, r *http.Request, f *os.File, maximum int64) (string, string, int64, map[string]string, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maximum)
+	name, err := url.PathUnescape(r.Header.Get("X-Share-Filename"))
+	if err != nil {
+		return "", "", 0, nil, badRequest("文件名编码无效")
 	}
+	if err = validateUploadName(name); err != nil {
+		return "", "", 0, nil, err
+	}
+	fields, err := decodeUploadOptions(r.Header.Get("X-Share-Options"))
+	if err != nil {
+		return "", "", 0, nil, err
+	}
+	if r.ContentLength > maximum {
+		return "", "", 0, nil, uploadTooLarge()
+	}
+	size, err := uploadCopy(r.Context(), f, r.Body, maximum)
+	if err != nil {
+		return "", "", 0, nil, err
+	}
+	if r.ContentLength >= 0 && size != r.ContentLength {
+		return "", "", 0, nil, badRequest("实际文件大小与声明不一致")
+	}
+	contentType := r.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = mime.TypeByExtension(path.Ext(name))
 	}
@@ -481,6 +411,7 @@ func (a *App) readUpload(w http.ResponseWriter, r *http.Request, f *os.File, sha
 	}
 	return name, contentType, size, fields, nil
 }
+
 func (a *App) uploadFile(w http.ResponseWriter, r *http.Request) error {
 	// 未知长度也按单文件上限预留额度，避免并发流式上传耗尽临时磁盘。
 	// 单次上传固定上限，中途提高设置不会突破已预留额度。
@@ -503,8 +434,7 @@ func (a *App) uploadFile(w http.ResponseWriter, r *http.Request) error {
 	}
 	defer os.Remove(filepath.Join(a.uploadDir, temporary))
 	defer f.Close()
-	share := r.URL.Path == "/api/share/upload"
-	name, contentType, size, fields, err := a.readUpload(w, r, f, share, min(maximum, reserve))
+	name, contentType, size, fields, err := a.readUpload(w, r, f, min(maximum, reserve))
 	if err != nil {
 		return err
 	}
@@ -515,40 +445,23 @@ func (a *App) uploadFile(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if p == nil || !p.Has(MountUpload) {
+	if p == nil || !p.Has(MountUpload|FileShare) {
 		return forbidden()
 	}
 	r = r.WithContext(withPrincipal(r.Context(), p))
-	var dest uploadDestination
-	var record Share
-	if share {
-		if !p.Has(FileShare) {
-			return forbidden()
-		}
-		record, err = a.uploadShareRecord(r, fields, name, size, contentType)
-		if err != nil {
-			return err
-		}
-		storedName := name
-		if fields["original_filename"] != "1" && fields["original_filename"] != "true" {
-			extension := path.Ext(name)
-			if len(extension) > 32 {
-				extension = ""
-			}
-			storedName = randomID() + extension
-		}
-		dest, _, _, err = a.shareDestination(r, fields["storage_config_id"], fields["path"], storedName)
-	} else {
-		dir := r.URL.Query().Get("path")
-		if dir == "" {
-			dir = fields["path"]
-		}
-		canonical, e := cleanPath(dir)
-		if e != nil {
-			return e
-		}
-		dest, _, _, err = a.mountedDestination(r, path.Join(canonical, name), true)
+	record, err := a.uploadShareRecord(r, fields, name, size, contentType)
+	if err != nil {
+		return err
 	}
+	storedName := name
+	if fields["original_filename"] != "1" && fields["original_filename"] != "true" {
+		extension := path.Ext(name)
+		if len(extension) > 32 {
+			extension = ""
+		}
+		storedName = randomID() + extension
+	}
+	dest, _, _, err := a.shareDestination(r, fields["storage_config_id"], fields["path"], storedName)
 	if err != nil {
 		return err
 	}
@@ -566,25 +479,22 @@ func (a *App) uploadFile(w http.ResponseWriter, r *http.Request) error {
 	if err = writer.PutNew(r.Context(), key, f, size, contentType); err != nil {
 		return err
 	}
-	if share {
-		record.Path = dest.Path
-		record.StorageID = dest.StorageID
-		record.StorageKey = dest.StorageKey
-		record.SourceVersion = dest.Version
-		record.MetaVersion = dest.Proof
-		if err = a.saveResource(r.Context(), "shares", record.ID, record.Slug, record.Owner, record); err != nil {
-			return &apiError{409, "SHARE_SAVE_FAILED", "文件已保存，但分享记录未保存，请在挂载中重新创建分享"}
-		}
-		v := shareView(record)
-		v["url"] = "/file/" + record.Slug
-		a.write(w, 201, v, "文件已上传并创建分享")
-	} else {
-		a.write(w, 201, map[string]any{"path": dest.Path, "name": name, "size": size}, "文件上传成功")
+	record.Path = dest.Path
+	record.StorageID = dest.StorageID
+	record.StorageKey = dest.StorageKey
+	record.SourceVersion = dest.Version
+	record.MetaVersion = dest.Proof
+	err = a.saveResource(r.Context(), "shares", record.ID, record.Slug, record.Owner, record)
+	if err != nil {
+		return &apiError{409, "SHARE_SAVE_FAILED", "文件已保存，但分享记录未保存，请重新上传"}
 	}
+	v := shareView(record)
+	v["url"] = "/file/" + record.Slug
+	a.write(w, 201, v, "文件已上传并创建分享")
 	return nil
 }
 func (a *App) uploadShareRecord(r *http.Request, fields map[string]string, name string, size int64, contentType string) (Share, error) {
-	s := Share{ID: randomID(), Slug: fields["slug"], Filename: name, Size: size, MimeType: contentType, Remark: fields["remark"], Owner: principal(r).Owner(), CreatedAt: nowText(), UseProxy: 1}
+	s := Share{ID: randomID(), Slug: fields["slug"], Filename: name, Size: size, MimeType: contentType, Remark: fields["remark"], Owner: principal(r).Owner(), CreatedAt: nowText()}
 	s.UpdatedAt = s.CreatedAt
 	if s.Slug == "" {
 		s.Slug = randomID()

@@ -5,7 +5,7 @@ import "md-editor-v3/lib/preview.css";
 import { sanitizeHTML } from "./sanitize.js";
 import { useTheme } from "./ui/theme.js";
 import { settings } from "./settings.js";
-const props = defineProps({ content: { type: String, default: "" } });
+defineProps({ content: { type: String, default: "" } });
 const dark = useTheme();
 const previewId = `markdown-preview-${useId()}`;
 config({ markdownItConfig: (md) => md.set({ html: true, breaks: true }) });

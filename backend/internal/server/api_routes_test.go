@@ -52,7 +52,7 @@ func TestAdminNamespaceIsolation(t *testing.T) {
 		{"GET", "/api/storage", f.admin, 403},
 		{"GET", "/api/admin/storage", f.admin, 200},
 		{"GET", "/api/test/api-key", f.admin, 403},
-		{"GET", "/api/admin/test/api-key", f.admin, 200},
+		{"GET", "/api/admin/test/api-key", f.admin, 404},
 		{"GET", "/api/test/admin-token", key, 404},
 		{"GET", "/api/admin/test/admin-token", f.admin, 200},
 		{"POST", "/api/storage", key, 404},
@@ -66,71 +66,34 @@ func TestAdminNamespaceIsolation(t *testing.T) {
 	} {
 		namespaceRequest(t, f, test.method, test.target, test.auth, nil, test.status)
 	}
-	// 管理员凭据不能从普通存储详情入口读取密钥，API Key 也不能通过 reveal 提权。
-	storage := dataMap(t, f.request(t, "POST", "/api/admin/storage", f.admin, map[string]any{
-		"name": "secret", "storage_type": "S3", "bucket_name": "bucket", "is_public": true,
-		"access_key_id": "namespace-access-secret", "secret_access_key": "namespace-signing-secret",
-	}, nil, 201))
-	id := storage["id"].(string)
-	namespaceRequest(t, f, "GET", "/api/storage/"+id+"?reveal=plain", f.admin, nil, 403)
-	user := namespaceRequest(t, f, "GET", "/api/storage/"+id+"?reveal=plain", key, nil, 200)
-	if strings.Contains(user.Body.String(), "namespace-access-secret") || strings.Contains(user.Body.String(), "namespace-signing-secret") {
-		t.Fatal("storage credentials leaked to API Key")
-	}
-	admin := namespaceRequest(t, f, "GET", "/api/admin/storage/"+id+"?reveal=plain", f.admin, nil, 200)
-	if !strings.Contains(admin.Body.String(), "namespace-signing-secret") {
-		t.Fatal("admin credential reveal unavailable")
-	}
 }
 
-func TestAdminDownloadTicketsCannotCrossNamespaces(t *testing.T) {
+// 已移除的入口及其管理员镜像必须都不可达，防止后续重构重新暴露旧协议。
+func TestRemovedAPIsAreNotRegistered(t *testing.T) {
 	f := newFixture(t)
-	root := t.TempDir()
-	writeFile(t, root, "file.txt", "namespace file")
-	f.local(t, root, "/disk")
-	key, _ := f.key(t, "reader", "/disk", MountView|WebDAVRead)
-	adminLink := dataMap(t, f.request(t, "GET", "/api/admin/fs/file-link?path=/disk/file.txt", f.admin, nil, nil, 200))["url"].(string)
-	if !strings.HasPrefix(adminLink, "/api/admin/p/") {
-		t.Fatal("admin download link left protected prefix")
-	}
-	namespaceRequest(t, f, "GET", adminLink, "", nil, 200)
-	namespaceRequest(t, f, "GET", strings.Replace(adminLink, "/api/admin/p/", "/api/p/", 1), "", nil, 403)
-	userLink := dataMap(t, f.request(t, "GET", "/api/fs/file-link?path=/disk/file.txt", key, nil, nil, 200))["url"].(string)
-	namespaceRequest(t, f, "GET", userLink, "", nil, 200)
-	namespaceRequest(t, f, "GET", strings.Replace(userLink, "/api/p/", "/api/admin/p/", 1), "", nil, 403)
-	// 已删除的 DAV 入口不能用 Basic 认证探测管理密码。
-	for _, target := range []string{"/dav/disk/file.txt", "/api/admin/dav/disk/file.txt"} {
-		namespaceRequest(t, f, "GET", target, "", nil, 404)
-	}
-	// 管理员主动创建的公开分享仍可由访客读取，不要求访客访问管理前缀。
-	share := dataMap(t, f.request(t, "POST", "/api/admin/fs/create-share", f.admin, map[string]any{"path": "/disk/file.txt"}, nil, 201))
-	namespaceRequest(t, f, "GET", "/api/s/"+share["slug"].(string), "", nil, 200)
-}
-
-func TestMultipartTicketsCannotCrossNamespaces(t *testing.T) {
-	f := newFixture(t)
-	f.local(t, t.TempDir(), "/disk")
-	key, _ := f.key(t, "writer", "/disk", MountUpload)
-	for _, credential := range []string{f.admin, key} {
-		name := "user-empty.txt"
-		if credential == f.admin {
-			name = "admin-empty.txt"
+	for _, endpoint := range []string{
+		"GET /api/version", "GET /api/system/max-upload-size", "GET /api/public/guest-config",
+		"GET /api/fs/list", "GET /api/fs/get", "GET /api/fs/content", "GET /api/fs/download", "GET /api/fs/file-link", "POST /api/fs/create-share", "GET /api/p/removed",
+		"GET /api/share/content/removed", "GET /api/share/content/removed/file.txt", "GET /api/files/removed", "GET /api/raw/removed", "POST /api/proxy/link",
+		"GET /api/admin/api-keys/removed/storage-acl", "PUT /api/admin/api-keys/removed/storage-acl",
+		"GET /api/admin/fs-meta/list", "POST /api/admin/fs-meta/create", "GET /api/admin/fs-meta/removed", "PUT /api/admin/fs-meta/removed", "DELETE /api/admin/fs-meta/removed", "POST /api/fs/meta/password/verify",
+		"GET /api/storage/removed", "GET /api/mount/list", "POST /api/admin/mount/create", "PUT /api/admin/mount/removed", "DELETE /api/admin/mount/removed",
+		"GET /api/storage-types", "GET /api/storage-types/LOCAL/capabilities", "GET /api/admin/mount-schema", "POST /api/admin/pastes/clear-expired",
+		"GET /api/admin/settings/groups", "GET /api/admin/settings/metadata", "POST /api/admin/cache/clear",
+		"POST /api/fs/multipart/init", "POST /api/fs/multipart/sign-parts", "POST /api/fs/multipart/list-parts", "POST /api/fs/multipart/list-uploads", "POST /api/fs/multipart/abort", "POST /api/fs/multipart/complete", "PUT /api/fs/multipart/part/removed/1",
+		"PUT /api/fs/upload", "POST /api/fs/upload",
+	} {
+		method, route, _ := strings.Cut(endpoint, " ")
+		if isAdminPath(route) {
+			namespaceRequest(t, f, method, route, f.admin, nil, 404)
+			continue
 		}
-		session := dataMap(t, f.request(t, "POST", "/api/fs/multipart/init", credential, map[string]any{
-			"path": "/disk", "fileName": name, "fileSize": 0, "partSize": 5 << 20,
-		}, nil, 200))
-		signed := dataMap(t, f.request(t, "POST", "/api/fs/multipart/sign-parts", credential, map[string]any{
-			"uploadId": session["uploadId"], "partNumbers": []int{1},
-		}, nil, 200))
-		link := signed["presignedUrls"].([]any)[0].(map[string]any)["url"].(string)
-		other := strings.Replace(link, "/api/", "/api/admin/", 1)
-		if credential == f.admin {
-			if !strings.HasPrefix(link, "/api/admin/") {
-				t.Fatal("admin multipart URL left protected prefix")
-			}
-			other = strings.Replace(link, "/api/admin/", "/api/", 1)
-		}
-		namespaceRequest(t, f, "PUT", other, "", nil, 403)
-		namespaceRequest(t, f, "PUT", link, "", nil, 200)
+		namespaceRequest(t, f, method, route, "", nil, 404)
+		namespaceRequest(t, f, method, adminAPIPrefix+strings.TrimPrefix(route, "/api"), f.admin, nil, 404)
+	}
+	namespaceRequest(t, f, "POST", "/api/share/upload", "", nil, 404)
+	namespaceRequest(t, f, "POST", "/api/admin/share/upload", f.admin, nil, 404)
+	for _, route := range []string{"/api/admin/public/settings", "/api/admin/health"} {
+		namespaceRequest(t, f, "GET", route, f.admin, nil, 404)
 	}
 }

@@ -73,7 +73,7 @@ func TestSlowPublicShareDoesNotBlockUnrelatedText(t *testing.T) {
 			root := t.TempDir()
 			writeFile(t, root, "file.txt", "shared content")
 			storage, _ := f.local(t, root, "/disk")
-			share := dataMap(t, f.request(t, "POST", "/api/fs/create-share", f.admin, map[string]any{"path": "/disk/file.txt"}, nil, 201))
+			share := f.legacyShare(t, f.admin, map[string]any{"path": "/disk/file.txt"})
 			f.request(t, "POST", "/api/paste", f.admin, map[string]any{"slug": "independent", "content": "independent text"}, nil, 201)
 			d := pauseShareStorage(t, f, storage)
 			shareDone := asyncVisitorRead(f, prefix+share["slug"].(string))
@@ -107,7 +107,7 @@ func TestShareStateChangesDuringStorageQueryRejectRead(t *testing.T) {
 				writeFile(t, root, "file.txt", "shared secret")
 				storage, mount := f.local(t, root, "/disk")
 				creator, keyID := f.key(t, "creator", "/disk", MountView|FileShare)
-				share := dataMap(t, f.request(t, "POST", "/api/fs/create-share", creator, map[string]any{"path": "/disk/file.txt"}, nil, 201))
+				share := f.legacyShare(t, creator, map[string]any{"path": "/disk/file.txt"})
 				d := pauseShareStorage(t, f, storage)
 				shareDone := asyncVisitorRead(f, prefix+share["slug"].(string))
 				waitForShareStorage(t, d)
@@ -118,7 +118,7 @@ func TestShareStateChangesDuringStorageQueryRejectRead(t *testing.T) {
 					case "password":
 						f.request(t, "PUT", "/api/files/"+share["id"].(string), f.admin, map[string]any{"password": "new-password"}, nil, 200)
 					case "source":
-						f.request(t, "PUT", "/api/mount/"+mount, f.admin, map[string]any{"root_path": "/replacement"}, nil, 200)
+						f.moveMount(t, mount, "/replacement")
 					case "permission":
 						f.request(t, "PUT", "/api/admin/api-keys/"+keyID, f.admin, map[string]any{"permissions": 0}, nil, 200)
 					case "deleted":
@@ -157,7 +157,7 @@ func TestConcurrentPublicShareHonorsLastView(t *testing.T) {
 			root := t.TempDir()
 			writeFile(t, root, "file.txt", "shared content")
 			f.local(t, root, "/disk")
-			share := dataMap(t, f.request(t, "POST", "/api/fs/create-share", f.admin, map[string]any{"path": "/disk/file.txt", "max_views": 1}, nil, 201))
+			share := f.legacyShare(t, f.admin, map[string]any{"path": "/disk/file.txt", "max_views": 1})
 			var successes atomic.Int32
 			var group sync.WaitGroup
 			for i := 0; i < 8; i++ {
@@ -183,7 +183,7 @@ func TestShareTicketExpiringDuringStorageQueryIsRejected(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "file.txt", "shared secret")
 	storage, _ := f.local(t, root, "/disk")
-	view := dataMap(t, f.request(t, "POST", "/api/fs/create-share", f.admin, map[string]any{"path": "/disk/file.txt", "password": "share-password"}, nil, 201))
+	view := f.legacyShare(t, f.admin, map[string]any{"path": "/disk/file.txt", "password": "share-password"})
 	var share Share
 	if err := f.app.resource(context.Background(), "shares", "id", view["id"].(string), &share); err != nil {
 		t.Fatal(err)

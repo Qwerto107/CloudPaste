@@ -18,7 +18,6 @@ import (
 
 type Listing struct {
 	Items      []FileInfo `json:"items"`
-	Cursor     string     `json:"cursor,omitempty"`
 	NextCursor string     `json:"nextCursor,omitempty"`
 	HasMore    bool       `json:"hasMore"`
 }
@@ -259,17 +258,10 @@ func (a *App) invalidateDriver(id string) {
 func (a *App) registerStorage(mux *apiMux) {
 	mux.HandleFunc("GET /api/storage", a.protected(0, false, a.listStorage))
 	mux.HandleFunc("POST /api/admin/storage", a.protected(0, true, a.saveStorage))
-	mux.HandleFunc("GET /api/storage/{id}", a.protected(0, false, a.storageDetail))
 	mux.HandleFunc("PUT /api/admin/storage/{id}", a.protected(0, true, a.saveStorage))
 	mux.HandleFunc("DELETE /api/admin/storage/{id}", a.protected(0, true, a.removeStorage))
 	mux.HandleFunc("PUT /api/admin/storage/{id}/set-default", a.protected(0, true, a.defaultStorage))
 	mux.HandleFunc("POST /api/admin/storage/{id}/test", a.protected(0, true, a.testStorage))
-	mux.HandleFunc("GET /api/mount/list", a.protected(MountView, false, a.listMounts))
-	mux.HandleFunc("POST /api/admin/mount/create", a.protected(0, true, a.saveMount))
-	mux.HandleFunc("PUT /api/admin/mount/{id}", a.protected(0, true, a.saveMount))
-	mux.HandleFunc("DELETE /api/admin/mount/{id}", a.protected(0, true, a.removeMount))
-	mux.HandleFunc("GET /api/storage-types", a.protected(0, false, a.storageTypes))
-	mux.HandleFunc("GET /api/admin/mount-schema", a.protected(0, true, a.mountSchema))
 }
 
 // 普通存储查询需要实际文件能力，纯文本或分享记录管理权限不能读取配置。
@@ -322,38 +314,6 @@ func (a *App) listStorage(w http.ResponseWriter, r *http.Request) error {
 		end = total
 	}
 	a.write(w, 200, map[string]any{"items": items[offset:end], "total": total}, "获取成功")
-	return nil
-}
-func (a *App) storageDetail(w http.ResponseWriter, r *http.Request) error {
-	actor := principal(r)
-	if !canReadStorage(actor) {
-		return forbidden()
-	}
-	var s Storage
-	if err := a.resource(r.Context(), "storage_configs", "id", r.PathValue("id"), &s); err != nil {
-		return err
-	}
-	if !a.storageAllowed(actor, s) {
-		return notFound()
-	}
-	view := storageView(s, actor.Admin)
-	if reveal := r.URL.Query().Get("reveal"); actor.Admin && (reveal == "plain" || reveal == "masked") {
-		for name, encrypted := range map[string]string{"access_key_id": s.AccessKey, "secret_access_key": s.SecretKey, "password": s.Password} {
-			plain, err := a.decrypt(encrypted)
-			if err != nil {
-				return err
-			}
-			if reveal == "masked" && plain != "" {
-				if len(plain) > 4 {
-					plain = "********" + plain[len(plain)-4:]
-				} else {
-					plain = "********"
-				}
-			}
-			view[name] = plain
-		}
-	}
-	a.write(w, 200, view, "获取成功")
 	return nil
 }
 func (a *App) saveStorage(w http.ResponseWriter, r *http.Request) error {
@@ -461,16 +421,19 @@ func (a *App) saveStorage(w http.ResponseWriter, r *http.Request) error {
 func (a *App) removeStorage(w http.ResponseWriter, r *http.Request) error {
 	a.mutationMu.Lock()
 	defer a.mutationMu.Unlock()
-	mounts, err := a.allMounts(r.Context())
+	// 挂载管理入口已移除；删除存储时一并撤销历史挂载，原文件保持不动。
+	tx, err := a.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		return err
 	}
-	for _, m := range mounts {
-		if m.StorageID == r.PathValue("id") {
-			return badRequest("请先删除关联挂载")
-		}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(r.Context(), `DELETE FROM mounts WHERE json_extract(data,'$.storage_config_id')=?`, r.PathValue("id")); err != nil {
+		return err
 	}
-	if err = a.deleteResource(r.Context(), "storage_configs", r.PathValue("id")); err != nil {
+	if _, err = tx.ExecContext(r.Context(), "DELETE FROM storage_configs WHERE id=?", r.PathValue("id")); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
 		return err
 	}
 	a.invalidateDriver(r.PathValue("id"))
@@ -506,110 +469,5 @@ func (a *App) testStorage(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	a.write(w, 200, map[string]any{"success": true, "storageType": s.Type, "message": "读取测试成功"}, "连接成功")
-	return nil
-}
-
-func (a *App) listMounts(w http.ResponseWriter, r *http.Request) error {
-	mounts, err := a.allMounts(r.Context())
-	if err != nil {
-		return err
-	}
-	visible := []Mount{}
-	p := principal(r)
-	for _, m := range mounts {
-		var s Storage
-		if err = a.resource(r.Context(), "storage_configs", "id", m.StorageID, &s); err != nil {
-			return err
-		}
-		m.Capabilities = storageCapabilities(s)
-		if p.Admin {
-			visible = append(visible, m)
-			continue
-		}
-		if m.Active == 1 && s.Status == "ENABLED" && a.storageAllowed(p, s) && (within(p.BasicPath, m.Path) || within(m.Path, p.BasicPath)) {
-			visible = append(visible, m)
-		}
-	}
-	a.write(w, 200, visible, "获取成功")
-	return nil
-}
-func (a *App) saveMount(w http.ResponseWriter, r *http.Request) error {
-	a.mutationMu.Lock()
-	defer a.mutationMu.Unlock()
-	var m, old Mount
-	m.Active = 1
-	m.RootPath = "/"
-	m.WebProxy = 1
-	m.EnableSign = 1
-	if r.Method == "PUT" {
-		if err := a.resource(r.Context(), "mounts", "id", r.PathValue("id"), &old); err != nil {
-			return err
-		}
-		m = old
-	}
-	if err := decode(w, r, &m); err != nil {
-		return err
-	}
-	if m.Name == "" || len(m.Name) > 100 {
-		return badRequest("挂载名称无效")
-	}
-	var err error
-	m.Path, err = cleanPath(m.Path)
-	if err != nil {
-		return err
-	}
-	if m.Path == "/" {
-		return badRequest("挂载必须位于根目录的子路径")
-	}
-	m.RootPath, err = cleanPath(m.RootPath)
-	if err != nil {
-		return err
-	}
-	var s Storage
-	if err = a.resource(r.Context(), "storage_configs", "id", m.StorageID, &s); err != nil {
-		return err
-	}
-	m.StorageType = s.Type
-	mounts, err := a.allMounts(r.Context())
-	if err != nil {
-		return err
-	}
-	if old.ID == "" && len(mounts) >= 1000 {
-		return badRequest("最多配置 1000 个挂载")
-	}
-	for _, existing := range mounts {
-		if existing.ID != old.ID && existing.Path == m.Path {
-			return badRequest("挂载路径已被占用")
-		}
-	}
-	if old.ID == "" {
-		m.ID = randomID()
-		m.CreatedAt = nowText()
-	} else {
-		m.ID = old.ID
-		m.CreatedAt = old.CreatedAt
-	}
-	m.Owner = principal(r).ID
-	m.UpdatedAt = nowText()
-	m.WebProxy = 1
-	m.EnableSign = 1
-	m.Capabilities = storageCapabilities(s)
-	if err = a.saveResource(r.Context(), "mounts", m.ID, "", m.Owner, m); err != nil {
-		return err
-	}
-	status := 200
-	if old.ID == "" {
-		status = 201
-	}
-	a.write(w, status, m, "挂载已保存")
-	return nil
-}
-func (a *App) removeMount(w http.ResponseWriter, r *http.Request) error {
-	a.mutationMu.Lock()
-	defer a.mutationMu.Unlock()
-	if err := a.deleteResource(r.Context(), "mounts", r.PathValue("id")); err != nil {
-		return err
-	}
-	a.write(w, 200, nil, "挂载已删除")
 	return nil
 }

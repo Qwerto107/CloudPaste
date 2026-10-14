@@ -145,71 +145,6 @@ func withPrincipal(ctx context.Context, p *Principal) context.Context {
 	return context.WithValue(ctx, contextKey{}, p)
 }
 
-// 文件票据只证明曾通过验证；每次下载仍检查当前凭证、权限和目录密码版本。
-func (a *App) ticketPrincipal(r *http.Request, token, purpose, target string) (*Principal, error) {
-	t, err := a.parseTicket(token, purpose, target)
-	if err != nil {
-		return nil, err
-	}
-	var actor *Principal
-	if t.Version == t.Subject {
-		var id, name string
-		err = a.db.QueryRowContext(r.Context(), "SELECT a.id,a.username FROM sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=? AND s.admin_id=? AND s.expires_at>?", t.Credential, t.Subject, time.Now().Unix()).Scan(&id, &name)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, forbidden()
-			}
-			return nil, err
-		}
-		actor = &Principal{ID: id, Name: name, Admin: true, BasicPath: "/", CredentialHash: t.Credential}
-	} else if t.Version == "apikey:"+t.Subject {
-		var raw, credential string
-		err = a.db.QueryRowContext(r.Context(), "SELECT data,key_hash FROM api_keys WHERE id=?", t.Subject).Scan(&raw, &credential)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, forbidden()
-			}
-			return nil, err
-		}
-		var k APIKey
-		if err = json.Unmarshal([]byte(raw), &k); err != nil {
-			return nil, err
-		}
-		if expired(k.ExpiresAt) || k.Enabled != 1 || credential != t.Credential {
-			return nil, forbidden()
-		}
-		actor = keyPrincipal(k, credential)
-	} else {
-		return nil, forbidden()
-	}
-	// 票据的原身份必须与当前入口一致，不能把管理员票据换到普通路径使用。
-	if actor.Admin != adminRequest(r) {
-		return nil, forbidden()
-	}
-	// 上传票据的目录与来源版本由上传会话统一验证，包含目标及父目录密码。
-	if purpose == "upload-part" {
-		return actor, nil
-	}
-	meta, err := a.effectiveMeta(r.Context(), target)
-	if err != nil {
-		return nil, err
-	}
-	if t.MetaVersion != secretHash(meta.Password) {
-		return nil, forbidden()
-	}
-	if purpose == "file" {
-		ownerRequest := r.WithContext(withPrincipal(r.Context(), actor))
-		m, s, _, _, err := a.resolveMount(ownerRequest, target, MountView, false)
-		if err != nil {
-			return nil, err
-		}
-		if t.SourceVersion != sourceVersion(m, s) {
-			return nil, forbidden()
-		}
-	}
-	return actor, nil
-}
-
 func permissionMap(p *Principal) map[string]bool {
 	return map[string]bool{"text_share": p.Has(TextShare), "text_manage": p.Has(TextManage), "file_share": p.Has(FileShare), "file_manage": p.Has(FileManage), "mount_view": p.Has(MountView), "mount_upload": p.Has(MountUpload), "mount_copy": false, "mount_rename": false, "mount_delete": false, "webdav_read": false, "webdav_manage": false}
 }
@@ -229,13 +164,9 @@ func (a *App) registerAuth(mux *apiMux) {
 	}))
 	mux.HandleFunc("POST /api/admin/change-password", a.protected(0, true, a.changePassword))
 	mux.HandleFunc("GET /api/admin/test/admin-token", a.protected(0, true, func(w http.ResponseWriter, r *http.Request) error { a.write(w, 200, nil, "令牌有效"); return nil }))
-	mux.HandleFunc("GET /api/test/api-key", a.protected(0, false, func(w http.ResponseWriter, r *http.Request) error {
+	mux.ServeMux.HandleFunc("GET /api/test/api-key", a.protected(0, false, func(w http.ResponseWriter, r *http.Request) error {
 		p := principal(r)
 		a.write(w, 200, map[string]any{"name": p.Name, "basic_path": p.BasicPath, "permissions": permissionMap(p), "is_admin": p.Admin, "key_info": map[string]any{"id": p.ID, "name": p.Name, "basic_path": p.BasicPath, "role": p.Role}}, "认证成功")
-		return nil
-	}))
-	mux.HandleFunc("GET /api/public/guest-config", a.handle(func(w http.ResponseWriter, r *http.Request) error {
-		a.write(w, 200, map[string]any{"enabled": false, "key": nil}, "游客模式未启用")
 		return nil
 	}))
 	mux.HandleFunc("GET /api/admin/api-keys", a.protected(0, true, a.listKeys))
@@ -250,8 +181,6 @@ func (a *App) registerAuth(mux *apiMux) {
 		a.write(w, 200, nil, "密钥已删除")
 		return nil
 	}))
-	mux.HandleFunc("GET /api/admin/api-keys/{id}/storage-acl", a.protected(0, true, a.keyACL))
-	mux.HandleFunc("PUT /api/admin/api-keys/{id}/storage-acl", a.protected(0, true, a.keyACL))
 }
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) error {
@@ -493,39 +422,5 @@ func (a *App) updateKey(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	a.write(w, 200, k, "密钥已更新")
-	return nil
-}
-func (a *App) keyACL(w http.ResponseWriter, r *http.Request) error {
-	a.mutationMu.Lock()
-	defer a.mutationMu.Unlock()
-	k, err := a.keyByID(r)
-	if err != nil {
-		return err
-	}
-	if r.Method == "PUT" {
-		var body struct {
-			IDs []string `json:"storage_config_ids"`
-		}
-		if err = decode(w, r, &body); err != nil {
-			return err
-		}
-		if len(body.IDs) > 100 {
-			return badRequest("ACL 最多包含 100 个存储")
-		}
-		for _, id := range body.IDs {
-			var s Storage
-			if err = a.resource(r.Context(), "storage_configs", "id", id, &s); err != nil {
-				return err
-			}
-		}
-		k.StorageIDs = body.IDs
-		if err = a.saveKey(r, k); err != nil {
-			return err
-		}
-	}
-	if k.StorageIDs == nil {
-		k.StorageIDs = []string{}
-	}
-	a.write(w, 200, map[string]any{"storage_config_ids": k.StorageIDs}, "获取成功")
 	return nil
 }

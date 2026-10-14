@@ -1,6 +1,9 @@
 # Dependencies
 node_modules
 
+# 本地 IDE 配置不属于部署或构建内容。
+.idea/
+
 # Wrangler specific
 .wrangler/
 

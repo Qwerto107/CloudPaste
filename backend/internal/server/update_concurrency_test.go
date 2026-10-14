@@ -1,8 +1,6 @@
 package server
 
 import (
-	"bytes"
-	"context"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -80,7 +78,7 @@ func updateFixture(t *testing.T, kind string) (*fixture, string, string, string,
 	writeFile(t, root, "file.txt", "shared content")
 	f.local(t, root, "/disk")
 	auth, keyID := f.key(t, "editor", "/disk", MountView|FileShare|FileManage)
-	view := dataMap(t, f.request(t, "POST", "/api/fs/create-share", auth, map[string]any{"path": "/disk/file.txt", "slug": "owned-file"}, nil, 201))
+	view := f.legacyShare(t, auth, map[string]any{"path": "/disk/file.txt", "slug": "owned-file"})
 	return f, auth, keyID, "/api/files/" + view["id"].(string), view["id"].(string)
 }
 
@@ -146,50 +144,5 @@ func TestSlowUpdatesRecheckRevokedPermissionAndDeletedRecord(t *testing.T) {
 				awaitUpdate(t, done, status)
 			})
 		}
-	}
-}
-
-func TestSlowShareCreationDoesNotHoldGlobalLockAndRechecksSource(t *testing.T) {
-	f := newFixture(t)
-	root := t.TempDir()
-	writeFile(t, root, "file.txt", "shared content")
-	storage, mount := f.local(t, root, "/disk")
-	auth, _ := f.key(t, "creator", "/disk", MountView|FileShare)
-	// 先初始化驱动，再暂停真实文件查询。
-	f.request(t, "GET", "/api/fs/get?path=/disk/file.txt", auth, nil, nil, 200)
-	d := pauseShareStorage(t, f, storage)
-	done := make(chan *httptest.ResponseRecorder, 1)
-	r := httptest.NewRequest("POST", "/api/fs/create-share", bytes.NewBufferString(`{"path":"/disk/file.txt","slug":"pending-share"}`))
-	r.Header.Set("Authorization", auth)
-	go func() {
-		w := httptest.NewRecorder()
-		f.handler.ServeHTTP(w, r)
-		done <- w
-	}()
-	waitForShareStorage(t, d)
-	changed := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		request := httptest.NewRequest("PUT", "/api/admin/mount/"+mount, bytes.NewBufferString(`{"root_path":"/replacement"}`))
-		request.Header.Set("Authorization", f.admin)
-		w := httptest.NewRecorder()
-		f.handler.ServeHTTP(w, request)
-		changed <- w
-	}()
-	select {
-	case w := <-changed:
-		if w.Code != 200 {
-			t.Fatalf("挂载更新返回 %d: %s", w.Code, w.Body.String())
-		}
-	case <-time.After(time.Second):
-		d.resume()
-		<-done
-		<-changed
-		t.Fatal("创建分享仍阻塞挂载更新")
-	}
-	d.resume()
-	awaitUpdate(t, done, 410)
-	var s Share
-	if err := f.app.resource(context.Background(), "shares", "slug", "pending-share", &s); err == nil {
-		t.Fatal("来源已变化却仍保存了分享")
 	}
 }

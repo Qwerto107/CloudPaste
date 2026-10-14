@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
-	"strings"
 	"time"
 )
 
@@ -36,12 +35,10 @@ func (a *App) registerPastes(mux *apiMux) {
 	mux.HandleFunc("POST /api/paste", a.protected(TextShare, false, a.createPaste))
 	mux.HandleFunc("GET /api/paste/{slug}", a.handleShare(a.publicPaste))
 	mux.HandleFunc("POST /api/paste/{slug}", a.handleShare(a.publicPaste))
-	mux.HandleFunc("GET /api/raw/{slug}", a.handleShare(a.publicPaste))
 	mux.HandleFunc("GET /api/pastes", a.protected(TextManage, false, a.listPastes))
 	mux.HandleFunc("GET /api/pastes/{id}", a.protected(TextManage, false, a.pasteDetail))
 	mux.HandleFunc("PUT /api/pastes/{slug}", a.protected(TextManage, false, a.updatePaste))
 	mux.HandleFunc("DELETE /api/pastes/batch-delete", a.protected(TextManage, false, a.deletePastes))
-	mux.HandleFunc("POST /api/admin/pastes/clear-expired", a.protected(0, true, a.clearExpiredPastes))
 }
 
 func (a *App) createPaste(w http.ResponseWriter, r *http.Request) error {
@@ -138,9 +135,6 @@ func (a *App) publicPaste(w http.ResponseWriter, r *http.Request) error {
 	hasAccess := p.Password != "" && access.Expires > 0
 	if p.Password != "" && !hasAccess {
 		if password == "" {
-			if strings.HasPrefix(r.URL.Path, "/api/raw/") {
-				return forbidden()
-			}
 			a.write(w, 200, map[string]any{"slug": p.Slug, "hasPassword": true, "requiresPassword": true}, "需要密码验证")
 			return nil
 		}
@@ -176,12 +170,6 @@ func (a *App) publicPaste(w http.ResponseWriter, r *http.Request) error {
 	a.mutationMu.Unlock()
 	if err != nil {
 		return err
-	}
-	if strings.HasPrefix(r.URL.Path, "/api/raw/") {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write([]byte(p.Content))
-		return nil
 	}
 	view := pasteView(p, true)
 	view["requiresPassword"] = false
@@ -361,18 +349,5 @@ func (a *App) deletePastes(w http.ResponseWriter, r *http.Request) error {
 		count++
 	}
 	a.write(w, 200, map[string]int{"success": count}, "删除完成")
-	return nil
-}
-
-func (a *App) clearExpiredPastes(w http.ResponseWriter, r *http.Request) error {
-	a.mutationMu.Lock()
-	defer a.mutationMu.Unlock()
-	// 在数据库中删除，避免启动一个常驻轮询任务。
-	result, err := a.db.ExecContext(r.Context(), `DELETE FROM pastes WHERE (json_extract(data,'$.expires_at') IS NOT NULL AND json_extract(data,'$.expires_at') <> '' AND julianday(json_extract(data,'$.expires_at')) <= julianday('now')) OR (json_extract(data,'$.max_views') > 0 AND json_extract(data,'$.views') >= json_extract(data,'$.max_views'))`)
-	if err != nil {
-		return err
-	}
-	count, _ := result.RowsAffected()
-	a.write(w, 200, map[string]int64{"deleted": count}, "清理完成")
 	return nil
 }

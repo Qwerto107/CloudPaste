@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -74,74 +73,17 @@ func (a *App) defaultShareExpiry(r *http.Request) (*string, error) {
 }
 
 func (a *App) registerSystem(mux *apiMux) {
-	mux.HandleFunc("GET /api/health", a.handle(func(w http.ResponseWriter, r *http.Request) error {
+	// 健康检查由程序和容器调用，不生成额外的管理员入口。
+	mux.ServeMux.HandleFunc("GET /api/health", a.handle(func(w http.ResponseWriter, r *http.Request) error {
 		if err := a.db.PingContext(r.Context()); err != nil {
 			return err
 		}
 		a.write(w, 200, map[string]any{"status": "ok", "uploads": true, "readOnlyStorage": false}, "服务正常")
 		return nil
 	}))
-	mux.HandleFunc("GET /api/version", a.handle(func(w http.ResponseWriter, r *http.Request) error {
-		a.write(w, 200, map[string]any{"version": "0.7.0", "name": "cloudpaste", "environment": "Docker / standalone", "storage": "SQLite", "goVersion": runtime.Version(), "uptime": int(time.Since(a.started).Seconds()), "features": map[string]bool{"upload": true, "webdav": false, "readOnlyStorage": false}}, "获取版本成功")
-		return nil
-	}))
-	mux.HandleFunc("GET /api/system/max-upload-size", a.handle(func(w http.ResponseWriter, r *http.Request) error {
-		a.write(w, 200, map[string]any{"max_upload_size": a.maxUploadBytes() / (1 << 20), "upload_enabled": true}, "获取上传限制成功")
-		return nil
-	}))
-	mux.HandleFunc("GET /api/public/settings", a.handle(a.settings))
+	mux.ServeMux.HandleFunc("GET /api/public/settings", a.handle(a.settings))
 	mux.HandleFunc("GET /api/admin/settings", a.protected(0, true, a.settings))
-	mux.HandleFunc("GET /api/admin/settings/groups", a.protected(0, true, func(w http.ResponseWriter, r *http.Request) error {
-		groups := []map[string]any{}
-		for id, name := range map[int]string{1: "全局设置", 2: "预览设置", 3: "设备互传", 4: "站点设置"} {
-			count, readOnly := 0, 0
-			for _, s := range defaultSettings {
-				if s.Group == id {
-					count++
-					if s.Flags == 2 {
-						readOnly++
-					}
-				}
-			}
-			groups = append(groups, map[string]any{"id": id, "name": name, "settingCount": count, "readonlyCount": readOnly})
-		}
-		a.write(w, 200, groups, "获取分组成功")
-		return nil
-	}))
-	mux.HandleFunc("GET /api/admin/settings/metadata", a.protected(0, true, func(w http.ResponseWriter, r *http.Request) error {
-		items, err := a.loadSettings(r)
-		if err != nil {
-			return err
-		}
-		for _, s := range items {
-			if s.Key == r.URL.Query().Get("key") {
-				a.write(w, 200, s, "获取成功")
-				return nil
-			}
-		}
-		return notFound()
-	}))
 	mux.HandleFunc("PUT /api/admin/settings/group/{group}", a.protected(0, true, a.updateSettings))
-	mux.HandleFunc("GET /api/storage-types/{type}/capabilities", a.protected(MountView, false, func(w http.ResponseWriter, r *http.Request) error {
-		for _, m := range storageMetadata() {
-			if m["type"] == r.PathValue("type") {
-				m["storageType"] = m["type"]
-				a.write(w, 200, m, "获取成功")
-				return nil
-			}
-		}
-		return notFound()
-	}))
-	mux.HandleFunc("POST /api/admin/cache/clear", a.protected(0, true, func(w http.ResponseWriter, r *http.Request) error {
-		a.clientsMu.Lock()
-		for id, entry := range a.storageClients {
-			_ = entry.Driver.Close()
-			delete(a.storageClients, id)
-		}
-		a.clientsMu.Unlock()
-		a.write(w, 200, map[string]int{"cleared": 0}, "未缓存文件内容；连接缓存已清理")
-		return nil
-	}))
 }
 func (a *App) loadSettings(r *http.Request) ([]setting, error) {
 	items := append([]setting(nil), defaultSettings...)

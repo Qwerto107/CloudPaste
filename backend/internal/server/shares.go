@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 	"time"
 )
@@ -52,102 +51,6 @@ func shareView(s Share) map[string]any {
 		v["typeName"] = "文件合集"
 	}
 	return v
-}
-
-func (a *App) createShare(w http.ResponseWriter, r *http.Request) error {
-	var body struct {
-		Path, Slug, Password, Remark string
-		ExpiresAt                    *string     `json:"expires_at"`
-		ExpiresIn                    json.Number `json:"expires_in"`
-		MaxViews                     int         `json:"max_views"`
-	}
-	if err := decode(w, r, &body); err != nil {
-		return err
-	}
-	target, err := cleanPath(body.Path)
-	if err != nil {
-		return err
-	}
-	if body.Slug == "" {
-		body.Slug = randomID()
-	}
-	if !validSlug.MatchString(body.Slug) {
-		return badRequest("链接后缀格式无效")
-	}
-	if body.ExpiresIn != "" && body.ExpiresAt == nil {
-		hours, err := body.ExpiresIn.Float64()
-		if err != nil || hours < 0 || hours > 876000 {
-			return badRequest("过期小时数无效")
-		}
-		if hours > 0 {
-			value := time.Now().Add(time.Duration(hours * float64(time.Hour))).UTC().Format(time.RFC3339)
-			body.ExpiresAt = &value
-		}
-	}
-	if err = validateExpiry(body.ExpiresAt, body.MaxViews); err != nil {
-		return err
-	}
-	if len(body.Remark) > 4000 {
-		return badRequest("备注过长")
-	}
-	hash := ""
-	if body.Password != "" {
-		hash, err = passwordHash(body.Password)
-		if err != nil {
-			return err
-		}
-	}
-	m, s, d, key, err := a.resolveMount(r, target, MountView, true)
-	if err != nil {
-		return err
-	}
-	info, err := d.Stat(r.Context(), key)
-	if err != nil {
-		return err
-	}
-	if info.Directory {
-		return badRequest("第一版仅支持单个已有文件分享")
-	}
-	meta, err := a.effectiveMeta(r.Context(), target)
-	if err != nil {
-		return err
-	}
-	size := int64(0)
-	if info.Size != nil {
-		size = *info.Size
-	}
-	share := Share{ID: randomID(), Slug: body.Slug, Path: target, Filename: path.Base(target), Size: size, MimeType: info.MimeType, Password: hash, Remark: body.Remark, Owner: principal(r).Owner(), ExpiresAt: body.ExpiresAt, MaxViews: body.MaxViews, CreatedAt: nowText(), UseProxy: 1, SourceVersion: sourceVersion(m, s), MetaVersion: secretHash(meta.Password)}
-	share.UpdatedAt = share.CreatedAt
-	// 创建分享同样不能在写锁中等待上游；查询后重新核对凭证、来源和目录密码。
-	err = func() error {
-		a.mutationMu.Lock()
-		defer a.mutationMu.Unlock()
-		actor, err := a.authenticate(r)
-		if err != nil {
-			return err
-		}
-		if !actor.Has(FileShare|MountView) || actor.Owner() != share.Owner {
-			return forbidden()
-		}
-		currentRequest := r.WithContext(withPrincipal(r.Context(), actor))
-		if _, _, err := a.shareDriver(currentRequest, share); err != nil {
-			return err
-		}
-		if err := a.checkPathPassword(currentRequest, target); err != nil {
-			return err
-		}
-		if err := a.saveResource(r.Context(), "shares", share.ID, share.Slug, share.Owner, share); err != nil {
-			return badRequest("链接后缀已被占用")
-		}
-		return nil
-	}()
-	if err != nil {
-		return err
-	}
-	v := shareView(share)
-	v["url"] = "/file/" + share.Slug
-	a.write(w, 201, v, "文件分享已创建")
-	return nil
 }
 
 // 分享不复制文件；来源配置、目录密码或创建者权限发生变化后必须重新创建分享。
@@ -409,14 +312,6 @@ func (a *App) ownedShare(r *http.Request) (Share, error) {
 		return s, notFound()
 	}
 	return s, nil
-}
-func (a *App) shareDetail(w http.ResponseWriter, r *http.Request) error {
-	s, err := a.ownedShare(r)
-	if err != nil {
-		return err
-	}
-	a.write(w, 200, shareView(s), "获取成功")
-	return nil
 }
 func (a *App) updateShare(w http.ResponseWriter, r *http.Request) error {
 	s, err := a.ownedShare(r)

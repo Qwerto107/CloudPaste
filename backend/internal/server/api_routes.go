@@ -38,19 +38,6 @@ func adminRequest(r *http.Request) bool {
 	return value
 }
 
-func scopedAPIPath(r *http.Request, value string) string {
-	if adminRequest(r) {
-		return adminAPIPrefix + strings.TrimPrefix(value, "/api")
-	}
-	return value
-}
-
 func isDAVPath(value string) bool {
 	return value == "/dav" || strings.HasPrefix(value, "/dav/") || value == adminAPIPrefix+"/dav" || strings.HasPrefix(value, adminAPIPrefix+"/dav/")
-}
-
-// 无登录头的管理员下载及分片请求必须在专用路径中验证绑定原凭证的票据。
-func adminTicketRequest(r *http.Request) bool {
-	return ((r.Method == "GET" || r.Method == "HEAD") && strings.HasPrefix(r.URL.Path, adminAPIPrefix+"/p/")) ||
-		(r.Method == "PUT" && strings.HasPrefix(r.URL.Path, adminAPIPrefix+"/fs/multipart/part/"))
 }

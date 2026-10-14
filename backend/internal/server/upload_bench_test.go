@@ -48,10 +48,12 @@ func BenchmarkLocalUpload(b *testing.B) {
 			b.SetBytes(size)
 			b.ResetTimer()
 			for b.Loop() {
-				r := httptest.NewRequest("PUT", "/api/admin/fs/upload?path=/disk", io.LimitReader(zeroReader{}, size))
+				r := httptest.NewRequest("PUT", "/api/admin/share/upload", io.LimitReader(zeroReader{}, size))
 				r.ContentLength = size
 				r.Header.Set("Authorization", "Bearer "+token)
-				r.Header.Set("X-FS-Filename", "file.bin")
+				for name, value := range uploadHeaders("file.bin", map[string]any{"storage_config_id": s.ID, "path": "/disk", "original_filename": true}, true) {
+					r.Header.Set(name, value)
+				}
 				r.Header.Set("Content-Type", "application/octet-stream")
 				w := httptest.NewRecorder()
 				handler.ServeHTTP(w, r)

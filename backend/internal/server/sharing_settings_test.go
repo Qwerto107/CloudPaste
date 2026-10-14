@@ -84,8 +84,5 @@ func TestRemovedFeaturesAndStorage(t *testing.T) {
 		}
 	}
 	f.request(t, "POST", "/api/admin/storage", f.admin, map[string]any{"name": "removed", "storage_type": "WEBDAV", "endpoint_url": "https://example.com"}, nil, 400)
-	response := f.request(t, "GET", "/api/storage-types", f.admin, nil, nil, 200)
-	if strings.Contains(response.Body.String(), "WEBDAV") {
-		t.Fatal("仍公布已删除的存储类型")
-	}
+	f.request(t, "GET", "/api/storage-types", f.admin, nil, nil, 404)
 }

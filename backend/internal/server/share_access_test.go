@@ -66,7 +66,7 @@ func TestProtectedShareAccessRefresh(t *testing.T) {
 				t.Fatal("最后一次查看缺少提示")
 			}
 			if kind == "text" {
-				expectUnavailable("GET", "/api/raw/protected", nil, map[string]string{"X-Share-Access": token})
+
 				var current Paste
 				if err := f.app.resource(context.Background(), "pastes", "id", created["id"].(string), &current); err != nil || current.Views != 3 {
 					t.Fatalf("文本查看次数不正确: views=%d err=%v", current.Views, err)
@@ -156,10 +156,10 @@ func TestProtectedShareAccessRefresh(t *testing.T) {
 			expectUnavailable("GET", get, nil, nil)
 			expectUnavailable("POST", verify, map[string]any{"password": "wrong-password"}, nil)
 			if kind == "text" {
-				expectUnavailable("GET", "/api/raw/protected", nil, nil)
+
 			} else {
 				expectUnavailable("GET", "/api/s/protected", nil, nil)
-				expectUnavailable("GET", "/api/share/content/protected", nil, nil)
+
 			}
 			f.request(t, "DELETE", remove, f.admin, map[string]any{"ids": []string{created["id"].(string)}, "delete_mode": "record_only"}, nil, 200)
 			expectUnavailable("GET", get, nil, newHeaders)
@@ -174,7 +174,7 @@ func TestShareAccessExpiresDuringStorageQuery(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "first.txt", "contents")
 	storage, _ := f.local(t, root, "/disk")
-	created := dataMap(t, f.request(t, "POST", "/api/fs/create-share", f.admin, map[string]any{"path": "/disk/first.txt", "password": "share-password"}, nil, 201))
+	created := f.legacyShare(t, f.admin, map[string]any{"path": "/disk/first.txt", "password": "share-password"})
 	var share Share
 	if err := f.app.resource(context.Background(), "shares", "id", created["id"].(string), &share); err != nil {
 		t.Fatal(err)

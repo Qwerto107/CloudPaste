@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,8 +98,66 @@ func (f *fixture) local(t *testing.T, root, mountPath string) (string, string) {
 	t.Helper()
 	storage := dataMap(t, f.request(t, "POST", "/api/storage", f.admin, map[string]any{"name": "local", "storage_type": "LOCAL", "root_path": root, "is_public": true}, nil, 201))
 	id := storage["id"].(string)
-	mount := dataMap(t, f.request(t, "POST", "/api/mount/create", f.admin, map[string]any{"name": "disk", "storage_config_id": id, "mount_path": mountPath}, nil, 201))
-	return id, mount["id"].(string)
+	// 直接准备旧版挂载数据，避免测试依赖已移除的管理接口。
+	mount := Mount{ID: randomID(), Name: "disk", StorageID: id, Path: mountPath, RootPath: "/", Active: 1, UpdatedAt: nowText()}
+	if err := f.app.saveResource(context.Background(), "mounts", mount.ID, "", "", mount); err != nil {
+		t.Fatal(err)
+	}
+	return id, mount.ID
+}
+
+// 构造旧版已有文件分享，验证升级后仍能读取并复核历史来源权限。
+func (f *fixture) legacyShare(t *testing.T, auth string, fields map[string]any) map[string]any {
+	t.Helper()
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Header.Set("Authorization", auth)
+	actor, err := f.app.authenticate(r)
+	if err != nil || actor == nil {
+		t.Fatalf("准备分享身份失败: %v", err)
+	}
+	r = r.WithContext(withPrincipal(r.Context(), actor))
+	target := fields["path"].(string)
+	m, storage, driver, key, err := f.app.resolveMount(r, target, MountView, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := driver.Stat(r.Context(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := f.app.effectiveMeta(r.Context(), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	share := Share{ID: randomID(), Slug: randomID(), Path: target, Filename: info.Name, Size: *info.Size, MimeType: info.MimeType, Owner: actor.Owner(), CreatedAt: nowText(), UpdatedAt: nowText(), SourceVersion: sourceVersion(m, storage), MetaVersion: secretHash(meta.Password)}
+	if value, ok := fields["slug"].(string); ok {
+		share.Slug = value
+	}
+	if value, ok := fields["max_views"].(int); ok {
+		share.MaxViews = value
+	}
+	if value, ok := fields["password"].(string); ok {
+		share.Password, err = passwordHash(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = f.app.saveResource(r.Context(), "shares", share.ID, share.Slug, share.Owner, share); err != nil {
+		t.Fatal(err)
+	}
+	return shareView(share)
+}
+
+func (f *fixture) moveMount(t *testing.T, id, root string) {
+	t.Helper()
+	var mount Mount
+	if err := f.app.resource(context.Background(), "mounts", "id", id, &mount); err != nil {
+		t.Fatal(err)
+	}
+	mount.RootPath, mount.UpdatedAt = root, nowText()
+	if err := f.app.saveResource(context.Background(), "mounts", id, "", mount.Owner, mount); err != nil {
+		t.Fatal(err)
+	}
 }
 func writeFile(t *testing.T, root, name, content string) {
 	t.Helper()
@@ -147,77 +204,14 @@ func TestBootstrapAndEncryptedConfiguration(t *testing.T) {
 	}
 }
 
-func TestLocalAuthorizationRangeAndCredentialRevocation(t *testing.T) {
-	f := newFixture(t)
-	root := t.TempDir()
-	writeFile(t, root, "public/file.txt", "0123456789")
-	writeFile(t, root, "private/secret.txt", "secret")
-	f.local(t, root, "/disk")
-	auth, id := f.key(t, "limited", "/disk/public", MountView|FileShare|FileManage|WebDAVRead)
-	f.request(t, "GET", "/api/fs/content?path=/disk/private/secret.txt", auth, nil, nil, 403)
-	f.request(t, "GET", "/api/fs/content?path="+url.QueryEscape("/disk/public/../private/secret.txt"), auth, nil, nil, 400)
-	f.request(t, "GET", "/api/fs/list?path=/disk", auth, nil, nil, 200)
-	f.request(t, "PROPFIND", "/dav", auth, nil, map[string]string{"Depth": "1"}, 404)
-	info := dataMap(t, f.request(t, "GET", "/api/fs/get?path=/disk/public/file.txt", auth, nil, nil, 200))
-	link := info["previewUrl"].(string)
-	w := f.request(t, "GET", link, "", nil, map[string]string{"Range": "bytes=2-5"}, 206)
-	if w.Body.String() != "2345" || w.Header().Get("Content-Range") != "bytes 2-5/10" {
-		t.Fatal("range response incorrect", w.Body.String(), w.Header())
-	}
-	f.request(t, "HEAD", link, "", nil, nil, 200)
-	f.request(t, "GET", strings.Split(link, "?")[0], "", nil, nil, 403)
-	share := dataMap(t, f.request(t, "POST", "/api/fs/create-share", auth, map[string]any{"path": "/disk/public/file.txt"}, nil, 201))
-	f.request(t, "PUT", "/api/admin/api-keys/"+id, f.admin, map[string]any{"is_enable": false}, nil, 200)
-	f.request(t, "GET", link, "", nil, nil, 403)
-	f.request(t, "GET", "/api/share/get/"+share["slug"].(string), "", nil, nil, 403)
-	// 管理员退出后，由该会话生成的临时文件链接也立即失效。
-	adminLink := dataMap(t, f.request(t, "GET", "/api/fs/file-link?path=/disk/public/file.txt", f.admin, nil, nil, 200))["url"].(string)
-	f.request(t, "POST", "/api/admin/logout", f.admin, nil, nil, 200)
-	f.request(t, "GET", adminLink, "", nil, nil, 403)
-}
-
 func TestSourceChangeRevokesLinksAndShares(t *testing.T) {
 	f := newFixture(t)
 	root := t.TempDir()
 	writeFile(t, root, "file.txt", "original")
 	writeFile(t, root, "replacement/file.txt", "replacement")
 	_, mountID := f.local(t, root, "/disk")
-	link := dataMap(t, f.request(t, "GET", "/api/fs/file-link?path=/disk/file.txt", f.admin, nil, nil, 200))["url"].(string)
-	share := dataMap(t, f.request(t, "POST", "/api/fs/create-share", f.admin, map[string]any{"path": "/disk/file.txt"}, nil, 201))
-	f.request(t, "PUT", "/api/mount/"+mountID, f.admin, map[string]any{"root_path": "/replacement"}, nil, 200)
-	f.request(t, "GET", link, "", nil, nil, 403)
-	f.request(t, "GET", "/api/share/get/"+share["slug"].(string), "", nil, nil, 404)
-	w := f.request(t, "GET", "/api/fs/content?path=/disk/file.txt", f.admin, nil, nil, 200)
-	if w.Body.String() != "replacement" {
-		t.Fatal("new mount root was not applied")
-	}
-}
-
-func TestDirectoryPasswordCoversAllFileEntries(t *testing.T) {
-	f := newFixture(t)
-	root := t.TempDir()
-	writeFile(t, root, "locked/file.txt", "protected")
-	f.local(t, root, "/disk")
-	auth, _ := f.key(t, "reader", "/", MountView|FileShare|WebDAVRead)
-	meta := dataMap(t, f.request(t, "POST", "/api/fs-meta/create", f.admin, map[string]any{"path": "/disk/locked", "password": "directory-password", "passwordInherit": true}, nil, 201))
-	for _, endpoint := range []string{"list", "get", "content", "download", "file-link"} {
-		target := "/disk/locked/file.txt"
-		if endpoint == "list" {
-			target = "/disk/locked"
-		}
-		f.request(t, "GET", "/api/fs/"+endpoint+"?path="+target, auth, nil, nil, 403)
-	}
-	f.request(t, "POST", "/api/fs/create-share", auth, map[string]any{"path": "/disk/locked/file.txt"}, nil, 403)
-	f.request(t, "GET", "/dav/disk/locked/file.txt", auth, nil, nil, 404)
-	verified := dataMap(t, f.request(t, "POST", "/api/fs/meta/password/verify", auth, map[string]any{"path": "/disk/locked", "password": "directory-password"}, nil, 200))
-	headers := map[string]string{"X-FS-Path-Token": verified["token"].(string)}
-	f.request(t, "GET", "/api/fs/content?path=/disk/locked/file.txt", auth, nil, headers, 200)
-	link := dataMap(t, f.request(t, "GET", "/api/fs/file-link?path=/disk/locked/file.txt", auth, nil, headers, 200))["url"].(string)
-	f.request(t, "GET", link, "", nil, nil, 200)
-	share := dataMap(t, f.request(t, "POST", "/api/fs/create-share", auth, map[string]any{"path": "/disk/locked/file.txt"}, headers, 201))
-	f.request(t, "PUT", "/api/fs-meta/"+meta["id"].(string), f.admin, map[string]any{"password": "replacement-password"}, nil, 200)
-	f.request(t, "GET", link, "", nil, nil, 403)
-	f.request(t, "GET", "/api/fs/content?path=/disk/locked/file.txt", auth, nil, headers, 403)
+	share := f.legacyShare(t, f.admin, map[string]any{"path": "/disk/file.txt"})
+	f.moveMount(t, mountID, "/replacement")
 	f.request(t, "GET", "/api/share/get/"+share["slug"].(string), "", nil, nil, 404)
 }
 
@@ -226,7 +220,7 @@ func TestSharePasswordAndLastViewLease(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "file.txt", "file contents")
 	f.local(t, root, "/disk")
-	s := dataMap(t, f.request(t, "POST", "/api/fs/create-share", f.admin, map[string]any{"path": "/disk/file.txt", "password": "share-password", "max_views": 1}, nil, 201))
+	s := f.legacyShare(t, f.admin, map[string]any{"path": "/disk/file.txt", "password": "share-password", "max_views": 1})
 	slug := s["slug"].(string)
 	w := f.request(t, "GET", "/api/share/get/"+slug, "", nil, nil, 200)
 	if strings.Contains(w.Body.String(), "previewUrl") || strings.Contains(w.Body.String(), "file contents") {
@@ -255,7 +249,7 @@ func TestPastePasswordOwnershipAndConcurrentViews(t *testing.T) {
 	p := dataMap(t, f.request(t, "POST", "/api/paste", auth, map[string]any{"content": "private text", "password": "paste-password", "max_views": 2}, nil, 201))
 	slug := p["slug"].(string)
 	f.request(t, "GET", "/api/pastes/"+p["id"].(string), other, nil, nil, 404)
-	f.request(t, "GET", "/api/raw/"+slug, "", nil, nil, 403)
+	f.request(t, "GET", "/api/raw/"+slug, "", nil, nil, 404)
 	w := f.request(t, "GET", "/api/paste/"+slug, "", nil, nil, 200)
 	if strings.Contains(w.Body.String(), "private text") {
 		t.Fatal("password bypass")
@@ -297,39 +291,12 @@ func directoryLink(t *testing.T, link, target string) {
 		t.Skipf("无法创建测试链接: %v %s", err, output)
 	}
 }
-func TestLocalLinksCannotEscapeStorageOrAuthorizedSubdirectory(t *testing.T) {
-	f := newFixture(t)
-	root, outside := t.TempDir(), t.TempDir()
-	writeFile(t, outside, "secret.txt", "outside")
-	writeFile(t, root, "private/secret.txt", "private")
-	writeFile(t, root, "public/file.txt", "public")
-	directoryLink(t, filepath.Join(root, "public", "escape"), outside)
-	directoryLink(t, filepath.Join(root, "public", "sibling"), filepath.Join(root, "private"))
-	f.local(t, root, "/disk")
-	auth, _ := f.key(t, "scoped", "/disk/public", MountView)
-	f.request(t, "GET", "/api/fs/content?path=/disk/public/escape/secret.txt", auth, nil, nil, 403)
-	f.request(t, "GET", "/api/fs/content?path=/disk/public/sibling/secret.txt", auth, nil, nil, 403)
-}
-
-func TestStorageACLAndExpiredDownloadCredential(t *testing.T) {
-	f := newFixture(t)
-	root := t.TempDir()
-	writeFile(t, root, "file.txt", "body")
-	storage, _ := f.local(t, root, "/disk")
-	auth, id := f.key(t, "reader", "/", MountView)
-	f.request(t, "PUT", "/api/admin/api-keys/"+id+"/storage-acl", f.admin, map[string]any{"storage_config_ids": []string{storage}}, nil, 200)
-	f.local(t, t.TempDir(), "/other")
-	f.request(t, "GET", "/api/fs/list?path=/other", auth, nil, nil, 403)
-	link := dataMap(t, f.request(t, "GET", "/api/fs/file-link?path=/disk/file.txt", auth, nil, nil, 200))["url"].(string)
-	f.request(t, "PUT", "/api/admin/api-keys/"+id, f.admin, map[string]any{"expires_at": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)}, nil, 200)
-	f.request(t, "GET", link, "", nil, nil, 403)
-}
 
 func TestHTTPDefaultsAndUnsupportedUploads(t *testing.T) {
 	f := newFixture(t)
-	f.request(t, "POST", "/api/share/upload", f.admin, nil, nil, 400)
-	f.request(t, "POST", "/api/proxy/link", "", map[string]any{"url": "http://localhost"}, nil, 401)
-	f.request(t, "POST", "/api/proxy/link", f.admin, map[string]any{"url": "http://localhost"}, nil, 501)
+	f.request(t, "POST", "/api/share/upload", f.admin, nil, nil, 404)
+	f.request(t, "POST", "/api/proxy/link", "", map[string]any{"url": "http://localhost"}, nil, 404)
+	f.request(t, "POST", "/api/proxy/link", f.admin, map[string]any{"url": "http://localhost"}, nil, 404)
 	w := f.request(t, "OPTIONS", "/api/fs/get", "", nil, map[string]string{"Origin": "https://evil.test"}, 204)
 	if w.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatal("untrusted CORS origin allowed")

@@ -102,6 +102,7 @@ type Storage struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// 挂载保存路径、启用状态与展示信息；下载票据由服务端统一校验。
 type Mount struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
@@ -110,9 +111,6 @@ type Mount struct {
 	Path         string   `json:"mount_path"`
 	RootPath     string   `json:"root_path"`
 	Active       Flag     `json:"is_active"`
-	WebProxy     Flag     `json:"web_proxy"`
-	EnableSign   Flag     `json:"enable_sign"`
-	SortOrder    int      `json:"sort_order"`
 	Remark       string   `json:"remark"`
 	Owner        string   `json:"created_by"`
 	CreatedAt    string   `json:"created_at"`
@@ -154,7 +152,6 @@ type Share struct {
 	Views         int     `json:"views"`
 	CreatedAt     string  `json:"created_at"`
 	UpdatedAt     string  `json:"updated_at"`
-	UseProxy      Flag    `json:"use_proxy"`
 }
 
 type FileInfo struct {

@@ -1,24 +1,19 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 func (f *fixture) upload(t *testing.T, method, target, auth string, body io.Reader, headers map[string]string, status int) *httptest.ResponseRecorder {
@@ -49,56 +44,37 @@ func uploadHeaders(name string, fields map[string]any, share bool) map[string]st
 	b, _ := json.Marshal(fields)
 	return map[string]string{prefix + "Filename": url.PathEscape(name), prefix + "Options": base64.StdEncoding.EncodeToString(b), "Content-Type": "text/plain"}
 }
-func formUpload(t *testing.T, name, content string, fields map[string]string) (*bytes.Buffer, map[string]string) {
-	t.Helper()
-	b := new(bytes.Buffer)
-	writer := multipart.NewWriter(b)
-	part, err := writer.CreateFormFile("file", name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = io.WriteString(part, content); err != nil {
-		t.Fatal(err)
-	}
-	for k, v := range fields {
-		if err = writer.WriteField(k, v); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err = writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return b, map[string]string{"Content-Type": writer.FormDataContentType()}
-}
+
+// 当前页面通过原始 PUT 上传，权限、中文元信息与临时额度必须一起校验。
 func TestUploadsScopeLimitsNoOverwriteAndCleanup(t *testing.T) {
 	f := newFixture(t)
 	root := t.TempDir()
-	id, _ := f.local(t, root, "/disk")
-	writer, _ := f.key(t, "upload", "/disk/public", MountUpload|MountView|FileShare)
+	storage, _ := f.local(t, root, "/disk")
+	writer, _ := f.key(t, "upload", "/disk/public", MountUpload|FileShare)
 	reader, _ := f.key(t, "reader", "/", MountView)
-	headers := uploadHeaders("中文.txt", nil, false)
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk/public", "", strings.NewReader("内容"), headers, 401)
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk/public", reader, strings.NewReader("内容"), headers, 403)
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk/private", writer, strings.NewReader("内容"), headers, 403)
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk/public", writer, strings.NewReader("内容"), headers, 201)
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk/public", writer, strings.NewReader("overwrite"), headers, 409)
-	if got := f.request(t, "GET", "/api/fs/content?path="+url.QueryEscape("/disk/public/中文.txt"), writer, nil, nil, 200).Body.String(); got != "内容" {
+	fields := map[string]any{"storage_config_id": storage, "path": "/disk/public", "original_filename": true}
+	headers := uploadHeaders("中文.txt", fields, true)
+	f.upload(t, "PUT", "/api/share/upload", "", strings.NewReader("内容"), headers, 401)
+	f.upload(t, "PUT", "/api/share/upload", reader, strings.NewReader("内容"), headers, 403)
+	denied := uploadHeaders("中文.txt", map[string]any{"storage_config_id": storage, "path": "/disk/private"}, true)
+	f.upload(t, "PUT", "/api/share/upload", writer, strings.NewReader("内容"), denied, 403)
+	share := dataMap(t, f.upload(t, "PUT", "/api/share/upload", writer, strings.NewReader("内容"), headers, 201))
+	f.upload(t, "PUT", "/api/share/upload", writer, strings.NewReader("overwrite"), headers, 409)
+	view := dataMap(t, f.request(t, "GET", "/api/share/get/"+share["slug"].(string), "", nil, nil, 200))
+	if got := f.request(t, "GET", view["contentUrl"].(string), "", nil, nil, 200).Body.String(); got != "内容" {
 		t.Fatal(got)
 	}
 	for _, name := range []string{"../escape", "sub/file", "sub\\file", ".cloudpaste-upload-secret", ".CLOUDPASTE-UPLOAD-secret", "bad\x00name", "bad\nname", "bad:stream"} {
-		f.upload(t, "PUT", "/api/fs/upload?path=/disk/public", writer, strings.NewReader("bad"), uploadHeaders(name, nil, false), 400)
+		f.upload(t, "PUT", "/api/share/upload", writer, strings.NewReader("bad"), uploadHeaders(name, fields, true), 400)
 	}
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk/public/../private", writer, strings.NewReader("bad"), headers, 400)
-	f.request(t, "GET", "/api/fs/content?path=/disk/public/.CLOUDPASTE-UPLOAD-secret", writer, nil, nil, 400)
-	body, formHeaders := formUpload(t, "form.txt", "form data", map[string]string{"path": "/disk/public"})
-	f.upload(t, "POST", "/api/fs/upload", writer, body, formHeaders, 201)
+	invalid := uploadHeaders("invalid.txt", map[string]any{"storage_config_id": storage, "path": "/disk/public/../private"}, true)
+	f.upload(t, "PUT", "/api/share/upload", writer, strings.NewReader("bad"), invalid, 400)
 	f.app.cfg.MaxUploadBytes = 8
-	// 未声明长度的请求也校验实际字节，不只相信 Content-Length。
-	r := httptest.NewRequest("PUT", "/api/fs/upload?path=/disk/public", strings.NewReader("more than eight bytes"))
+	r := httptest.NewRequest("PUT", "/api/share/upload", strings.NewReader("more than eight bytes"))
 	r.ContentLength = -1
 	r.Header.Set("Authorization", writer)
-	for k, v := range uploadHeaders("large.txt", nil, false) {
-		r.Header.Set(k, v)
+	for key, value := range uploadHeaders("large.txt", fields, true) {
+		r.Header.Set(key, value)
 	}
 	w := httptest.NewRecorder()
 	f.handler.ServeHTTP(w, r)
@@ -108,209 +84,71 @@ func TestUploadsScopeLimitsNoOverwriteAndCleanup(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "public/large.txt")); !os.IsNotExist(err) {
 		t.Fatal("oversized file published", err)
 	}
-	f.request(t, "PUT", "/api/storage/"+id, f.admin, map[string]any{"readonly": true}, nil, 200)
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk/public", writer, strings.NewReader("ok"), uploadHeaders("readonly.txt", nil, false), 403)
-	mounts := f.request(t, "GET", "/api/mount/list", f.admin, nil, nil, 200)
-	if strings.Contains(mounts.Body.String(), `"writer"`) {
-		t.Fatal("readonly mount advertised upload")
-	}
+	f.request(t, "PUT", "/api/storage/"+storage, f.admin, map[string]any{"readonly": true}, nil, 200)
+	f.upload(t, "PUT", "/api/share/upload", writer, strings.NewReader("ok"), uploadHeaders("readonly.txt", fields, true), 403)
 	entries, err := os.ReadDir(f.app.uploadDir)
 	if err != nil || len(entries) != 0 || f.app.rawReserved != 0 {
 		t.Fatal("temporary files leaked", entries, err)
 	}
 }
 
-func TestUploadShareFormOrderUnicodeAndUnmappedStorage(t *testing.T) {
+func TestUploadShareUnicodeAndUnmappedStorage(t *testing.T) {
 	f := newFixture(t)
-	root := t.TempDir()
-	id, _ := f.local(t, root, "/disk")
-	writer, keyID := f.key(t, "writer", "/disk", MountUpload|FileShare|FileManage)
-	body, headers := formUpload(t, "分享.txt", "secret upload", map[string]string{"storage_config_id": id, "path": "/disk", "password": "分享密码", "remark": "中文备注", "max_views": "1"})
-	record := dataMap(t, f.upload(t, "POST", "/api/share/upload", writer, body, headers, 201))
-	slug := record["slug"].(string)
-	if _, ok := record["storage_key"]; ok {
-		t.Fatal("physical storage key leaked")
-	}
-	if record["remark"] != "中文备注" {
-		t.Fatal("Unicode metadata lost")
-	}
-	f.request(t, "GET", "/api/s/"+slug, "", nil, nil, 403)
-	verified := dataMap(t, f.request(t, "POST", "/api/share/verify/"+slug, "", map[string]any{"password": "分享密码"}, nil, 200))
-	link := verified["previewUrl"].(string)
-	if got := f.request(t, "GET", link, "", nil, nil, 200).Body.String(); got != "secret upload" {
-		t.Fatal(got)
-	}
-	f.request(t, "POST", "/api/share/verify/"+slug, "", map[string]any{"password": "分享密码"}, nil, 404)
-	f.request(t, "PUT", "/api/admin/api-keys/"+keyID, f.admin, map[string]any{"is_enable": false}, nil, 200)
-	f.request(t, "GET", link, "", nil, nil, 403)
-	// 上传页面可直接选择未挂载的存储，但受限路径账号不能绕过挂载边界。
-	unmounted := dataMap(t, f.request(t, "POST", "/api/storage", f.admin, map[string]any{"name": "unmounted", "storage_type": "LOCAL", "root_path": t.TempDir(), "is_public": true}, nil, 201))["id"].(string)
-	scoped, _ := f.key(t, "scoped", "/disk", MountUpload|FileShare)
-	f.upload(t, "PUT", "/api/share/upload", scoped, strings.NewReader("blocked"), uploadHeaders("a.txt", map[string]any{"storage_config_id": unmounted}, true), 403)
-	fields := map[string]any{"storage_config_id": unmounted, "remark": "中文备注", "password": "中文密码"}
+	storage := dataMap(t, f.request(t, "POST", "/api/storage", f.admin, map[string]any{"name": "unmounted", "storage_type": "LOCAL", "root_path": t.TempDir(), "is_public": true}, nil, 201))["id"].(string)
+	fields := map[string]any{"storage_config_id": storage, "remark": "中文备注", "password": "中文密码", "max_views": 1}
 	share := dataMap(t, f.upload(t, "PUT", "/api/share/upload", f.admin, strings.NewReader("unmapped"), uploadHeaders("原名.txt", fields, true), 201))
-	v := dataMap(t, f.request(t, "POST", "/api/share/verify/"+share["slug"].(string), "", map[string]any{"password": "中文密码"}, nil, 200))
-	if f.request(t, "GET", v["previewUrl"].(string), "", nil, nil, 200).Body.String() != "unmapped" {
+	if share["remark"] != "中文备注" || share["storage_key"] != nil {
+		t.Fatal("分享响应泄露来源或损坏中文元信息")
+	}
+	f.request(t, "GET", "/api/s/"+share["slug"].(string), "", nil, nil, 403)
+	view := dataMap(t, f.request(t, "POST", "/api/share/verify/"+share["slug"].(string), "", map[string]any{"password": "中文密码"}, nil, 200))
+	if f.request(t, "GET", view["contentUrl"].(string), "", nil, nil, 200).Body.String() != "unmapped" {
 		t.Fatal("unmapped share failed")
 	}
+	f.request(t, "GET", "/api/share/get/"+share["slug"].(string), "", nil, nil, 404)
+	scoped, _ := f.key(t, "scoped", "/disk", MountUpload|FileShare)
+	f.upload(t, "PUT", "/api/share/upload", scoped, strings.NewReader("blocked"), uploadHeaders("a.txt", fields, true), 403)
 }
 
-func TestUploadDirectoryPasswordsAndSessionRevocation(t *testing.T) {
+// 旧版本的目录密码仍限制当前上传，不能因移除配置接口而绕过。
+func TestUploadRespectsStoredDirectoryPasswords(t *testing.T) {
 	f := newFixture(t)
-	root := t.TempDir()
-	f.local(t, root, "/disk")
-	writer, keyID := f.key(t, "writer", "/disk", MountUpload|MountView|FileShare)
-	meta := dataMap(t, f.request(t, "POST", "/api/fs-meta/create", f.admin, map[string]any{"path": "/disk/locked", "password": "directory-password", "passwordInherit": false}, nil, 201))
-	headers := uploadHeaders("a.txt", nil, false)
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk/locked", writer, strings.NewReader("ok"), headers, 403)
-	verified := dataMap(t, f.request(t, "POST", "/api/fs/meta/password/verify", writer, map[string]any{"path": "/disk/locked", "password": "directory-password"}, nil, 200))
-	headers["X-FS-Path-Token"] = verified["token"].(string)
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk/locked", writer, strings.NewReader("ok"), headers, 201)
-	body := map[string]any{"path": "/disk/locked", "fileName": "parts.txt", "fileSize": 3, "partSize": 5 << 20}
-	f.request(t, "POST", "/api/fs/multipart/init", writer, body, nil, 403)
-	s := dataMap(t, f.request(t, "POST", "/api/fs/multipart/init", writer, body, headers, 200))
-	id := s["uploadId"].(string)
-	partURL := signedPart(t, f, writer, id, 1)
-	f.request(t, "PUT", "/api/fs-meta/"+meta["id"].(string), f.admin, map[string]any{"password": "replacement-password"}, nil, 200)
-	f.upload(t, "PUT", partURL, "", strings.NewReader("abc"), nil, 410)
-	f.request(t, "POST", "/api/fs/multipart/abort", writer, map[string]any{"uploadId": id}, nil, 200)
-	body["path"] = "/disk"
-	s = dataMap(t, f.request(t, "POST", "/api/fs/multipart/init", writer, body, nil, 200))
-	id = s["uploadId"].(string)
-	partURL = signedPart(t, f, writer, id, 1)
-	f.request(t, "PUT", "/api/admin/api-keys/"+keyID, f.admin, map[string]any{"is_enable": false}, nil, 200)
-	f.upload(t, "PUT", partURL, "", strings.NewReader("abc"), nil, 403)
-}
-func signedPart(t *testing.T, f *fixture, auth, id string, n int) string {
-	t.Helper()
-	v := dataMap(t, f.request(t, "POST", "/api/fs/multipart/sign-parts", auth, map[string]any{"uploadId": id, "partNumbers": []int{n}}, nil, 200))
-	return v["presignedUrls"].([]any)[0].(map[string]any)["url"].(string)
-}
-func TestMultipartIntegrityRetryRestartAndQuota(t *testing.T) {
-	f := newFixture(t)
-	root := t.TempDir()
-	f.local(t, root, "/disk")
-	writer, _ := f.key(t, "writer", "/disk", MountUpload|MountView)
-	other, _ := f.key(t, "other", "/disk", MountUpload)
-	const partSize = 5 << 20
-	size := int64(partSize + 3)
-	init := map[string]any{"path": "/disk", "fileName": "large.bin", "fileSize": size, "partSize": partSize, "partCount": 2}
-	s := dataMap(t, f.request(t, "POST", "/api/fs/multipart/init", writer, init, nil, 200))
-	id := s["uploadId"].(string)
-	f.request(t, "POST", "/api/fs/multipart/sign-parts", other, map[string]any{"uploadId": id, "partNumbers": []int{1}}, nil, 403)
-	url1, url2 := signedPart(t, f, writer, id, 1), signedPart(t, f, writer, id, 2)
-	f.upload(t, "PUT", strings.Replace(url1, "/1?", "/2?", 1), "", strings.NewReader("end"), nil, 403)
-	f.upload(t, "PUT", url2, "", strings.NewReader("bad-size"), nil, 400)
-	f.request(t, "POST", "/api/fs/multipart/complete", writer, map[string]any{"uploadId": id, "parts": []uploadPart{}}, nil, 400)
-	data := bytes.Repeat([]byte("x"), partSize)
-	etag1 := f.upload(t, "PUT", url1, "", bytes.NewReader(data), nil, 200).Header().Get("ETag")
-	etag2 := f.upload(t, "PUT", url2, "", strings.NewReader("old"), nil, 200).Header().Get("ETag")
-	// 分片重试更新校验记录，旧清单不能完成新内容。
-	newETag := f.upload(t, "PUT", url2, "", strings.NewReader("end"), nil, 200).Header().Get("ETag")
-	f.request(t, "POST", "/api/fs/multipart/complete", writer, map[string]any{"uploadId": id, "parts": []uploadPart{{PartNumber: 1, ETag: etag1}, {PartNumber: 2, ETag: etag2}}}, nil, 400)
-	orphan := filepath.Join(f.app.uploadDir, randomID())
-	if err := os.WriteFile(orphan, []byte("interrupted request"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	// 关闭并重新打开数据库，恢复不能依赖旧进程里的任何内存状态。
-	cfg, logger := f.app.cfg, f.app.logger
-	if err := f.app.Close(); err != nil {
-		t.Fatal(err)
-	}
-	restored, err := New(cfg, logger)
+	storage, _ := f.local(t, t.TempDir(), "/disk")
+	writer, _ := f.key(t, "writer", "/disk", MountUpload|FileShare)
+	hash, err := passwordHash("directory-password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = restored.Close() })
-	f.app, f.handler = restored, restored.Handler()
-	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
-		t.Fatal("orphan staging file survived restart")
-	}
-	listed := dataMap(t, f.request(t, "POST", "/api/fs/multipart/list-parts", writer, map[string]any{"uploadId": id}, nil, 200))
-	if len(listed["parts"].([]any)) != 2 {
-		t.Fatal("parts not recovered")
-	}
-	parts := []uploadPart{{PartNumber: 1, ETag: etag1}, {PartNumber: 2, ETag: newETag}}
-	f.request(t, "POST", "/api/fs/multipart/complete", writer, map[string]any{"uploadId": id, "parts": parts}, nil, 200)
-	contents, err := os.ReadFile(filepath.Join(root, "large.bin"))
-	if err != nil || int64(len(contents)) != size || string(contents[len(contents)-3:]) != "end" {
-		t.Fatal("merged file incorrect", err)
-	}
-	if _, err = os.Stat(filepath.Join(f.app.uploadDir, id)); !os.IsNotExist(err) {
-		t.Fatal("completed staging session leaked")
-	}
-	f.app.cfg.MaxStagedBytes = size
-	init["fileName"] = "pending.bin"
-	s = dataMap(t, f.request(t, "POST", "/api/fs/multipart/init", writer, init, nil, 200))
-	id = s["uploadId"].(string)
-	f.request(t, "POST", "/api/fs/multipart/init", writer, init, nil, 507)
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk", writer, strings.NewReader("a"), uploadHeaders("quota.txt", nil, false), 507)
-	f.request(t, "POST", "/api/fs/multipart/abort", writer, map[string]any{"uploadId": id}, nil, 200)
-	s = dataMap(t, f.request(t, "POST", "/api/fs/multipart/init", writer, init, nil, 200))
-	id = s["uploadId"].(string)
-	var session uploadSession
-	if err = f.app.resource(context.Background(), "uploads", "id", id, &session); err != nil {
+	meta := FsMeta{ID: randomID(), Path: "/disk/locked", Password: hash, PasswordInherit: true}
+	if err = f.app.saveResource(context.Background(), "fs_meta", meta.ID, "", "", meta); err != nil {
 		t.Fatal(err)
 	}
-	session.Expires = time.Now().Add(-time.Second).Unix()
-	if err = f.app.saveResource(context.Background(), "uploads", id, "", session.Owner, session); err != nil {
-		t.Fatal(err)
-	}
-	f.request(t, "POST", "/api/fs/multipart/list-uploads", writer, map[string]any{"path": "/disk"}, nil, 200)
-	if _, err = os.Stat(filepath.Join(f.app.uploadDir, id)); !os.IsNotExist(err) {
-		t.Fatal("expired upload file leaked")
-	}
+	fields := map[string]any{"storage_config_id": storage, "path": "/disk/locked"}
+	f.upload(t, "PUT", "/api/share/upload", writer, strings.NewReader("blocked"), uploadHeaders("a.txt", fields, true), 403)
 }
 
 func TestUploadCannotEscapeThroughDirectoryLinks(t *testing.T) {
 	f := newFixture(t)
 	root, outside := t.TempDir(), t.TempDir()
-	f.local(t, root, "/disk")
-	link := filepath.Join(root, "escape")
-	if runtime.GOOS == "windows" {
-		output, err := exec.Command("cmd", "/c", "mklink", "/J", link, outside).CombinedOutput()
-		if err != nil {
-			t.Skipf("junction unavailable: %v %s", err, output)
-		}
-	} else {
-		if err := os.Symlink(outside, link); err != nil {
-			t.Fatal(err)
-		}
-	}
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk/escape", f.admin, strings.NewReader("bad"), uploadHeaders("outside.txt", nil, false), 403)
+	storage, _ := f.local(t, root, "/disk")
+	directoryLink(t, filepath.Join(root, "escape"), outside)
+	fields := map[string]any{"storage_config_id": storage, "path": "/disk/escape", "original_filename": true}
+	f.upload(t, "PUT", "/api/share/upload", f.admin, strings.NewReader("bad"), uploadHeaders("outside.txt", fields, true), 403)
 	if _, err := os.Stat(filepath.Join(outside, "outside.txt")); !os.IsNotExist(err) {
 		t.Fatal("upload escaped storage root")
 	}
-	// API Key 的授权子目录也构成独立文件系统边界。
-	if err := os.MkdirAll(filepath.Join(root, "public"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	insideLink := filepath.Join(root, "public/to-private")
-	if runtime.GOOS == "windows" {
-		output, err := exec.Command("cmd", "/c", "mklink", "/J", insideLink, outside).CombinedOutput()
-		if err != nil {
-			t.Skipf("junction unavailable: %v %s", err, output)
-		}
-	} else {
-		if err := os.Symlink(outside, insideLink); err != nil {
-			t.Fatal(err)
-		}
-	}
-	writer, _ := f.key(t, "writer", "/disk/public", MountUpload)
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk/public/to-private", writer, strings.NewReader("bad"), uploadHeaders("private.txt", nil, false), 403)
 }
 
 func TestConcurrentUploadNeverOverwrites(t *testing.T) {
 	f := newFixture(t)
-	root := t.TempDir()
-	f.local(t, root, "/disk")
+	storage, _ := f.local(t, t.TempDir(), "/disk")
 	var group sync.WaitGroup
 	statuses := make(chan int, 2)
 	for _, content := range []string{"first", "second"} {
 		group.Go(func() {
-			r := httptest.NewRequest("PUT", "/api/admin/fs/upload?path=/disk", strings.NewReader(content))
+			r := httptest.NewRequest("PUT", "/api/admin/share/upload", strings.NewReader(content))
 			r.Header.Set("Authorization", f.admin)
-			for k, v := range uploadHeaders("same.txt", nil, false) {
+			for k, v := range uploadHeaders("same.txt", map[string]any{"storage_config_id": storage, "path": "/disk", "original_filename": true}, true) {
 				r.Header.Set(k, v)
 			}
 			w := httptest.NewRecorder()
@@ -348,30 +186,16 @@ func (r *callbackReader) Read(data []byte) (int, error) {
 func TestUploadRevocationWhileReceivingBody(t *testing.T) {
 	f := newFixture(t)
 	root := t.TempDir()
-	f.local(t, root, "/disk")
-	writer, id := f.key(t, "writer", "/disk", MountUpload)
-	// 请求初始认证成功后撤销权限，收到完整文件也不能继续发布。
+	storage, _ := f.local(t, root, "/disk")
+	writer, id := f.key(t, "writer", "/disk", MountUpload|FileShare)
+	// 初始认证后撤销权限，完整接收也不能继续发布文件。
 	body := &callbackReader{Reader: strings.NewReader("contents"), callback: func() {
 		f.request(t, "PUT", "/api/admin/api-keys/"+id, f.admin, map[string]any{"permissions": MountView}, nil, 200)
 	}}
-	f.upload(t, "PUT", "/api/fs/upload?path=/disk", writer, body, uploadHeaders("revoked.txt", nil, false), 403)
+	fields := map[string]any{"storage_config_id": storage, "path": "/disk", "original_filename": true}
+	f.upload(t, "PUT", "/api/share/upload", writer, body, uploadHeaders("revoked.txt", fields, true), 403)
 	if _, err := os.Stat(filepath.Join(root, "revoked.txt")); !os.IsNotExist(err) {
 		t.Fatal("revoked upload published")
-	}
-	f.request(t, "PUT", "/api/admin/api-keys/"+id, f.admin, map[string]any{"permissions": MountUpload}, nil, 200)
-	session := dataMap(t, f.request(t, "POST", "/api/fs/multipart/init", writer, map[string]any{"path": "/disk", "fileName": "parts.txt", "fileSize": 3}, nil, 200))
-	uploadID := session["uploadId"].(string)
-	partURL := signedPart(t, f, writer, uploadID, 1)
-	body = &callbackReader{Reader: strings.NewReader("abc"), callback: func() {
-		f.request(t, "PUT", "/api/admin/api-keys/"+id, f.admin, map[string]any{"is_enable": false}, nil, 200)
-	}}
-	f.upload(t, "PUT", partURL, "", body, nil, 403)
-	var stored uploadSession
-	if err := f.app.resource(context.Background(), "uploads", "id", uploadID, &stored); err != nil {
-		t.Fatal(err)
-	}
-	if len(stored.Parts) != 0 {
-		t.Fatal("revoked chunk registered")
 	}
 }
 
