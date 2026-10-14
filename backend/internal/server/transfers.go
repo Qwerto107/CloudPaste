@@ -3,11 +3,12 @@ package server
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strings"
@@ -310,12 +311,14 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 	}
 	var code string
 	for code == "" {
-		var b [5]byte
-		if _, err := rand.Read(b[:]); err != nil {
+		// 均匀生成一个字母和四位数字，保留前导零；仍检查在线房间是否重名。
+		number, err := rand.Int(rand.Reader, big.NewInt(26*10000))
+		if err != nil {
 			h.mu.Unlock()
 			return err
 		}
-		code = base32.NewEncoding("ABCDEFGHJKLMNPQRSTUVWXYZ23456789").EncodeToString(b[:])
+		value := number.Int64()
+		code = fmt.Sprintf("%c%04d", 'A'+value/10000, value%10000)
 		for _, room := range h.rooms {
 			if room.code == code {
 				code = ""
@@ -358,9 +361,15 @@ func (a *App) joinTransfer(w http.ResponseWriter, r *http.Request) error {
 		h.mu.Unlock()
 		return transferBusy()
 	}
-	code := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(body.Code), "-", ""))
+	// 显示用横杠、复制时的紧凑形式及粘贴空白都解析为同一个配对码。
+	code := strings.ToUpper(strings.Map(func(r rune) rune {
+		if r == '-' || unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, body.Code))
 	for _, room := range h.rooms {
-		if code != room.code || len(code) != 8 || room.paired || room.members[1] != nil || !room.members[0].connected || time.Since(room.created) > 5*time.Minute || room.ctx.Err() != nil {
+		if code != room.code || room.paired || room.members[1] != nil || !room.members[0].connected || time.Since(room.created) > 5*time.Minute || room.ctx.Err() != nil {
 			continue
 		}
 		name := transferName(body.Name)

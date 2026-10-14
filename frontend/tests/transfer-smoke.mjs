@@ -78,6 +78,8 @@ try {
     viewport: { width: 390, height: 844 },
     acceptDownloads: true,
   });
+  await ac.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await bc.grantPermissions(["clipboard-read", "clipboard-write"]);
   await ac.addInitScript(
     (token) =>
       localStorage.setItem(
@@ -106,18 +108,142 @@ try {
   await a
     .getByRole("textbox", { name: "设备名称", exact: true })
     .fill("发送设备");
-  await a.getByRole("checkbox").check();
+  assert.equal(
+    await a
+      .getByRole("checkbox", { name: "自动同意设备加入", exact: true })
+      .isChecked(),
+    false,
+  );
+  await a
+    .getByRole("checkbox", {
+      name: "仅使用中继，不向对方交换直连网络地址",
+      exact: true,
+    })
+    .check();
   await a.getByRole("button", { name: "创建配对码", exact: true }).click();
   await a.getByRole("heading", { name: "等待另一台设备" }).waitFor();
   const code = (await a.locator(".transfer-code").textContent())
     .replaceAll(" ", "")
     .trim();
-  assert.equal(code.length, 8);
+  assert.match(code, /^[A-Z]-[0-9]{4}$/);
+  await a.getByRole("button", { name: "复制配对码", exact: true }).click();
+  const copiedCode = await a.evaluate(() => navigator.clipboard.readText());
+  assert.equal(copiedCode, code.replace("-", ""));
   await b
     .getByRole("textbox", { name: "设备名称", exact: true })
     .fill("接收设备");
-  await b.getByRole("textbox", { name: "配对码", exact: true }).fill(code);
-  await b.getByRole("button", { name: "加入连接", exact: true }).click();
+  const cells = b.locator(".pair-code input");
+  assert.equal(await cells.count(), 5);
+  assert.equal(await b.locator(".pair-code-separator").textContent(), "-");
+  for (let index = 0; index < 5; index++) {
+    assert.equal(await cells.nth(index).inputValue(), "");
+    assert.equal(await cells.nth(index).getAttribute("placeholder"), null);
+  }
+  // 暂不填写字母，检查编辑行为时不能提前自动加入。
+  for (let index = 1; index < 5; index++)
+    await cells.nth(index).fill(copiedCode[index].toLowerCase());
+  await b.waitForFunction(
+    (code) =>
+      Array.from(
+        document.querySelectorAll(".pair-code input"),
+        (input) => input.value,
+      ).join("") === code,
+    copiedCode.slice(1),
+  );
+  // 自动跳格、方向键和中间删除都要保留数字的位置，不能自动挤向前面。
+  assert.equal(
+    await cells.nth(4).evaluate((input) => input === document.activeElement),
+    true,
+  );
+  await cells.nth(4).press("ArrowLeft");
+  assert.equal(
+    await cells.nth(3).evaluate((input) => input === document.activeElement),
+    true,
+  );
+  await cells.nth(3).press("Backspace");
+  assert.equal(await cells.nth(3).inputValue(), "");
+  assert.equal(await cells.nth(4).inputValue(), copiedCode[4]);
+  assert.equal(
+    await b.getByRole("button", { name: "加入连接", exact: true }).isDisabled(),
+    true,
+  );
+  await cells.nth(3).press("Backspace");
+  assert.equal(await cells.nth(2).inputValue(), "");
+  await cells.nth(2).fill(copiedCode[2]);
+  await cells.nth(3).fill(copiedCode[3]);
+  // 完整代码粘贴会自动提交；失效时清空五格并回到字母输入框。
+  const invalidCode = (copiedCode[0] === "A" ? "B" : "A") + copiedCode.slice(1);
+  await cells.nth(2).evaluate(
+    (input, value) => {
+      const clipboard = new DataTransfer();
+      clipboard.setData("text/plain", value);
+      input.dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData: clipboard,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    },
+    " " + invalidCode[0].toLowerCase() + "-" + invalidCode.slice(1) + " ",
+  );
+  await b
+    .getByRole("alert")
+    .filter({ hasText: "连接已失效或不可用" })
+    .waitFor();
+  await b.waitForFunction(() =>
+    Array.from(document.querySelectorAll(".pair-code input")).every(
+      (input) => input.value === "",
+    ),
+  );
+  assert.equal(
+    await cells.nth(0).evaluate((input) => input === document.activeElement),
+    true,
+  );
+  await b.evaluate(
+    (value) => navigator.clipboard.writeText(value),
+    invalidCode,
+  );
+  const pastedResponse = b.waitForResponse((response) =>
+    response.url().endsWith("/api/transfer/join"),
+  );
+  await b.getByRole("button", { name: "粘贴配对码", exact: true }).click();
+  assert.equal((await pastedResponse).status(), 404);
+  await b.waitForFunction(() =>
+    Array.from(document.querySelectorAll(".pair-code input")).every(
+      (input) => input.value === "",
+    ),
+  );
+  await b.setViewportSize({ width: 320, height: 844 });
+  assert.ok(
+    await b.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+    "分格配对码在窄屏溢出",
+  );
+  await b.screenshot({
+    path: resolve(root, "backend/bin/pair-code-mobile.png"),
+    fullPage: true,
+  });
+  await b.setViewportSize({ width: 390, height: 844 });
+  for (let index = 0; index < 4; index++)
+    await cells.nth(index).fill(copiedCode[index].toLowerCase());
+  assert.equal(
+    await b.getByRole("button", { name: "加入连接", exact: true }).isDisabled(),
+    true,
+  );
+  let joinRequests = 0;
+  const countJoin = (request) => {
+    if (request.url().endsWith("/api/transfer/join")) joinRequests++;
+  };
+  b.on("request", countJoin);
+  const joinedResponse = b.waitForResponse((response) =>
+    response.url().endsWith("/api/transfer/join"),
+  );
+  // 最后一位触发加入，不需要再点按钮；同一次输入只发出一次请求。
+  await cells.nth(4).fill(copiedCode[4]);
+  assert.equal((await joinedResponse).status(), 200);
+  await b.getByRole("heading", { name: "等待对方确认" }).waitFor();
+  assert.equal(joinRequests, 1);
+  b.off("request", countJoin);
   await a.getByRole("button", { name: "确认连接", exact: true }).click();
   await b.getByRole("heading", { name: "消息", exact: true }).waitFor();
 
@@ -741,17 +867,39 @@ try {
       };
     });
   }
-  await a.getByRole("checkbox").uncheck();
+  await a
+    .getByRole("checkbox", {
+      name: "仅使用中继，不向对方交换直连网络地址",
+      exact: true,
+    })
+    .uncheck();
+  await a
+    .getByRole("checkbox", { name: "自动同意设备加入", exact: true })
+    .check();
   await a.getByRole("button", { name: "创建配对码", exact: true }).click();
   await a.getByRole("heading", { name: "等待另一台设备" }).waitFor();
   const directCode = (await a.locator(".transfer-code").textContent())
     .replaceAll(" ", "")
     .trim();
+  assert.match(directCode, /^[A-Z]-[0-9]{4}$/);
   await b
-    .getByRole("textbox", { name: "配对码", exact: true })
-    .fill(directCode);
-  await b.getByRole("button", { name: "加入连接", exact: true }).click();
-  await a.getByRole("button", { name: "确认连接", exact: true }).click();
+    .getByRole("textbox", { name: "配对码字母", exact: true })
+    .evaluate((input, value) => {
+      const clipboard = new DataTransfer();
+      clipboard.setData("text/plain", value);
+      input.dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData: clipboard,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, directCode);
+  await a.getByRole("heading", { name: "消息", exact: true }).waitFor();
+  assert.equal(
+    await a.getByRole("button", { name: "确认连接", exact: true }).count(),
+    0,
+  );
   for (const page of [a, b])
     await page
       .getByText("直连可用 · 支持实时中继", { exact: true })

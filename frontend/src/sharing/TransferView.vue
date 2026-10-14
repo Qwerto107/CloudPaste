@@ -4,7 +4,13 @@ import { NModal } from "naive-ui";
 import { onBeforeRouteLeave } from "vue-router";
 import { session, hasPermission } from "./session.js";
 import Icon from "./Icon.vue";
+import PairCodeInput from "./PairCodeInput.vue";
 import { chatImageHistory, validateChatImage } from "./transfer-images.js";
+import {
+  normalizePairingCode,
+  validPairingCode,
+  displayPairingCode,
+} from "./transfer-code.js";
 import {
   TransferClient,
   canSaveDirectly,
@@ -14,6 +20,8 @@ import {
 // 每次进入页面生成短随机后缀，方便区分参与配对的设备，用户仍可自行修改。
 const name = ref(`我的设备-${transferID().slice(0, 6)}`);
 const code = ref("");
+const pairCodeInput = ref(null);
+const autoApproveDevice = ref(false);
 const pastingCode = ref(false);
 const pairingCode = ref("");
 const relayOnly = ref(false);
@@ -220,8 +228,11 @@ function event(message) {
     maxFile.value = message.max_file_size;
     status.value = "connecting";
   } else if (message.type === "ready") status.value = "waiting";
-  else if (message.type === "joining") joining.value = message.name;
-  else if (message.type === "paired") {
+  else if (message.type === "joining") {
+    joining.value = message.name;
+    // 可选自动确认仍由创建者发送原有 confirm 消息，服务端继续复核双方状态。
+    if (autoApproveDevice.value) send({ type: "confirm" });
+  } else if (message.type === "paired") {
     status.value = "paired";
     names.value = message.names;
     pairingCode.value = "";
@@ -332,6 +343,8 @@ function event(message) {
   }
 }
 async function open(kind) {
+  // 自动提交与手动提交共用入口，请求期间不能重复加入。
+  if (busy.value || (kind === "join" && !validPairingCode(code.value))) return;
   error.value = "";
   busy.value = true;
   autoReceive.value = false;
@@ -348,11 +361,16 @@ async function open(kind) {
     await client.open(kind, {
       name: name.value,
       relay_only: relayOnly.value,
-      ...(kind === "join" ? { code: code.value } : {}),
+      ...(kind === "join" ? { code: normalizePairingCode(code.value) } : {}),
     });
   } catch (reason) {
     error.value = reason.message;
     client.close();
+    if (kind === "join" && reason.code === "TRANSFER_UNAVAILABLE") {
+      // 失效代码不保留在分格输入框中，便于直接输入新的配对码。
+      code.value = "";
+      nextTick(() => pairCodeInput.value?.focus());
+    }
   } finally {
     busy.value = false;
   }
@@ -452,7 +470,9 @@ async function copyDownloadLink(file) {
 }
 async function copyCode() {
   try {
-    await navigator.clipboard.writeText(pairingCode.value);
+    await navigator.clipboard.writeText(
+      normalizePairingCode(pairingCode.value),
+    );
   } catch {
     error.value = "复制失败，请手动选择配对码复制";
   }
@@ -472,14 +492,14 @@ async function pasteCode() {
       !["idle", "closed"].includes(status.value)
     )
       return;
-    const value = clipboard.replace(/[\s-]/g, "").toUpperCase();
-    if (!/^[A-HJ-NP-Z2-9]{8}$/.test(value)) {
-      error.value = "剪贴板中不是有效的 8 位配对码";
+    const value = normalizePairingCode(clipboard);
+    if (!validPairingCode(value)) {
+      error.value = "剪贴板中不是有效的配对码（例如 A-1234）";
       return;
     }
     code.value = value;
     await nextTick();
-    document.getElementById("transfer-pair-code")?.focus();
+    await open("join");
   } catch {
     error.value = "无法读取剪贴板，请在配对码输入框中手动粘贴";
   } finally {
@@ -622,6 +642,15 @@ onBeforeUnmount(() => {
         <div class="transfer-entry-card">
           <h2>创建连接</h2>
           <p class="muted">生成 5 分钟有效的配对码，确认对方加入后即可互传。</p>
+          <label v-if="canCreate" class="check">
+            <UiCheckbox
+              v-model="autoApproveDevice"
+              :disabled="busy"
+            />自动同意设备加入
+          </label>
+          <p v-if="canCreate" class="muted small">
+            开启后，持有码的设备会自动加入。
+          </p>
           <UiButton
             v-if="canCreate"
             class="primary"
@@ -642,14 +671,11 @@ onBeforeUnmount(() => {
           <div class="transfer-code-field">
             <label for="transfer-pair-code">配对码</label>
             <div class="transfer-code-input">
-              <UiInput
-                id="transfer-pair-code"
+              <PairCodeInput
+                ref="pairCodeInput"
                 v-model="code"
-                aria-label="配对码"
-                placeholder="输入 8 位配对码"
-                maxlength="12"
-                autocomplete="off"
-                autocapitalize="characters"
+                :disabled="busy"
+                @complete="open('join')"
               />
               <UiButton
                 type="button"
@@ -663,7 +689,7 @@ onBeforeUnmount(() => {
           <UiButton
             class="primary"
             icon="transfer"
-            :disabled="busy || !code.trim()"
+            :disabled="busy || !validPairingCode(code)"
             >加入连接</UiButton
           >
         </form>
@@ -685,7 +711,7 @@ onBeforeUnmount(() => {
       </h2>
       <template v-if="pairingCode">
         <p class="transfer-code">
-          {{ pairingCode.slice(0, 4) }} {{ pairingCode.slice(4) }}
+          {{ displayPairingCode(pairingCode) }}
         </p>
         <UiButton type="button" @click="copyCode">复制配对码</UiButton>
         <p class="muted">配对成功后失效。请通过可信渠道把配对码发送给对方。</p>
@@ -1220,7 +1246,7 @@ onBeforeUnmount(() => {
   gap: 8px;
   min-width: 0;
 }
-.transfer-code-input .ui-input {
+.transfer-code-input .pair-code {
   flex: 1;
   min-width: 0;
 }
