@@ -484,7 +484,10 @@ func (a *App) uploadFile(w http.ResponseWriter, r *http.Request) error {
 	record.StorageKey = dest.StorageKey
 	record.SourceVersion = dest.Version
 	record.MetaVersion = dest.Proof
-	err = a.saveResource(r.Context(), "shares", record.ID, record.Slug, record.Owner, record)
+	// 文件传输留在锁外，仅后缀回收和记录写入需要串行提交。
+	a.mutationMu.Lock()
+	err = a.saveShareResource(r.Context(), "shares", record.ID, record.Slug, record.Owner, record)
+	a.mutationMu.Unlock()
 	if err != nil {
 		return &apiError{409, "SHARE_SAVE_FAILED", "文件已保存，但分享记录未保存，请重新上传"}
 	}
@@ -536,12 +539,9 @@ func (a *App) uploadShareRecord(r *http.Request, fields map[string]string, name 
 			return s, err
 		}
 	}
-	var count int
-	if err := a.db.QueryRowContext(r.Context(), "SELECT count(*) FROM shares WHERE slug=?", s.Slug).Scan(&count); err != nil {
+	// 预检查只判断可用性；实际回收在文件或合集成功提交的事务中执行。
+	if _, err := checkShareSlug(r.Context(), a.db, "shares", s.Slug, s.ID); err != nil {
 		return s, err
-	}
-	if count != 0 {
-		return s, badRequest("链接后缀已被占用")
 	}
 	return s, nil
 }

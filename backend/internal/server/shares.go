@@ -389,8 +389,8 @@ func (a *App) updateShare(w http.ResponseWriter, r *http.Request) error {
 			return s, err
 		}
 		s.UpdatedAt = nowText()
-		if err = a.saveResource(r.Context(), "shares", s.ID, s.Slug, s.Owner, s); err != nil {
-			return s, badRequest("链接后缀已被占用")
+		if err = a.saveShareResource(r.Context(), "shares", s.ID, s.Slug, s.Owner, s); err != nil {
+			return s, err
 		}
 		return s, nil
 	}()

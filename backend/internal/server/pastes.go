@@ -90,8 +90,12 @@ func (a *App) createPaste(w http.ResponseWriter, r *http.Request) error {
 	p.CreatedAt = nowText()
 	p.UpdatedAt = p.CreatedAt
 	p.Views = 0
-	if err := a.saveResource(r.Context(), "pastes", p.ID, p.Slug, p.Owner, p); err != nil {
-		return badRequest("链接后缀已被占用")
+	// 与查看次数更新串行，回收时只能看到已提交的失效状态。
+	a.mutationMu.Lock()
+	err := a.saveShareResource(r.Context(), "pastes", p.ID, p.Slug, p.Owner, p)
+	a.mutationMu.Unlock()
+	if err != nil {
+		return err
 	}
 	view := pasteView(p, false)
 	view["url"] = "/paste/" + p.Slug
@@ -227,6 +231,7 @@ func (a *App) updatePaste(w http.ResponseWriter, r *http.Request) error {
 		return notFound()
 	}
 	var body struct {
+		ID                                        string `json:"id"`
 		Content, Title, Remark, Password, NewSlug *string
 		ClearPassword                             bool
 		ExpiresAt                                 json.RawMessage `json:"expires_at"`
@@ -235,6 +240,10 @@ func (a *App) updatePaste(w http.ResponseWriter, r *http.Request) error {
 	}
 	if err := decode(w, r, &body); err != nil {
 		return err
+	}
+	// 后缀可能已被新分享复用，旧编辑窗口不能修改新记录。
+	if body.ID != "" && body.ID != p.ID {
+		return notFound()
 	}
 	// 接收请求和计算密码哈希都在锁外，慢客户端不能持有全局写锁。
 	if body.ClearPassword {
@@ -309,8 +318,8 @@ func (a *App) updatePaste(w http.ResponseWriter, r *http.Request) error {
 			return p, err
 		}
 		p.UpdatedAt = nowText()
-		if err := a.saveResource(r.Context(), "pastes", p.ID, p.Slug, p.Owner, p); err != nil {
-			return p, badRequest("链接后缀已被占用")
+		if err := a.saveShareResource(r.Context(), "pastes", p.ID, p.Slug, p.Owner, p); err != nil {
+			return p, err
 		}
 		return p, nil
 	}()

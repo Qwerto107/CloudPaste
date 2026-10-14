@@ -255,6 +255,8 @@ async function save() {
         body.max_views = Number(values.max_views);
       if (values.password) body.password = values.password;
       if (panel.value === "texts") {
+        // 后缀复用后，旧编辑窗口仍只能更新原记录。
+        body.id = editID.value;
         body.title = values.title;
         body.content = values.content;
         target = `/pastes/${encodeURIComponent(values.slug)}`;

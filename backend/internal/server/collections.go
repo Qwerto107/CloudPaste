@@ -83,8 +83,11 @@ func (a *App) createCollection(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		defer tx.Rollback()
+		if err := reclaimShareSlug(r.Context(), tx, "shares", collection.Slug, collection.ID); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(r.Context(), "INSERT INTO shares(id,slug,owner,data,created_at) VALUES(?,?,?,?,?)", collection.ID, collection.Slug, collection.Owner, string(data), collection.CreatedAt); err != nil {
-			return badRequest("链接后缀已被占用")
+			return err
 		}
 		for _, id := range body.IDs {
 			if _, err := tx.ExecContext(r.Context(), "DELETE FROM shares WHERE id=? AND owner=?", id, collection.Owner); err != nil {
