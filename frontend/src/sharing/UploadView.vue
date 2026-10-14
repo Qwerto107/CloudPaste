@@ -27,6 +27,10 @@ const uploaded = ref([]);
 const error = ref("");
 let controller;
 const allowed = computed(() => hasPermission(2));
+const uploadLimit = computed(() => {
+  const size = Number(settings.max_upload_size);
+  return size >= 1024 ? `${size / 1024} GiB` : `${size} MiB`;
+});
 // 页面离开时取消传输，服务端将清理未完成的临时文件。
 onBeforeUnmount(() => controller?.abort());
 onMounted(async () => {
@@ -188,8 +192,7 @@ async function copy(value) {
             files.length ? "继续添加文件，或拖到这里" : "选择文件，或拖到这里"
           }}</strong
           ><span class="muted"
-            >每次最多 30 个文件，单文件不超过
-            {{ settings.max_upload_size }} MiB</span
+            >每次最多 30 个文件，单文件不超过 {{ uploadLimit }}</span
           ></label
         >
         <ul v-if="files.length" class="file-queue">

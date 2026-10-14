@@ -147,6 +147,17 @@ test("默认禁止站外图片与 srcset，保留本站图片和正常 Markdown"
     ),
   );
 });
+test("嵌入位图经过真实 Markdown 预览，SVG 数据图片仍被移除", async () => {
+  const image =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=";
+  const html = await renderPreview(
+    `![图片](${image})\n<img src="data:image/svg+xml;base64,PHN2Zy8+" onerror="alert(1)">`,
+  );
+  const body = new JSDOM(html).window.document;
+  assert.equal(body.querySelectorAll("img").length, 1);
+  assert.equal(body.querySelector("img").getAttribute("src"), image);
+  assert.equal(body.querySelector("[onerror]"), null);
+});
 test("自定义站点 HTML 使用相同安全过滤，不接受内联脚本、表单或图片数据 URI", () => {
   const html = sanitizeHTML(
     '<form action="https://evil.example"><input></form><p style="background:url(https://evil.example)">公告</p><img src="data:image/svg+xml,test"><a href="https://example.com" target="_blank">链接</a>',

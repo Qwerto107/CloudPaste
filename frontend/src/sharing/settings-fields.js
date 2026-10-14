@@ -23,9 +23,10 @@ export const fields = {
   },
   max_upload_size: {
     label: "单文件上传上限",
-    help: "限制每个文件的大小，不能超过服务器配置的上限。",
+    help: "单文件最大 10 GiB（10240 MiB），可调低，不能超过服务器配置的上限。",
     unit: "MiB",
     min: 1,
+    max: 10240,
   },
   share_default_expiry_hours: {
     label: "新分享默认有效期",

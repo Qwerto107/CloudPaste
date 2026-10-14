@@ -1,4 +1,5 @@
 import DOMPurify from "dompurify";
+import { safeEmbeddedImage } from "./images.js";
 
 // 分享内容和站点 HTML 共用过滤规则，默认不让打开分享触发站外图片请求。
 export function sanitizeHTML(value, allowExternalImages = false) {
@@ -11,13 +12,12 @@ export function sanitizeHTML(value, allowExternalImages = false) {
   });
   for (const image of body.querySelectorAll("img")) {
     try {
-      const url = new URL(
-        image.getAttribute("src") || "",
-        window.location.origin,
-      );
+      const source = image.getAttribute("src") || "";
+      const url = new URL(source, window.location.origin);
       if (
-        !["http:", "https:"].includes(url.protocol) ||
-        (!allowExternalImages && url.origin !== window.location.origin)
+        !safeEmbeddedImage(source) &&
+        (!["http:", "https:"].includes(url.protocol) ||
+          (!allowExternalImages && url.origin !== window.location.origin))
       ) {
         image.remove();
         continue;

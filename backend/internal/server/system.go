@@ -22,7 +22,7 @@ type setting struct {
 var defaultSettings = []setting{
 	{"proxy_sign_all", "true", "bool", 1, 2, "Go 后端始终验证下载票据"},
 	{"proxy_sign_expires", "600", "number", 1, 2, "公开分享下载票据有效期（秒）"},
-	{"max_upload_size", "100", "number", 1, 0, "上传上限（MiB，不超过环境配置）"},
+	{"max_upload_size", "10240", "number", 1, 0, "上传上限（MiB，最大 10 GiB，不超过环境配置）"},
 	{"share_default_expiry_hours", "24", "number", 1, 0, "新分享默认有效期（小时，0 表示不过期）"},
 	{"preview_max_text_kb", "512", "number", 2, 0, "文本文件预览上限（KiB，16–2048）"},
 	{"preview_text_types", "txt,md,markdown,json,xml,csv,log,yaml,yml,html,css,js,go,rs,py,toml", "text", 2, 0, "文本预览扩展名（逗号分隔）"},

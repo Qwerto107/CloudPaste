@@ -7,7 +7,7 @@ export const settings = reactive({
   site_upload_page_enabled: "true",
   share_default_expiry_hours: "24",
   preview_max_text_kb: "512",
-  max_upload_size: "100",
+  max_upload_size: "10240",
 });
 let pending;
 export function loadSettings(force = false) {

@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// 管理员能读取失效内容，但查看不计次，票据不能跨入口或在退出后继续使用。
 func TestAdminExpiredSharePreview(t *testing.T) {
 	for _, kind := range []string{"text", "file", "collection"} {
 		for _, reason := range []string{"expired", "exhausted"} {
@@ -215,5 +216,39 @@ func TestS3FileDeletion(t *testing.T) {
 	}
 	if err := deleter.Delete(context.Background(), "file.txt"); err != nil {
 		t.Fatal("S3 删除重试失败", err)
+	}
+}
+
+func TestTenGiBUploadBoundary(t *testing.T) {
+	f := newFixture(t)
+	if f.app.maxUploadBytes() != 10<<30 || f.app.cfg.MaxStagedBytes != 20<<30 {
+		t.Fatal("默认大小上限没有支持 10 GiB")
+	}
+	for _, size := range []int64{10 << 30, (10 << 30) + 1} {
+		// 只申报大小，不分配十 GiB 的测试数据。恰好上限会进入内容验证，超出则提前拒绝。
+		r := httptest.NewRequest("PUT", "/api/admin/share/upload", strings.NewReader(""))
+		r.ContentLength = size
+		r.Header.Set("Authorization", f.admin)
+		r.Header.Set("X-Share-Filename", "large.bin")
+		w := httptest.NewRecorder()
+		f.handler.ServeHTTP(w, r)
+		want := 400
+		if size > 10<<30 {
+			want = 413
+		}
+		if w.Code != want {
+			t.Fatalf("大小 %d 返回 %d，期望 %d: %s", size, w.Code, want, w.Body.String())
+		}
+	}
+	for _, name := range []string{"MAX_UPLOAD_SIZE_MB", "MAX_STAGED_SIZE_MB", "MAX_UPLOADS"} {
+		t.Setenv(name, "")
+	}
+	cfg, err := ConfigFromEnv()
+	if err != nil || cfg.MaxUploadBytes != 10<<30 || cfg.MaxStagedBytes != 20<<30 {
+		t.Fatalf("环境配置默认大小错误: %+v %v", cfg, err)
+	}
+	t.Setenv("MAX_UPLOAD_SIZE_MB", "10241")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("配置接受了超过 10 GiB 的上传上限")
 	}
 }

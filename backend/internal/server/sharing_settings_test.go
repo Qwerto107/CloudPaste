@@ -40,7 +40,7 @@ func TestSharingSettingsLimitsAndPersistence(t *testing.T) {
 	if f.app.maxUploadBytes() != 1<<20 {
 		t.Fatal("上传限制未生效")
 	}
-	for _, body := range []map[string]any{{"max_upload_size": "101"}, {"max_upload_size": "-1"}, {"share_default_expiry_hours": "NaN"}} {
+	for _, body := range []map[string]any{{"max_upload_size": "10241"}, {"max_upload_size": "-1"}, {"share_default_expiry_hours": "NaN"}} {
 		f.request(t, "PUT", "/api/admin/settings/group/1", f.admin, body, nil, 400)
 	}
 	f.request(t, "PUT", "/api/admin/settings/group/2", f.admin, map[string]any{"preview_max_text_kb": "2049"}, nil, 400)

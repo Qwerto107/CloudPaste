@@ -78,10 +78,11 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		cfg.MaxUploads = 2
 	}
 	if cfg.MaxUploadBytes <= 0 {
-		cfg.MaxUploadBytes = 100 << 20
+		cfg.MaxUploadBytes = 10 << 30
 	}
+	cfg.MaxUploadBytes = min(cfg.MaxUploadBytes, 10<<30)
 	if cfg.MaxStagedBytes <= 0 {
-		cfg.MaxStagedBytes = 1 << 30
+		cfg.MaxStagedBytes = 20 << 30
 	}
 	if cfg.TransferMaxFileBytes <= 0 {
 		cfg.TransferMaxFileBytes = 10 << 30
