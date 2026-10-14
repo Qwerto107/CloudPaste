@@ -24,6 +24,7 @@ func shareGone(s Share) error {
 func shareView(s Share) map[string]any {
 	v := toMap(s)
 	delete(v, "password")
+	delete(v, "password_encrypted")
 	delete(v, "source_version")
 	delete(v, "meta_version")
 	delete(v, "file_path")
@@ -346,7 +347,11 @@ func (a *App) listShares(w http.ResponseWriter, r *http.Request) error {
 		if err = json.Unmarshal(raw, &s); err != nil {
 			return err
 		}
-		views = append(views, shareView(s))
+		view, err := a.managedFileView(s)
+		if err != nil {
+			return err
+		}
+		views = append(views, view)
 	}
 	a.write(w, 200, map[string]any{"files": views, "pagination": pagination(total, limit, offset)}, "获取成功")
 	return nil
@@ -377,15 +382,17 @@ func (a *App) updateShare(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	// 密码哈希与请求体读取不占用全局写锁。
+	var encryptedPassword string
 	if body.ClearPassword {
 		empty := ""
 		body.Password = &empty
 	} else if body.Password != nil && *body.Password != "" {
-		hash, err := passwordHash(*body.Password)
+		hash, encrypted, err := a.protectSharePassword(*body.Password)
 		if err != nil {
 			return err
 		}
 		body.Password = &hash
+		encryptedPassword = encrypted
 	}
 	s, err = func() (Share, error) {
 		a.mutationMu.Lock()
@@ -424,6 +431,7 @@ func (a *App) updateShare(w http.ResponseWriter, r *http.Request) error {
 		}
 		if body.Password != nil {
 			s.Password = *body.Password
+			s.EncryptedPassword = encryptedPassword
 		}
 		if body.ExpiresAt != nil {
 			if err = json.Unmarshal(body.ExpiresAt, &s.ExpiresAt); err != nil {
@@ -446,7 +454,11 @@ func (a *App) updateShare(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	a.write(w, 200, shareView(s), "分享已更新")
+	view, err := a.managedFileView(s)
+	if err != nil {
+		return err
+	}
+	a.write(w, 200, view, "分享已更新")
 	return nil
 }
 func (a *App) deleteShares(w http.ResponseWriter, r *http.Request) error {

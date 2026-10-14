@@ -491,7 +491,10 @@ func (a *App) uploadFile(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return &apiError{409, "SHARE_SAVE_FAILED", "文件已保存，但分享记录未保存，请重新上传"}
 	}
-	v := shareView(record)
+	v, err := a.managedFileView(record)
+	if err != nil {
+		return err
+	}
 	v["url"] = "/file/" + record.Slug
 	a.write(w, 201, v, "文件已上传并创建分享")
 	return nil
@@ -534,7 +537,7 @@ func (a *App) uploadShareRecord(r *http.Request, fields map[string]string, name 
 	}
 	if fields["password"] != "" {
 		var err error
-		s.Password, err = passwordHash(fields["password"])
+		s.Password, s.EncryptedPassword, err = a.protectSharePassword(fields["password"])
 		if err != nil {
 			return s, err
 		}

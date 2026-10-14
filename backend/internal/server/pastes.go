@@ -57,6 +57,8 @@ func (a *App) createPaste(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	p = body.Paste
+	// 客户端不能提交加密副本；必须由服务端使用当前密钥生成。
+	p.EncryptedPassword = ""
 	if body.Expiry == nil {
 		expiry, err := a.defaultShareExpiry(r)
 		if err != nil {
@@ -83,7 +85,7 @@ func (a *App) createPaste(w http.ResponseWriter, r *http.Request) error {
 	}
 	if p.Password != "" {
 		var err error
-		p.Password, err = passwordHash(p.Password)
+		p.Password, p.EncryptedPassword, err = a.protectSharePassword(p.Password)
 		if err != nil {
 			return err
 		}
@@ -100,7 +102,10 @@ func (a *App) createPaste(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	view := pasteView(p, false)
+	view, err := a.managedPasteView(p, false)
+	if err != nil {
+		return err
+	}
 	view["url"] = "/paste/" + p.Slug
 	a.write(w, 201, view, "文本创建成功")
 	return nil
@@ -109,6 +114,7 @@ func (a *App) createPaste(w http.ResponseWriter, r *http.Request) error {
 func pasteView(p Paste, content bool) map[string]any {
 	view := toMap(p)
 	delete(view, "password")
+	delete(view, "password_encrypted")
 	view["has_password"] = p.Password != ""
 	view["hasPassword"] = p.Password != ""
 	if !content {
@@ -220,7 +226,11 @@ func (a *App) listPastes(w http.ResponseWriter, r *http.Request) error {
 		if err = json.Unmarshal(raw, &p); err != nil {
 			return err
 		}
-		views = append(views, pasteView(p, true))
+		view, err := a.managedPasteView(p, true)
+		if err != nil {
+			return err
+		}
+		views = append(views, view)
 	}
 	a.write(w, 200, map[string]any{"results": views, "pagination": pagination(total, limit, offset)}, "获取成功")
 	return nil
@@ -234,7 +244,11 @@ func (a *App) pasteDetail(w http.ResponseWriter, r *http.Request) error {
 	if !principal(r).Admin && principal(r).Owner() != p.Owner {
 		return notFound()
 	}
-	a.write(w, 200, pasteView(p, true), "获取成功")
+	view, err := a.managedPasteView(p, true)
+	if err != nil {
+		return err
+	}
+	a.write(w, 200, view, "获取成功")
 	return nil
 }
 
@@ -262,15 +276,17 @@ func (a *App) updatePaste(w http.ResponseWriter, r *http.Request) error {
 		return notFound()
 	}
 	// 接收请求和计算密码哈希都在锁外，慢客户端不能持有全局写锁。
+	var encryptedPassword string
 	if body.ClearPassword {
 		empty := ""
 		body.Password = &empty
 	} else if body.Password != nil && *body.Password != "" {
-		hash, err := passwordHash(*body.Password)
+		hash, encrypted, err := a.protectSharePassword(*body.Password)
 		if err != nil {
 			return err
 		}
 		body.Password = &hash
+		encryptedPassword = encrypted
 	}
 	id := p.ID
 	p, err := func() (Paste, error) {
@@ -317,6 +333,7 @@ func (a *App) updatePaste(w http.ResponseWriter, r *http.Request) error {
 		}
 		if body.Password != nil {
 			p.Password = *body.Password
+			p.EncryptedPassword = encryptedPassword
 		}
 		if body.MaxViews != nil {
 			p.MaxViews = *body.MaxViews
@@ -343,7 +360,11 @@ func (a *App) updatePaste(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	// 响应写入也可能阻塞，释放写锁后再返回完整内容。
-	a.write(w, 200, pasteView(p, true), "文本已更新")
+	view, err := a.managedPasteView(p, true)
+	if err != nil {
+		return err
+	}
+	a.write(w, 200, view, "文本已更新")
 	return nil
 }
 

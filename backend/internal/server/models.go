@@ -65,19 +65,20 @@ type APIKey struct {
 }
 
 type Paste struct {
-	ID        string  `json:"id"`
-	Slug      string  `json:"slug"`
-	Title     string  `json:"title"`
-	Content   string  `json:"content"`
-	Remark    string  `json:"remark"`
-	Password  string  `json:"password,omitempty"`
-	ExpiresAt *string `json:"expires_at"`
-	MaxViews  int     `json:"max_views"`
-	Views     int     `json:"views"`
-	Public    Flag    `json:"is_public"`
-	Owner     string  `json:"created_by"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
+	EncryptedPassword string  `json:"password_encrypted,omitempty"`
+	ID                string  `json:"id"`
+	Slug              string  `json:"slug"`
+	Title             string  `json:"title"`
+	Content           string  `json:"content"`
+	Remark            string  `json:"remark"`
+	Password          string  `json:"password,omitempty"`
+	ExpiresAt         *string `json:"expires_at"`
+	MaxViews          int     `json:"max_views"`
+	Views             int     `json:"views"`
+	Public            Flag    `json:"is_public"`
+	Owner             string  `json:"created_by"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
 }
 
 type Storage struct {
@@ -132,6 +133,7 @@ type FsMeta struct {
 }
 
 type Share struct {
+	EncryptedPassword string `json:"password_encrypted,omitempty"`
 	// 合集保存文件来源快照，沿用同一分享的密码、有效期和查看次数。
 	Files         []Share `json:"files,omitempty"`
 	StorageID     string  `json:"storage_config_id,omitempty"`

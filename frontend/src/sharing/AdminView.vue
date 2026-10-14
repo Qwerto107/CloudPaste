@@ -61,6 +61,7 @@ const permissions = [
 ];
 const selectedPermissions = ref([]);
 const originalMaxViews = ref(0);
+const originalPassword = ref("");
 const shareStates = {
   valid: { label: "有效", reason: "", kind: "valid" },
   expired: { label: "已失效", reason: "已过期", kind: "invalid" },
@@ -207,7 +208,10 @@ async function openEditor(item = null) {
         values[key] = Boolean(values[key]);
     if (panel.value === "keys") values.is_enable = Boolean(values.is_enable);
     originalMaxViews.value = Number(values.max_views || 0);
-    values.password = "";
+    if (panel.value === "texts" || panel.value === "files") {
+      values.password = item?.password || "";
+      originalPassword.value = values.password;
+    } else values.password = "";
     editing.value = true;
   } catch (reason) {
     error.value = reason.message;
@@ -254,7 +258,9 @@ async function save() {
       // 改显示名或备注不重置已使用的查看额度。
       if (Number(values.max_views) !== originalMaxViews.value)
         body.max_views = Number(values.max_views);
-      if (values.password) body.password = values.password;
+      // 没改密码不重新加密；旧哈希记录留空也继续保留保护。
+      if (values.password !== originalPassword.value)
+        body.password = values.password;
       if (panel.value === "texts") {
         // 后缀复用后，旧编辑窗口仍只能更新原记录。
         body.id = editID.value;
@@ -696,12 +702,16 @@ onBeforeUnmount(() => {
           /></label>
           <div class="form-row">
             <label
-              >新访问密码<UiInput
+              >访问密码<UiInput
                 v-model="values.password"
-                type="password"
+                type="text"
                 autocomplete="new-password"
                 maxlength="72"
-                placeholder="留空保留现有密码" /></label
+                :placeholder="
+                  values.password_available === false
+                    ? '原密码不可恢复，输入新密码'
+                    : '未设置，直接输入即可修改'
+                " /></label
             ><label
               >最多查看次数<UiInput
                 v-model.number="values.max_views"
