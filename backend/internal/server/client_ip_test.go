@@ -111,10 +111,13 @@ func TestTrustedProxyPasswordBudgetsRemainIndependent(t *testing.T) {
 	for i := 0; i < 60; i++ {
 		f.request(t, "POST", "/api/admin/login", "", map[string]any{"username": "missing-user", "password": "wrong"}, attacker, 429)
 	}
-	// 单个来源超限后不再消耗总额度，其他真实来源仍可登录。
+	// 单个来源超限不会占用其他真实来源的尝试次数。
 	f.request(t, "POST", "/api/admin/login", "", map[string]any{"username": "admin", "password": testPassword}, map[string]string{"X-Forwarded-For": "203.0.113.8"}, 200)
-	if got := f.app.adminPasswordAttempts.total.Count; got != 12 {
-		t.Fatalf("one source exhausted shared CPU budget: count=%d", got)
+	if got := f.app.adminPasswordAttempts.byIP["198.51.100.7"].Count; got != 10 {
+		t.Fatalf("rejected attempts changed source budget: count=%d", got)
+	}
+	if got := f.app.adminPasswordAttempts.byIP["203.0.113.8"].Count; got != 1 {
+		t.Fatalf("fresh source did not get its own budget: count=%d", got)
 	}
 }
 

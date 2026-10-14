@@ -62,9 +62,6 @@ func (a *App) allowPasswordAttempt(r *http.Request) bool {
 			delete(budget.byIP, key)
 		}
 	}
-	if now.Sub(budget.total.Started) > time.Minute {
-		budget.total = attemptWindow{Started: now}
-	}
 	entry, exists := budget.byIP[ip]
 	if !exists {
 		if len(budget.byIP) >= 2048 {
@@ -72,11 +69,10 @@ func (a *App) allowPasswordAttempt(r *http.Request) bool {
 		}
 		entry = attemptWindow{Started: now}
 	}
-	if entry.Count >= 10 || budget.total.Count >= 60 {
+	if entry.Count >= a.cfg.RateLimits.PasswordPerIP {
 		return false
 	}
 	entry.Count++
-	budget.total.Count++
 	budget.byIP[ip] = entry
 	return true
 }

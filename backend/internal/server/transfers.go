@@ -294,7 +294,7 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 	h := a.transfers
 	ip := a.clientIP(r)
 	h.mu.Lock()
-	if h.ctx.Err() != nil || !h.allowLocked("create:"+ip, 4) || !h.allowLocked("create:all", 30) || len(h.rooms) >= transferRooms {
+	if h.ctx.Err() != nil || !h.allowLocked("create:"+ip, a.cfg.RateLimits.TransferCreatePerIP) || len(h.rooms) >= transferRooms {
 		h.mu.Unlock()
 		return transferBusy()
 	}
@@ -357,7 +357,7 @@ func (a *App) joinTransfer(w http.ResponseWriter, r *http.Request) error {
 	h := a.transfers
 	ip := a.clientIP(r)
 	h.mu.Lock()
-	if !h.allowLocked("join:"+ip, 10) || !h.allowLocked("join:all", 120) {
+	if !h.allowLocked("join:"+ip, a.cfg.RateLimits.TransferJoinPerIP) {
 		h.mu.Unlock()
 		return transferBusy()
 	}
@@ -412,7 +412,7 @@ func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
 	h := a.transfers
 	ip := a.clientIP(r)
 	h.mu.Lock()
-	if h.ctx.Err() != nil || h.connectionCount >= transferConnections || h.connections[ip] >= 8 || !h.allowLocked("socket:"+ip, 30) {
+	if h.ctx.Err() != nil || h.connectionCount >= transferConnections || h.connections[ip] >= 8 || !h.allowLocked("socket:"+ip, a.cfg.RateLimits.TransferSocketPerIP) {
 		h.mu.Unlock()
 		a.fail(w, transferBusy())
 		return
@@ -483,7 +483,7 @@ func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.mu.Lock()
-		if !h.allowLocked("message:"+member.token, 240) {
+		if !h.allowLocked("message:"+member.token, a.cfg.RateLimits.TransferMessagesPerMember) {
 			h.mu.Unlock()
 			return
 		}

@@ -36,10 +36,9 @@ type attemptWindow struct {
 	Count   int
 }
 
-// 每类入口独立保存来源及总尝试额度，访客不能耗尽管理认证的计数。
+// 访客与管理入口分别按 IP 计数，不再设置跨来源的每分钟总额度。
 type passwordAttemptBudget struct {
-	byIP  map[string]attemptWindow
-	total attemptWindow
+	byIP map[string]attemptWindow
 }
 
 // App 统一持有数据库和有界并发资源，不创建后台轮询池或无限缓存。
@@ -68,6 +67,9 @@ type App struct {
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
+	if err := cfg.configureRateLimits(false); err != nil {
+		return nil, err
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}

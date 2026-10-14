@@ -157,7 +157,7 @@ func (a *App) transferToolDownload(w http.ResponseWriter, r *http.Request) error
 		h.mu.Unlock()
 		return err
 	}
-	if !h.allowLocked("tool:"+a.clientIP(r), 240) {
+	if !h.allowLocked("tool:"+a.clientIP(r), a.cfg.RateLimits.TransferToolPerIP) {
 		h.mu.Unlock()
 		return transferBusy()
 	}

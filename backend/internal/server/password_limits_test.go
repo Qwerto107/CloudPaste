@@ -30,10 +30,10 @@ func TestAdminLoginAttemptsDoNotBlockVisitorPassword(t *testing.T) {
 	f.request(t, "POST", "/api/paste/protected-text", "", map[string]any{"password": "share-password"}, nil, 200)
 }
 
-func TestVisitorGlobalPasswordBudgetDoesNotBlockAdmin(t *testing.T) {
+func TestPasswordBudgetsAreIndependentPerIP(t *testing.T) {
 	f := newFixture(t)
-	// 使用多个真实连接来源耗尽访客总额；客户端来源头不能改变计数。
-	for i := 0; i < 60; i++ {
+	// 多个 IP 各自使用限额，不再受原先的全站 60 次限制。
+	for i := 0; i < 120; i++ {
 		r := httptest.NewRequest("POST", "/api/paste/example", nil)
 		r.RemoteAddr = fmt.Sprintf("198.51.100.%d:1234", i/10+1)
 		r.Header.Set("X-Forwarded-For", fmt.Sprintf("203.0.113.%d", i))
@@ -43,14 +43,18 @@ func TestVisitorGlobalPasswordBudgetDoesNotBlockAdmin(t *testing.T) {
 	}
 	r := httptest.NewRequest("POST", "/api/paste/example", nil)
 	r.RemoteAddr = "198.51.100.200:1234"
-	if f.app.allowPasswordAttempt(r) {
-		t.Fatal("visitor global budget not enforced")
+	if !f.app.allowPasswordAttempt(r) {
+		t.Fatal("other IPs exhausted a fresh IP allowance")
 	}
 	admin := httptest.NewRequest("POST", "/api/admin/login", nil)
 	admin.RemoteAddr = r.RemoteAddr
 	admin = admin.WithContext(context.WithValue(admin.Context(), adminScopeKey{}, true))
 	if !f.app.allowPasswordAttempt(admin) {
-		t.Fatal("visitor global budget exhausted admin allowance")
+		t.Fatal("visitor attempts exhausted admin allowance")
+	}
+	r.RemoteAddr = "198.51.100.1:1234"
+	if f.app.allowPasswordAttempt(r) {
+		t.Fatal("per-IP password limit not enforced")
 	}
 }
 

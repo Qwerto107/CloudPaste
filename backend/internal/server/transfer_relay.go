@@ -59,7 +59,7 @@ func (a *App) claimTransfer(r *http.Request, download bool) (*transferFile, erro
 	ip := a.clientIP(r)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if !h.allowLocked("relay:"+ip, 90) {
+	if !h.allowLocked("relay:"+ip, a.cfg.RateLimits.TransferRelayPerIP) {
 		return nil, transferBusy()
 	}
 	for _, room := range h.rooms {

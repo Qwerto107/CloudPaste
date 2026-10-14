@@ -19,10 +19,14 @@ type Config struct {
 	TransferDisabled                                                    bool
 	TransferMaxFileBytes, TransferBytesPerSecond                        int64
 	TransferSTUN                                                        string
+	RateLimits                                                          RateLimitConfig
 }
 
 func ConfigFromEnv() (Config, error) {
 	c := Config{ListenAddr: ":8787", DataDir: "./data", AdminUsername: "admin", MaxDownloads: 8}
+	if err := c.configureRateLimits(true); err != nil {
+		return c, err
+	}
 	c.TransferDisabled = os.Getenv("TRANSFER_ENABLED") == "false"
 	c.TransferMaxFileBytes = 10 << 30
 	c.TransferBytesPerSecond = 64 << 20
