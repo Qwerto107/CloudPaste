@@ -88,7 +88,7 @@ curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-comp
 docker compose up -d --pull always
 ```
 
-Both modes use prebuilt `0.7.0` images and the same entry point. Stop the active mode before switching to the other. Access is limited to the local machine by default. See the [deployment guide](deployment.md) for server access, switching modes and upgrades. [Linux standalone binaries](binary.md) include the complete web interface in one executable; API-only binaries remain available.
+The single-container `cloudpaste` image supports Linux amd64, arm64, armv6, armv5 and loong64. The separate `cloudpaste-frontend` and `cloudpaste-backend` images support Linux amd64 and arm64. Both modes use the same entry point; stop the active mode before switching. Access is limited to the local machine by default. See the [deployment guide](deployment.md) for server access, switching modes and upgrades. [Linux, Windows and macOS binaries](binary.md) include the complete web interface in one executable; separate backend binaries are available for Linux amd64 and arm64.
 
 ## Local assets, clear boundaries
 

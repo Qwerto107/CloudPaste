@@ -59,7 +59,9 @@ Linux 上，新建的专用目录执行 `sudo chown 65532:65532 data files`。�
 docker compose up -d --pull always
 ```
 
-此命令使用 [docker-compose.yml](../docker-compose.yml)，默认拉取 `ghcr.io/qwerto107/cloudpaste-standalone:0.7.0`。镜像已包含前后端，无需安装 Go、Node.js 或本地打包。
+此命令使用 [docker-compose.yml](../docker-compose.yml)，默认拉取 `ghcr.io/qwerto107/cloudpaste:0.7.0`。镜像已包含前后端，无需安装 Go、Node.js 或本地打包。
+
+单容器镜像支持 Linux amd64、arm64、arm/v6、arm/v5、loong64，Docker 按宿主机架构选择。Windows 和 macOS 的原生单文件程序见 [二进制部署](binary.md)；Apple Silicon 上的 Docker 使用 Linux arm64 镜像。
 
 ### 3. 登录并添加存储
 
@@ -83,6 +85,8 @@ docker compose up -d --pull always
 ```
 
 默认拉取 `cloudpaste-frontend:0.7.0`、`cloudpaste-backend:0.7.0` 两个 GHCR 镜像。前端 Nginx 提供页面并转发 API，浏览器入口仍为 `http://127.0.0.1:8081`。
+
+分离版的镜像和独立后端二进制仅提供 Linux amd64、arm64；ARMv5、ARMv6 和 Loong64 使用单容器或完整程序。
 
 ## 切换部署方式
 
@@ -113,7 +117,7 @@ docker compose up -d --pull always
 | 要调整什么 | 修改位置 | 示例 |
 | --- | --- | --- |
 | 管理员账号 | `.env` | `ADMIN_USERNAME`、`ADMIN_PASSWORD`（首次初始化使用；之后在后台修改） |
-| 单容器镜像版本 | `docker-compose.yml` 的 `image` | `ghcr.io/qwerto107/cloudpaste-standalone:版本号` |
+| 单容器镜像版本 | `docker-compose.yml` 的 `image` | `ghcr.io/qwerto107/cloudpaste:版本号` |
 | 多容器镜像版本 | 运行目录的 `docker-compose.yml` 中两处 `image` | 前后端填写相同版本 |
 | 监听地址和宿主机端口 | 对应 Compose 的 `ports` | 单容器 `127.0.0.1:8081:8787`，多容器前端 `127.0.0.1:8081:8080` |
 | 文件目录 | `.env` | `LOCAL_FILES_DIR=./files`，后台仍填 `/files` |

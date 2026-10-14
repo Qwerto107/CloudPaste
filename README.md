@@ -98,7 +98,7 @@ curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-comp
 docker compose up -d --pull always
 ```
 
-两种方式都使用现成的 `0.7.0` 镜像，入口相同。已有运行中的容器需先停止当前模式，再切换另一种。默认仅本机可访问；服务器部署、模式切换与升级见 [部署指南](docs/deployment.md)。不使用 Docker 时，可下载内置完整界面的 [Linux 单文件程序](docs/binary.md)。
+单容器镜像 `cloudpaste` 支持 Linux amd64、arm64、armv6、armv5、loong64；多容器的 `cloudpaste-frontend`、`cloudpaste-backend` 仅支持 Linux amd64、arm64。两种方式入口相同，已有运行中的容器需先停止当前模式再切换。默认仅本机可访问；服务器部署、模式切换与升级见 [部署指南](docs/deployment.md)。不使用 Docker 时，可下载内置完整界面的 [Linux、Windows 或 macOS 单文件程序](docs/binary.md)。
 
 ## 轻量，也有边界
 

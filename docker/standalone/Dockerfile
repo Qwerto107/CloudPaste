@@ -21,13 +21,29 @@ COPY backend/ ./
 COPY --from=frontend /src/backend/internal/webui/dist ./internal/webui/dist
 ARG TARGETOS
 ARG TARGETARCH
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -tags with_frontend -trimpath -ldflags="-s -w" -o /cloudpaste ./cmd/cloudpaste \
-    && mkdir /runtime-data
+ARG TARGETVARIANT
+# ARMv5、ARMv6 必须明确指令集，其他架构不设置 GOARM。
+RUN case "${TARGETARCH}/${TARGETVARIANT}" in \
+      arm/v5) export GOARM=5 ;; \
+      arm/v6) export GOARM=6 ;; \
+      arm/*) echo "不支持的 ARM 变体: ${TARGETVARIANT}" >&2; exit 1 ;; \
+    esac \
+    && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -tags with_frontend -trimpath -ldflags="-s -w" -o /cloudpaste ./cmd/cloudpaste \
+    && mkdir /runtime-data /runtime-tmp \
+    && chmod 1777 /runtime-tmp
 
-# 无需 Nginx 或 Node 运行时；沿用现有数据目录、非 root 用户与健康检查。
-FROM gcr.io/distroless/static-debian13:nonroot
+# 只取构建主机镜像中的架构无关文件，避免目标架构受基础镜像限制。
+FROM --platform=$BUILDPLATFORM gcr.io/distroless/static-debian13:nonroot AS runtime-files
+
+# 纯 Go 程序无需系统运行库，scratch 可覆盖全部五种 Linux 架构。
+FROM scratch
+COPY --from=runtime-files /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=runtime-files /etc/passwd /etc/passwd
+COPY --from=runtime-files /etc/group /etc/group
+COPY --from=runtime-files /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /cloudpaste /cloudpaste
 COPY --chown=65532:65532 --from=build /runtime-data /data
+COPY --chmod=1777 --from=build /runtime-tmp /tmp
 USER 65532:65532
 ENV DATA_DIR=/data PORT=8787
 EXPOSE 8787

@@ -95,7 +95,7 @@ def main():
     assert content == b"end"
 
     # 文件位于表单第一项，后续中文备注与分享参数仍需完整解析。
-    boundary = "cloudpaste-go-smoke-boundary"
+    boundary = "cloudpaste-smoke-boundary"
     form = f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="form.txt"\r\nContent-Type: text/plain\r\n\r\nform upload\r\n'
     for name, value in {"storage_config_id": storage["id"], "path": "/smoke", "remark": "中文备注"}.items():
         form += f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'
