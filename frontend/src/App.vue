@@ -38,6 +38,37 @@ const accountTarget = computed(() => {
 });
 const error = ref("");
 const announcement = ref(false);
+const announcementEnabled = computed(
+  () =>
+    settings.site_announcement_enabled === "true" &&
+    Boolean(settings.site_announcement_content?.trim()),
+);
+// 新页面使用站点设置的默认状态；页面内切换路由不会重新展开访客已收起的公告。
+watch(
+  () => [
+    settings.site_announcement_enabled,
+    settings.site_announcement_default_open,
+    settings.site_announcement_content,
+  ],
+  () => {
+    announcement.value =
+      announcementEnabled.value &&
+      settings.site_announcement_default_open === "true";
+  },
+  { immediate: true },
+);
+const githubURL = computed(() => {
+  try {
+    const url = new URL(settings.site_github_url || "");
+    return ["http:", "https:"].includes(url.protocol) &&
+      !url.username &&
+      !url.password
+      ? url.href
+      : "";
+  } catch {
+    return "";
+  }
+});
 // 首次主题由头部同源脚本提前设置，避免暗色页面刷新时闪白。
 const dark = ref(document.documentElement.dataset.theme === "dark");
 provide(themeKey, dark);
@@ -137,7 +168,8 @@ async function logout() {
             v-if="settings.site_upload_page_enabled !== 'false'"
             to="/upload"
             ><Icon name="folder" />文件分享</RouterLink
-          ><RouterLink to="/transfer"><Icon name="transfer" />设备互传</RouterLink
+          ><RouterLink to="/transfer"
+            ><Icon name="transfer" />设备互传</RouterLink
           ><RouterLink :to="accountTarget"
             ><Icon name="grid" />{{
               session.type === "none" ? "登录" : "管理"
@@ -157,7 +189,7 @@ async function logout() {
             }}</span></span
           >
           <UiButton
-            v-if="settings.site_announcement_enabled === 'true'"
+            v-if="announcementEnabled"
             class="quiet icon-button"
             icon="bell"
             aria-label="站点公告"
@@ -165,6 +197,18 @@ async function logout() {
             @click="announcement = !announcement"
           >
           </UiButton>
+          <UiButton
+            v-if="settings.site_github_enabled === 'true' && githubURL"
+            tag="a"
+            type="button"
+            class="quiet icon-button"
+            icon="github"
+            :href="githubURL"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GitHub"
+            title="GitHub"
+          />
           <UiButton
             class="quiet icon-button theme-toggle"
             :icon="dark ? 'sun' : 'moon'"
@@ -191,10 +235,11 @@ async function logout() {
         </p>
         <div class="custom-content" v-html="head"></div>
         <section
-          v-if="announcement && settings.site_announcement_enabled === 'true'"
-          class="panel"
+          v-if="announcement && announcementEnabled"
+          class="panel site-announcement"
+          role="region"
+          aria-label="站点公告"
         >
-          <h2>站点公告</h2>
           <MarkdownPreview
             :content="settings.site_announcement_content || ''"
           />
@@ -206,7 +251,9 @@ async function logout() {
         <MarkdownPreview
           v-if="settings.site_footer_markdown"
           :content="settings.site_footer_markdown"
-        /><span v-else>CloudPaste · 临时文本与文件分享</span>
+        /><span v-else
+          >Copyright © 2026 Qwerto107 · CloudPaste. All rights reserved.</span
+        >
       </footer>
     </NDialogProvider>
   </NConfigProvider>

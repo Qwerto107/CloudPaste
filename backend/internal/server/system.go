@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -40,7 +41,10 @@ var defaultSettings = []setting{
 	{"site_custom_body", "", "textarea", 4, 0, "页面底部 HTML（过滤脚本与事件属性）"},
 	{"site_home_editor_enabled", "true", "bool", 4, 0, "显示文本编辑入口"},
 	{"site_upload_page_enabled", "true", "bool", 4, 0, "显示文件上传入口"},
+	{"site_github_enabled", "true", "bool", 4, 0, "显示 GitHub 链接"},
+	{"site_github_url", "https://github.com/Qwerto107/CloudPaste", "text", 4, 0, "GitHub 地址"},
 	{"site_announcement_enabled", "false", "bool", 4, 0, "启用公告"},
+	{"site_announcement_default_open", "false", "bool", 4, 0, "默认显示公告内容"},
 	{"site_announcement_content", "", "textarea", 4, 0, "公告内容"},
 }
 
@@ -190,6 +194,13 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 		}
 		if definition.Type == "bool" && value != "true" && value != "false" {
 			return badRequest("布尔值必须为 true 或 false")
+		}
+		// 导航链接只接受网页地址，不能通过配置注入脚本协议或携带登录凭据。
+		if key == "site_github_url" && value != "" {
+			u, err := url.Parse(value)
+			if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil || strings.ContainsAny(value, "\r\n\t") || len(value) > 2048 {
+				return badRequest("GitHub 地址必须为有效的 HTTP 或 HTTPS 链接")
+			}
 		}
 		if definition.Type == "number" {
 			number, err := strconv.ParseInt(value, 10, 64)

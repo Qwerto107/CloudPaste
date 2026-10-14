@@ -95,7 +95,7 @@ export const fields = {
   },
   site_footer_markdown: {
     label: "页脚内容",
-    help: "支持 Markdown，留空使用默认页脚。",
+    help: "支持 Markdown，留空显示 Copyright © 2026 Qwerto107 · CloudPaste. All rights reserved.",
     placeholder: "填写版权信息或简短说明",
   },
   site_home_editor_enabled: {
@@ -108,12 +108,25 @@ export const fields = {
   },
   site_announcement_enabled: {
     label: "显示站点公告",
-    help: "开启后在导航栏显示公告按钮。",
+    help: "开启且填写内容后，在导航栏显示公告按钮。",
+  },
+  site_announcement_default_open: {
+    label: "默认显示公告",
+    help: "启用公告后，打开或刷新页面时自动展开；访客仍可点击右上角公告按钮收起。",
   },
   site_announcement_content: {
     label: "公告内容",
-    help: "支持 Markdown，访客点击公告按钮后查看。",
+    help: "支持 Markdown，可设置默认展开；留空时不显示公告。",
     placeholder: "填写站点使用说明或通知",
+  },
+  site_github_enabled: {
+    label: "显示 GitHub 链接",
+    help: "控制右上角 GitHub 图标的显示与隐藏。",
+  },
+  site_github_url: {
+    label: "GitHub 地址",
+    help: "默认打开本项目仓库，支持 HTTP 或 HTTPS 地址；留空隐藏图标。",
+    placeholder: "https://github.com/Qwerto107/CloudPaste",
   },
   site_custom_head: {
     code: true,
@@ -184,13 +197,22 @@ export const sections = {
       title: "页面入口",
       description: "选择访客能看到的分享入口，创建权限仍由账号或密钥决定。",
       icon: "grid",
-      keys: ["site_home_editor_enabled", "site_upload_page_enabled"],
+      keys: [
+        "site_home_editor_enabled",
+        "site_upload_page_enabled",
+        "site_github_enabled",
+        "site_github_url",
+      ],
     },
     {
       title: "站点公告",
       description: "发布简短通知或使用说明。",
       icon: "bell",
-      keys: ["site_announcement_enabled", "site_announcement_content"],
+      keys: [
+        "site_announcement_enabled",
+        "site_announcement_default_open",
+        "site_announcement_content",
+      ],
     },
     {
       title: "高级自定义",

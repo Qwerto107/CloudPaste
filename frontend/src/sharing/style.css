@@ -286,7 +286,7 @@ button:disabled {
   gap: 0.25rem;
   min-width: 0;
 }
-.header-actions button {
+.header-actions .ui-button {
   padding: 0.55rem;
   flex-shrink: 0;
   color: var(--muted);
@@ -374,6 +374,17 @@ small {
   max-width: 440px;
   margin-top: 2rem;
   padding: 2rem;
+}
+/* 公告仅保留内容，减少容器与 Markdown 首尾段落的额外留白。 */
+.panel.site-announcement {
+  padding: 0.65rem 1rem;
+  margin-bottom: 1rem;
+}
+.site-announcement .md-editor-preview > :first-child {
+  margin-top: 0;
+}
+.site-announcement .md-editor-preview > :last-child {
+  margin-bottom: 0;
 }
 .wide {
   width: 100%;
