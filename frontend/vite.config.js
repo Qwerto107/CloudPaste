@@ -22,7 +22,7 @@ export default defineConfig(({ mode }) => {
       ],
     },
     define: {
-      __APP_VERSION__: JSON.stringify("0.8.1"),
+      __APP_VERSION__: JSON.stringify("0.8.2"),
       __APP_ENV__: JSON.stringify(env.VITE_APP_ENV || "production"),
       __BACKEND_URL__: JSON.stringify(env.VITE_BACKEND_URL || ""),
     },
