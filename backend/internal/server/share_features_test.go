@@ -221,6 +221,7 @@ func TestS3FileDeletion(t *testing.T) {
 
 func TestTenGiBUploadBoundary(t *testing.T) {
 	f := newFixture(t)
+	storage, _ := f.local(t, t.TempDir(), "/disk")
 	if f.app.maxUploadBytes() != 10<<30 || f.app.cfg.MaxStagedBytes != 20<<30 {
 		t.Fatal("默认大小上限没有支持 10 GiB")
 	}
@@ -229,7 +230,10 @@ func TestTenGiBUploadBoundary(t *testing.T) {
 		r := httptest.NewRequest("PUT", "/api/admin/share/upload", strings.NewReader(""))
 		r.ContentLength = size
 		r.Header.Set("Authorization", f.admin)
-		r.Header.Set("X-Share-Filename", "large.bin")
+		// 新流程先校验目标存储；提供有效目标后再验证文件大小边界。
+		for name, value := range uploadHeaders("large.bin", map[string]any{"storage_config_id": storage, "path": "/disk"}, true) {
+			r.Header.Set(name, value)
+		}
 		w := httptest.NewRecorder()
 		f.handler.ServeHTTP(w, r)
 		want := 400
