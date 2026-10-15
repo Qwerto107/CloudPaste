@@ -45,7 +45,7 @@ func (a *App) createCollection(w http.ResponseWriter, r *http.Request) error {
 	err = func() error {
 		a.mutationMu.Lock()
 		defer a.mutationMu.Unlock()
-		actor, err := a.authenticate(r)
+		actor, err := a.creationPrincipal(r, guestUpload, MountUpload|FileShare)
 		if err != nil {
 			return err
 		}

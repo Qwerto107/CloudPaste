@@ -32,6 +32,8 @@ function update(event) {
         : props.modelValue.filter((item) => item !== props.value)
       : enabled,
   );
+  // 父组件可能等待确认后再更新，原生勾选状态始终以传入值为准。
+  event.target.checked = checked.value;
 }
 </script>
 <template>

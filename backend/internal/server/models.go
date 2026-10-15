@@ -34,6 +34,7 @@ func (f *Flag) UnmarshalJSON(b []byte) error {
 type Principal struct {
 	ID, Name, BasicPath, Role string
 	Admin                     bool
+	Guest                     bool // 仅由指定访客入口创建，不根据 API Key 的角色名称判断。
 	Permissions               int
 	StorageIDs                []string
 	CredentialHash            string
@@ -43,6 +44,9 @@ func (p *Principal) Has(permission int) bool {
 	return p != nil && (p.Admin || p.Permissions&permission == permission)
 }
 func (p *Principal) Owner() string {
+	if p.Guest {
+		return "guest:" + p.ID
+	}
 	if p.Admin {
 		return p.ID
 	}

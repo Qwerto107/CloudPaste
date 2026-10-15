@@ -1,5 +1,6 @@
 import { reactive } from "vue";
 import { request } from "./api.js";
+import { settings } from "./settings.js";
 
 const storageKey = "cloudpaste-sharing-session";
 export const session = reactive({
@@ -89,5 +90,17 @@ export function initializeSession() {
 }
 
 export function hasPermission(flag) {
+  // 访客仅获得明确开放的创建能力，不能获得列表、编辑或管理权限。
+  if (session.type === "none") {
+    const permissions =
+      (settings.guest_text_share_enabled === "true" ? 1 : 0) |
+      (settings.guest_file_upload_enabled === "true" ? 2 : 0);
+    return (permissions & flag) === flag;
+  }
   return session.type === "admin" || (session.permissions & flag) === flag;
+}
+
+export function canTransfer(action) {
+  if (session.type !== "none") return action === "join" || hasPermission(3);
+  return settings[`guest_transfer_${action}_enabled`] === "true";
 }

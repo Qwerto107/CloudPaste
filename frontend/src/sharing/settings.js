@@ -2,6 +2,10 @@ import { reactive } from "vue";
 import { request } from "./api.js";
 
 export const settings = reactive({
+  guest_text_share_enabled: "false",
+  guest_file_upload_enabled: "false",
+  guest_transfer_create_enabled: "false",
+  guest_transfer_join_enabled: "true",
   site_title: "CloudPaste",
   site_home_editor_enabled: "true",
   site_upload_page_enabled: "true",

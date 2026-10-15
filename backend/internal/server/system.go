@@ -21,6 +21,10 @@ type setting struct {
 
 // 公开设置采用白名单；凭证、管理员密码和运行环境变量不会进入返回值。
 var defaultSettings = []setting{
+	{guestText, "false", "bool", 1, 0, "允许访客创建文本分享"},
+	{guestUpload, "false", "bool", 1, 0, "允许访客上传文件"},
+	{guestCreateTransfer, "false", "bool", 1, 0, "允许访客创建互传"},
+	{guestJoinTransfer, "true", "bool", 1, 0, "允许访客加入互传"},
 	{"proxy_sign_all", "true", "bool", 1, 2, "Go 后端始终验证下载票据"},
 	{"proxy_sign_expires", "600", "number", 1, 2, "公开分享下载票据有效期（秒）"},
 	{"max_upload_size", "10240", "number", 1, 0, "上传上限（MiB，最大 10 GiB，不超过环境配置）"},

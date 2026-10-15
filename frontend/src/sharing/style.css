@@ -1433,3 +1433,13 @@ summary.settings-card-heading::-webkit-details-marker {
     transition: none !important;
   }
 }
+/* 访客风险提示留足标题宽度，小屏幕仍按可用空间换行。 */
+.n-dialog.guest-permission-warning {
+  width: min(600px, calc(100vw - 32px));
+}
+
+@media (min-width: 640px) {
+  .guest-permission-warning .n-dialog__title {
+    white-space: nowrap;
+  }
+}

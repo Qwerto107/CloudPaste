@@ -247,7 +247,7 @@ func (a *App) Handler() http.Handler {
 			if origin == r.Header.Get("Origin") && origin != "" && origin != "*" {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Add("Vary", "Origin")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Content-Range, Range, X-Custom-Auth-Key, X-FS-Path-Token, X-FS-Path-Tokens, X-FS-Filename, X-FS-Options, X-Share-Filename, X-Share-Options, X-Share-Access")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Content-Range, Range, X-Custom-Auth-Key, X-FS-Path-Token, X-FS-Path-Tokens, X-FS-Filename, X-FS-Options, X-Share-Filename, X-Share-Options, X-Share-Access, X-Guest-Token")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS")
 				w.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Range, ETag, Accept-Ranges, Content-Disposition")
 			}

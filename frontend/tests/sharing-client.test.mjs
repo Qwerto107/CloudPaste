@@ -5,9 +5,39 @@ globalThis.window = {
   appConfig: { backendUrl: "" },
 };
 globalThis.localStorage = { setItem() {}, removeItem() {} };
-const { session, saveSession } = await import("../src/sharing/session.js");
+const { session, saveSession, clearSession, hasPermission, canTransfer } =
+  await import("../src/sharing/session.js");
+const { settings } = await import("../src/sharing/settings.js");
 const { apiURL, request, uploadShare, contentURL } =
   await import("../src/sharing/api.js");
+
+test("访客四项权限分别控制，管理权限保持关闭，登录后沿用账号权限", () => {
+  clearSession();
+  assert.equal(hasPermission(1), false);
+  assert.equal(hasPermission(2), false);
+  assert.equal(canTransfer("create"), false);
+  assert.equal(canTransfer("join"), true);
+  settings.guest_text_share_enabled = "true";
+  settings.guest_file_upload_enabled = "true";
+  settings.guest_transfer_join_enabled = "false";
+  assert.equal(hasPermission(3), true);
+  assert.equal(hasPermission(4), false);
+  assert.equal(hasPermission(8), false);
+  assert.equal(canTransfer("create"), false);
+  assert.equal(canTransfer("join"), false);
+  settings.guest_transfer_create_enabled = "true";
+  assert.equal(canTransfer("create"), true);
+  saveSession({ type: "apikey", token: "test-key", permissions: 1 });
+  assert.equal(hasPermission(2), false);
+  assert.equal(canTransfer("create"), false);
+  assert.equal(canTransfer("join"), true);
+  Object.assign(settings, {
+    guest_text_share_enabled: "false",
+    guest_file_upload_enabled: "false",
+    guest_transfer_create_enabled: "false",
+    guest_transfer_join_enabled: "true",
+  });
+});
 
 test("管理员走独立前缀，公开分享请求不携带凭据", async () => {
   saveSession({ type: "admin", token: "test-admin", permissions: 15 });
@@ -87,6 +117,40 @@ test("认证过期清除本地身份，403 不破坏有效身份", async () => {
     });
   await assert.rejects(request("/files"), /会话过期/);
   assert.equal(session.type, "none");
+});
+
+test("访客上传与合集共用随机归属凭证，不附带登录身份", async () => {
+  clearSession();
+  let xhr;
+  globalThis.XMLHttpRequest = class {
+    constructor() {
+      xhr = this;
+      this.headers = {};
+      this.upload = {};
+    }
+    open() {}
+    setRequestHeader(name, value) {
+      this.headers[name] = value;
+    }
+    send() {
+      this.status = 201;
+      this.responseText = JSON.stringify({ success: true, data: {} });
+      this.onload();
+    }
+  };
+  await uploadShare({ name: "guest.txt", type: "text/plain" }, {}, () => {});
+  const token = xhr.headers["X-Guest-Token"];
+  assert.equal(Buffer.from(token, "base64url").length, 32);
+  assert.equal(xhr.headers.Authorization, undefined);
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options.headers["X-Guest-Token"], token);
+    assert.equal(options.headers.Authorization, undefined);
+    return new Response(JSON.stringify({ success: true, data: {} }));
+  };
+  await request("/share/collection", {
+    method: "POST",
+    body: { ids: ["first", "second"] },
+  });
 });
 
 test("公开分享使用独立解锁凭证，不附带登录身份或把凭证放入 URL", async () => {

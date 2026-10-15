@@ -7,6 +7,21 @@ export const backendBase = (
 ).replace(/\/$/, "");
 const base = backendBase;
 
+let guestToken;
+function guestUploadToken() {
+  // 每个页面使用独立随机凭证，同一批文件可归入合集；不保存为登录身份。
+  if (!guestToken) {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    guestToken = btoa(
+      Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""),
+    )
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+  }
+  return guestToken;
+}
+
 // 管理员和 API Key 保持独立入口，公开分享绝不附带登录凭据。
 export function apiURL(endpoint, publicRequest = false) {
   const scope =
@@ -45,6 +60,12 @@ export async function request(
   const headers = { "Content-Type": "application/json" };
   if (!publicRequest && authorization())
     headers.Authorization = authorization();
+  if (
+    !publicRequest &&
+    session.type === "none" &&
+    endpoint === "/share/collection"
+  )
+    headers["X-Guest-Token"] = guestUploadToken();
   // 临时分享凭证仅用于公开分享接口，不与管理员或 API Key 身份混用。
   if (publicRequest && shareToken) headers["X-Share-Access"] = shareToken;
   const response = await fetch(apiURL(endpoint, publicRequest), {
@@ -81,7 +102,8 @@ export function uploadShare(file, fields, onProgress, signal) {
     const cleanup = () => signal?.removeEventListener("abort", abort);
     xhr.open("PUT", apiURL("/share/upload"));
     xhr.timeout = 3600000;
-    xhr.setRequestHeader("Authorization", authorization());
+    if (authorization()) xhr.setRequestHeader("Authorization", authorization());
+    else xhr.setRequestHeader("X-Guest-Token", guestUploadToken());
     xhr.setRequestHeader(
       "Content-Type",
       file.type || "application/octet-stream",

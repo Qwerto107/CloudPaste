@@ -185,6 +185,9 @@ func (h *transferHub) sweep() {
 }
 
 func (h *transferHub) ownerValid(p Principal) bool {
+	if p.Guest {
+		return true // 开关仅控制新连接，已创建的连接沿用原有生命周期。
+	}
 	ctx, cancel := context.WithTimeout(h.ctx, 2*time.Second)
 	defer cancel()
 	if p.Admin {
@@ -239,9 +242,9 @@ func transferName(s string) string {
 }
 
 func (a *App) registerTransfers(mux *apiMux) {
-	mux.HandleFunc("POST /api/transfer/create", a.protected(TextShare|FileShare, false, a.createTransfer))
-	// 访客与临时会话入口不生成管理员别名，不接收管理员长期凭证。
-	mux.ServeMux.HandleFunc("POST /api/transfer/join", a.handle(a.joinTransfer))
+	mux.HandleFunc("POST /api/transfer/create", a.guestOrProtected(guestCreateTransfer, TextShare|FileShare, a.createTransfer))
+	// 加入入口可认证登录身份；后续互传仍只使用短期成员凭证。
+	mux.HandleFunc("POST /api/transfer/join", a.handle(a.joinTransfer))
 	mux.ServeMux.HandleFunc("GET /api/transfer/socket", a.transferSocket)
 	mux.ServeMux.HandleFunc("PUT /api/transfer/upload/{id}", a.handle(a.transferUpload))
 	mux.ServeMux.HandleFunc("GET /api/transfer/download/{id}", a.handle(a.transferDownload))
@@ -340,6 +343,15 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (a *App) joinTransfer(w http.ResponseWriter, r *http.Request) error {
+	if principal(r) == nil {
+		allowed, err := a.guestAllowed(r, guestJoinTransfer)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return &apiError{403, "FORBIDDEN", "访客无加入互传权限，请登录后重试"}
+		}
+	}
 	if a.cfg.TransferDisabled {
 		return transferUnavailable()
 	}

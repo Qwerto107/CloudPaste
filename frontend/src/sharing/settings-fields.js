@@ -1,5 +1,21 @@
 // 展示信息与后端配置键分开维护；服务端仍负责权限和最终数值校验。
 export const fields = {
+  guest_text_share_enabled: {
+    label: "创建文本",
+    help: "允许未登录访客创建文本分享。",
+  },
+  guest_file_upload_enabled: {
+    label: "上传文件",
+    help: "允许访客向公开、可写的存储上传文件并创建分享，仍受上传额度限制。",
+  },
+  guest_transfer_create_enabled: {
+    label: "创建互传",
+    help: "允许访客创建配对码，独立于文本和文件分享权限。",
+  },
+  guest_transfer_join_enabled: {
+    label: "加入互传",
+    help: "允许访客通过配对码加入连接；关闭后需先登录。",
+  },
   transfer_rate_mb: {
     label: "中继总速率上限",
     help: "所有中继文件共享此带宽，0 表示不限速。保存后立即生效，不影响点对点直连。",
@@ -164,6 +180,17 @@ export const sections = {
   ],
   global: [
     {
+      title: "访客权限",
+      description: "分别控制未登录访客的操作，不影响已登录账号的权限。",
+      icon: "key",
+      keys: [
+        "guest_text_share_enabled",
+        "guest_file_upload_enabled",
+        "guest_transfer_create_enabled",
+        "guest_transfer_join_enabled",
+      ],
+    },
+    {
       title: "分享与上传",
       description: "为新分享设置默认规则。",
       icon: "link",
@@ -204,7 +231,7 @@ export const sections = {
     },
     {
       title: "页面入口",
-      description: "选择访客能看到的分享入口，创建权限仍由账号或密钥决定。",
+      description: "控制分享入口是否显示；实际操作仍由访客或账号权限决定。",
       icon: "grid",
       keys: [
         "site_home_editor_enabled",

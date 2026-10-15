@@ -32,7 +32,7 @@ func validateExpiry(expires *string, maxViews int) error {
 }
 
 func (a *App) registerPastes(mux *apiMux) {
-	mux.HandleFunc("POST /api/paste", a.protected(TextShare, false, a.createPaste))
+	mux.HandleFunc("POST /api/paste", a.guestOrProtected(guestText, TextShare, a.createPaste))
 	mux.ServeMux.HandleFunc("GET /api/paste/{slug}", a.handleShare(a.publicPaste))
 	mux.ServeMux.HandleFunc("POST /api/paste/{slug}", a.handleShare(a.publicPaste))
 	// 管理员通过独立入口查看失效内容，公开入口仍保持原有约束。
@@ -57,6 +57,10 @@ func (a *App) createPaste(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	p = body.Paste
+	// 访客没有认证的私有内容入口，只能创建通过链接访问的分享。
+	if principal(r).Guest && p.Public != 1 {
+		return badRequest("访客不能创建私有文本")
+	}
 	// 客户端不能提交加密副本；必须由服务端使用当前密钥生成。
 	p.EncryptedPassword = ""
 	if body.Expiry == nil {

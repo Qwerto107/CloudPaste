@@ -58,7 +58,10 @@ func shareView(s Share) map[string]any {
 // 此函数只复核授权与来源配置，不向远程存储发出文件查询。
 func (a *App) shareDriver(r *http.Request, s Share) (Driver, string, error) {
 	var actor *Principal
-	if strings.HasPrefix(s.Owner, "apikey:") {
+	if strings.HasPrefix(s.Owner, "guest:") {
+		// 关闭新上传不撤销已创建的分享；来源存储和分享自身限制仍会复核。
+		actor = guestPrincipal(strings.TrimPrefix(s.Owner, "guest:"), FileShare|MountUpload)
+	} else if strings.HasPrefix(s.Owner, "apikey:") {
 		var raw, credential string
 		err := a.db.QueryRowContext(r.Context(), "SELECT data,key_hash FROM api_keys WHERE id=?", strings.TrimPrefix(s.Owner, "apikey:")).Scan(&raw, &credential)
 		if err != nil {

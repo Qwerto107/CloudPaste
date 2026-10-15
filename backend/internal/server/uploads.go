@@ -90,6 +90,15 @@ func (a *App) shareDestination(r *http.Request, id, dir, name string) (uploadDes
 	if s.Status != "ENABLED" || s.ReadOnly == 1 || !a.storageAllowed(principal(r), s) {
 		return uploadDestination{}, nil, "", forbidden()
 	}
+	// 访客只能写入专属目录，不能指定挂载路径或覆盖已有用户的文件。
+	if p := principal(r); p.Guest {
+		if dir != "" && dir != "/" {
+			return uploadDestination{}, nil, "", forbidden()
+		}
+		d, err := a.driver(s)
+		key := path.Join("guest", p.ID, name)
+		return uploadDestination{StorageID: id, StorageKey: key, Version: sourceVersion(Mount{}, s), Proof: secretHash("unmounted")}, d, key, err
+	}
 	canonical, err := cleanPath(dir)
 	if err != nil {
 		return uploadDestination{}, nil, "", err
@@ -337,7 +346,7 @@ func (r *uploadReadCloser) Close() error { return r.closer.Close() }
 
 func (a *App) registerUploads(mux *apiMux) {
 	// 当前上传页面只发送原始文件；分享与文件发布共用有界上传额度。
-	mux.HandleFunc("PUT /api/share/upload", a.protected(MountUpload|FileShare, false, a.uploadEndpoint(a.uploadFile)))
+	mux.HandleFunc("PUT /api/share/upload", a.guestOrProtected(guestUpload, MountUpload|FileShare, a.uploadEndpoint(a.uploadFile)))
 }
 func decodeUploadOptions(header string) (map[string]string, error) {
 	fields := map[string]string{}
@@ -441,7 +450,7 @@ func (a *App) uploadFile(w http.ResponseWriter, r *http.Request) error {
 	if fields["overwrite"] == "true" || fields["overwrite"] == "1" {
 		return badRequest("暂不支持覆盖已有文件")
 	}
-	p, err := a.authenticate(r)
+	p, err := a.creationPrincipal(r, guestUpload, MountUpload|FileShare)
 	if err != nil {
 		return err
 	}

@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { NModal } from "naive-ui";
 import { onBeforeRouteLeave } from "vue-router";
-import { session, hasPermission } from "./session.js";
+import { session, canTransfer } from "./session.js";
 import { settings, loadSettings } from "./settings.js";
 import Icon from "./Icon.vue";
 import PairCodeInput from "./PairCodeInput.vue";
@@ -58,7 +58,8 @@ const direct = ref(false);
 const myMember = ref(0);
 const maxFile = ref(0);
 const busy = ref(false);
-const canCreate = computed(() => hasPermission(3));
+const canCreate = computed(() => canTransfer("create"));
+const canJoin = computed(() => canTransfer("join"));
 const active = computed(() =>
   files.value.some((file) => file.state === "active"),
 );
@@ -346,6 +347,7 @@ function event(message) {
 async function open(kind) {
   // 自动提交与手动提交共用入口，请求期间不能重复加入。
   if (busy.value || (kind === "join" && !validPairingCode(code.value))) return;
+  if (!canTransfer(kind)) return;
   error.value = "";
   busy.value = true;
   autoReceive.value = false;
@@ -675,19 +677,22 @@ onBeforeUnmount(() => {
         </div>
         <form class="transfer-entry-card" @submit.prevent="open('join')">
           <h2>加入连接</h2>
+          <p v-if="!canJoin" class="muted">
+            访客加入互传已关闭，请登录后使用。
+          </p>
           <div class="transfer-code-field">
             <label for="transfer-pair-code">配对码</label>
             <div class="transfer-code-input">
               <PairCodeInput
                 ref="pairCodeInput"
                 v-model="code"
-                :disabled="busy"
+                :disabled="busy || !canJoin"
                 @complete="open('join')"
               />
               <UiButton
                 type="button"
                 aria-label="粘贴配对码"
-                :disabled="busy || pastingCode"
+                :disabled="busy || !canJoin || pastingCode"
                 @click="pasteCode"
                 >{{ pastingCode ? "读取中" : "粘贴" }}</UiButton
               >
@@ -696,7 +701,7 @@ onBeforeUnmount(() => {
           <UiButton
             class="primary"
             icon="transfer"
-            :disabled="busy || !validPairingCode(code)"
+            :disabled="busy || !canJoin || !validPairingCode(code)"
             >加入连接</UiButton
           >
         </form>

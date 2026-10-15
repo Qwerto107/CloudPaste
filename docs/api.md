@@ -6,13 +6,17 @@
 
 | 身份         | 入口               | 认证                                  |
 | ------------ | ------------------ | ------------------------------------- |
-| 未登录访客   | 公开分享与站点设置 | 分享仍校验密码、过期、次数和读取票据  |
+| 未登录访客   | 公开入口及允许的创建入口 | 分享仍校验密码、过期、次数和读取票据 |
 | API Key 用户 | 普通 /api 路径     | Authorization: ApiKey 或 ApiKeyBase64 |
 | 管理员       | /api/admin 路径    | Authorization: Bearer                 |
 
 API Key 必须启用且未过期，并满足权限、路径范围与存储 ACL；分享管理还检查归属。密钥含中文、空白或控制字符时，用 ApiKeyBase64 传输完整密钥的 UTF-8 标准 Base64，前端自动处理。
 
 前端身份入口为 /login、/manage/* 和 /admin/login、/admin/*。管理员凭据只能用于管理员 API，API Key 不能进入管理员 API。外部反向代理的管理访问控制应覆盖 /api/admin 本身和全部子路径，包括登录。
+
+常规设置（分组 1）支持四个布尔开关：`guest_text_share_enabled`、`guest_file_upload_enabled`、`guest_transfer_create_enabled` 默认 `false`，`guest_transfer_join_enabled` 默认 `true`。分别允许无认证请求调用 `POST /api/paste`、`PUT /api/share/upload`（含 `GET /api/storage`、`POST /api/share/collection`）、`POST /api/transfer/create`、`POST /api/transfer/join`。前三项关闭时匿名请求返回 401，加入关闭时返回 403；已认证请求沿用原权限。访客不能创建私有文本或使用管理、创建者预览接口。
+
+访客上传仅可使用公开、启用且可写的存储，`path` 只能为空或 `/`，实际写入隔离目录。浏览器为同一批上传生成 32 字节随机凭证，以无填充 Base64URL 的 `X-Guest-Token` 请求头发送，创建合集时沿用同一凭证；服务端只保存其摘要作为归属。此凭证不能用于登录、管理或查看失效内容。自定义客户端合并文件时也需保持该随机凭证，禁止使用可猜测的值。
 
 ## 限频策略
 
@@ -139,8 +143,8 @@ PUT /api/files/{id} 支持 filename、remark、password、clearPassword、expire
 
 | 方法与路径                                      | 凭据与用途                                                                       |
 | ----------------------------------------------- | -------------------------------------------------------------------------------- |
-| `POST /api/transfer/create`                     | API Key，必须同时具备文本与文件分享权限；管理员改用 `/api/admin/transfer/create` |
-| `POST /api/transfer/join`                       | 无登录凭据，通过配对码申请第二席                                                 |
+| `POST /api/transfer/create`                     | 允许访客时无需登录；API Key 必须同时具备文本与文件分享权限，管理员改用 `/api/admin/transfer/create` |
+| `POST /api/transfer/join`                       | 通过配对码申请第二席；匿名加入受访客开关控制，登录用户附带对应凭据（管理员走 `/api/admin/transfer/join`） |
 | `GET /api/transfer/socket`                      | WebSocket，首条 JSON 消息提交临时成员票据                                        |
 | `GET /api/transfer/download/{id}?ticket=…`      | 接收方一次性票据，返回附件流                                                     |
 | `PUT /api/transfer/upload/{id}`                 | 发送方 `Authorization: Transfer …`，请求体为原文件流                             |

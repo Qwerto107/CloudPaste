@@ -4,12 +4,16 @@ import { h } from "vue";
 export function useConfirmation() {
   const dialog = useDialog();
   // 用同一套主题显示确认框；关闭、取消和点击遮罩都视为不执行。
-  return (content) =>
+  return (
+    content,
+    { title = "请确认操作", positiveText = "确认", className } = {},
+  ) =>
     new Promise((resolve) =>
       dialog.warning({
-        title: "请确认操作",
+        class: className,
+        title,
         content,
-        positiveText: "确认",
+        positiveText,
         negativeText: "取消",
         onPositiveClick: () => {
           resolve(true);

@@ -6,6 +6,7 @@ import {
   watch,
   onBeforeUnmount,
   defineAsyncComponent,
+  h,
 } from "vue";
 import { useConfirmation } from "./ui/confirm.js";
 const confirmAction = useConfirmation();
@@ -32,6 +33,7 @@ const values = reactive({});
 const saved = ref({});
 const loading = ref(false);
 const saving = ref(false);
+const confirming = ref(false);
 const error = ref("");
 const success = ref("");
 let controller;
@@ -65,6 +67,39 @@ const cards = computed(() => {
 function field(item) {
   return fields[item.key] || { label: item.description || "其他选项" };
 }
+const riskyGuestSettings = new Set([
+  "guest_text_share_enabled",
+  "guest_file_upload_enabled",
+  "guest_transfer_create_enabled",
+]);
+async function changeToggle(item, enabled) {
+  if (saving.value || loading.value || confirming.value) return;
+  // 先确认再改变开关，取消、关闭弹窗均保持原值；关闭权限不需要确认。
+  if (enabled && !values[item.key] && riskyGuestSettings.has(item.key)) {
+    confirming.value = true;
+    try {
+      const accepted = await confirmAction(
+        () =>
+          h("div", [
+            h(
+              "p",
+              "开启后，任何人无需登录即可使用此功能，可能被滥用于传播违法内容、恶意上传或大量创建连接，导致存储空间耗尽、带宽费用增加，甚至服务不可用。",
+            ),
+            h("p", [h("strong", "请确认你已了解上述风险，仍要开启？")]),
+          ]),
+        {
+          title: `高风险操作：向所有访客开放「${field(item).label}」`,
+          positiveText: "了解风险，仍然开启",
+          className: "guest-permission-warning",
+        },
+      );
+      if (!accepted || controller?.signal.aborted) return;
+    } finally {
+      confirming.value = false;
+    }
+  }
+  values[item.key] = enabled;
+}
 function reset() {
   Object.assign(values, saved.value);
   success.value = "";
@@ -96,7 +131,7 @@ async function load() {
   }
 }
 async function save() {
-  if (saving.value || loading.value || !dirty.value) return;
+  if (saving.value || loading.value || confirming.value || !dirty.value) return;
   saving.value = true;
   error.value = "";
   success.value = "";
@@ -121,6 +156,7 @@ async function save() {
 async function canLeave() {
   return (
     !saving.value &&
+    !confirming.value &&
     (!dirty.value ||
       (await confirmAction("有未保存的修改，确定放弃并离开吗？")))
   );
@@ -157,7 +193,7 @@ watch(panel, load, { immediate: true });
   <div v-if="loading" class="panel empty" role="status">正在加载设置…</div>
   <UiButton v-else-if="!definitions.length" @click="load">重新加载</UiButton>
   <form v-else class="settings-form" @submit.prevent="save">
-    <UiFieldset class="settings-fields" :disabled="saving">
+    <UiFieldset class="settings-fields" :disabled="saving || confirming">
       <component
         :is="card.advanced ? 'details' : 'section'"
         v-for="card in cards"
@@ -217,7 +253,8 @@ watch(panel, load, { immediate: true });
                 }}</span>
                 <UiCheckbox
                   :id="'setting-' + item.key"
-                  v-model="values[item.key]"
+                  :model-value="values[item.key]"
+                  @update:model-value="changeToggle(item, $event)"
                   class="setting-switch"
                   type="checkbox"
                   role="switch"
@@ -281,9 +318,13 @@ watch(panel, load, { immediate: true });
             : success || "所有修改已保存"
       }}</span>
       <div>
-        <UiButton type="button" :disabled="!dirty || saving" @click="reset">
+        <UiButton
+          type="button"
+          :disabled="!dirty || saving || confirming"
+          @click="reset"
+        >
           撤销修改</UiButton
-        ><UiButton class="primary" :disabled="!dirty || saving">
+        ><UiButton class="primary" :disabled="!dirty || saving || confirming">
           {{ saving ? "正在保存…" : "保存设置" }}
         </UiButton>
       </div>

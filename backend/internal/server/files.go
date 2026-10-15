@@ -9,7 +9,7 @@ import (
 )
 
 func (a *App) registerFiles(mux *apiMux) {
-	mux.HandleFunc("POST /api/share/collection", a.protected(FileShare, false, a.createCollection))
+	mux.HandleFunc("POST /api/share/collection", a.guestOrProtected(guestUpload, FileShare, a.createCollection))
 	// 公开分享只提供普通路径，前端不会附带管理身份。
 	mux.ServeMux.HandleFunc("GET /api/share/get/{slug}", a.handleShare(a.publicShare))
 	mux.ServeMux.HandleFunc("POST /api/share/verify/{slug}", a.handleShare(a.publicShare))

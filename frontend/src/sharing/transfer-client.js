@@ -133,7 +133,6 @@ export class TransferClient {
     const data = await request(`/transfer/${kind}`, {
       method: "POST",
       body: fields,
-      public: kind === "join",
     });
     if (this.closed) return;
     this.member = data.member;

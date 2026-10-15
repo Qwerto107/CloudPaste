@@ -256,7 +256,7 @@ func (a *App) invalidateDriver(id string) {
 }
 
 func (a *App) registerStorage(mux *apiMux) {
-	mux.HandleFunc("GET /api/storage", a.protected(0, false, a.listStorage))
+	mux.HandleFunc("GET /api/storage", a.guestOrProtected(guestUpload, 0, a.listStorage))
 	mux.HandleFunc("POST /api/admin/storage", a.protected(0, true, a.saveStorage))
 	mux.HandleFunc("PUT /api/admin/storage/{id}", a.protected(0, true, a.saveStorage))
 	mux.HandleFunc("DELETE /api/admin/storage/{id}", a.protected(0, true, a.removeStorage))
@@ -303,6 +303,9 @@ func (a *App) listStorage(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		if a.storageAllowed(actor, s) {
+			if actor.Guest && (s.Status != "ENABLED" || s.ReadOnly == 1) {
+				continue
+			}
 			items = append(items, storageView(s, actor.Admin))
 		}
 	}
