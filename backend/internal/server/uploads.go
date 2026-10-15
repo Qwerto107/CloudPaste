@@ -187,10 +187,13 @@ func (a *App) uploadedShareDriver(r *http.Request, s Share) (Driver, string, err
 	return a.recheckDestination(r, dest, FileShare)
 }
 
-// 旧分片只保留到期清理所需信息，升级时不恢复已移除的上传协议。
+// 本地临时文件记录原始存储位置，重启后无需遍历整个存储即可回收；旧分片仅按到期清理。
 type pendingUpload struct {
-	ID      string
-	Expires int64
+	ID         string
+	Expires    int64
+	LocalRoot  string `json:"local_root,omitempty"`
+	LocalScope string `json:"local_scope,omitempty"`
+	LocalKey   string `json:"local_key,omitempty"`
 }
 
 func (a *App) initUploads() error {
@@ -200,7 +203,7 @@ func (a *App) initUploads() error {
 	}
 	a.uploadMu.Lock()
 	defer a.uploadMu.Unlock()
-	if err := a.cleanupUploads(context.Background()); err != nil {
+	if err := a.cleanupUploads(context.Background(), true); err != nil {
 		return err
 	}
 	sessions, _, err := a.resources(context.Background(), "uploads", "", 129, 0)
@@ -243,37 +246,72 @@ func (a *App) initUploads() error {
 	}
 	return nil
 }
-func (a *App) cleanupUploads(ctx context.Context) error {
-	raws, _, err := a.resources(ctx, "uploads", "", 129, 0)
-	if err != nil {
-		return err
-	}
-	for _, raw := range raws {
-		var s pendingUpload
-		if err = json.Unmarshal(raw, &s); err != nil {
+func (a *App) cleanupUploads(ctx context.Context, startup bool) error {
+	for {
+		// 每批只读取待清理记录；活动上传不参与删除，避免高并发时扫描全部记录。
+		rows, err := a.db.QueryContext(ctx, `SELECT data FROM uploads WHERE
+			coalesce(json_extract(data,'$.Expires'),json_extract(data,'$.expires')) <= ?
+			OR (? AND json_extract(data,'$.local_root') IS NOT NULL) LIMIT 128`, time.Now().Unix(), startup)
+		if err != nil {
 			return err
 		}
-		if s.Expires <= time.Now().Unix() {
-			if err = a.removeUpload(ctx, s.ID); err != nil {
+		var pending []pendingUpload
+		for rows.Next() {
+			var raw string
+			var upload pendingUpload
+			if err = rows.Scan(&raw); err == nil {
+				err = json.Unmarshal([]byte(raw), &upload)
+			}
+			if err != nil {
+				_ = rows.Close()
+				return err
+			}
+			pending = append(pending, upload)
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil || len(pending) == 0 {
+			return err
+		}
+		// 单连接数据库必须先关闭查询，再删除临时文件和记录。
+		for _, upload := range pending {
+			if err = a.removeUpload(ctx, upload); err != nil {
 				return err
 			}
 		}
 	}
-	return nil
 }
-func (a *App) removeUpload(ctx context.Context, id string) error {
-	if !validUploadID(id) {
+func (a *App) removeUpload(ctx context.Context, upload pendingUpload) error {
+	if !validUploadID(upload.ID) {
 		return badRequest("上传编号无效")
+	}
+	if upload.LocalRoot != "" {
+		driver := &localDriver{rootPath: upload.LocalRoot, scope: upload.LocalScope}
+		root, _, err := driver.openParent(upload.LocalKey, false)
+		if err != nil {
+			var api *apiError
+			if !errors.Is(err, os.ErrNotExist) && !(errors.As(err, &api) && api.Status == 404) {
+				return err
+			}
+		}
+		if root != nil {
+			err = root.Remove(uploadTempPrefix + upload.ID)
+			_ = root.Close()
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+		return a.deleteResource(ctx, "uploads", upload.ID)
 	}
 	root, err := os.OpenRoot(a.uploadDir)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
-	if err = root.Remove(id); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err = root.Remove(upload.ID); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return a.deleteResource(ctx, "uploads", id)
+	return a.deleteResource(ctx, "uploads", upload.ID)
 }
 func validUploadID(id string) bool { return len(id) == 32 && validSlug.MatchString(id) }
 func (a *App) stagedSize(ctx context.Context) (int64, error) {
@@ -284,7 +322,7 @@ func (a *App) stagedSize(ctx context.Context) (int64, error) {
 func (a *App) reserveUpload(ctx context.Context, size int64) error {
 	a.uploadMu.Lock()
 	defer a.uploadMu.Unlock()
-	if err := a.cleanupUploads(ctx); err != nil {
+	if err := a.cleanupUploads(ctx, false); err != nil {
 		return err
 	}
 	used, err := a.stagedSize(ctx)
@@ -385,28 +423,17 @@ func uploadCopy(ctx context.Context, to io.Writer, from io.Reader, limit int64) 
 	}
 	return n, nil
 }
-func (a *App) readUpload(w http.ResponseWriter, r *http.Request, f *os.File, maximum int64) (string, string, int64, map[string]string, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, maximum)
+func uploadMetadata(r *http.Request) (string, string, map[string]string, error) {
 	name, err := url.PathUnescape(r.Header.Get("X-Share-Filename"))
 	if err != nil {
-		return "", "", 0, nil, badRequest("文件名编码无效")
+		return "", "", nil, badRequest("文件名编码无效")
 	}
 	if err = validateUploadName(name); err != nil {
-		return "", "", 0, nil, err
+		return "", "", nil, err
 	}
 	fields, err := decodeUploadOptions(r.Header.Get("X-Share-Options"))
 	if err != nil {
-		return "", "", 0, nil, err
-	}
-	if r.ContentLength > maximum {
-		return "", "", 0, nil, uploadTooLarge()
-	}
-	size, err := uploadCopy(r.Context(), f, r.Body, maximum)
-	if err != nil {
-		return "", "", 0, nil, err
-	}
-	if r.ContentLength >= 0 && size != r.ContentLength {
-		return "", "", 0, nil, badRequest("实际文件大小与声明不一致")
+		return "", "", nil, err
 	}
 	contentType := r.Header.Get("Content-Type")
 	if contentType == "" {
@@ -416,9 +443,9 @@ func (a *App) readUpload(w http.ResponseWriter, r *http.Request, f *os.File, max
 		contentType = "application/octet-stream"
 	}
 	if _, _, err := mime.ParseMediaType(contentType); err != nil {
-		return "", "", 0, nil, badRequest("文件类型无效")
+		return "", "", nil, badRequest("文件类型无效")
 	}
-	return name, contentType, size, fields, nil
+	return name, contentType, fields, nil
 }
 
 func (a *App) uploadFile(w http.ResponseWriter, r *http.Request) error {
@@ -436,20 +463,71 @@ func (a *App) uploadFile(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	defer a.releaseUpload(reserve)
-	temporary := randomID()
-	f, err := os.OpenFile(filepath.Join(a.uploadDir, temporary), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(filepath.Join(a.uploadDir, temporary))
-	defer f.Close()
-	name, contentType, size, fields, err := a.readUpload(w, r, f, min(maximum, reserve))
+	name, contentType, fields, err := uploadMetadata(r)
 	if err != nil {
 		return err
 	}
 	if fields["overwrite"] == "true" || fields["overwrite"] == "1" {
 		return badRequest("暂不支持覆盖已有文件")
 	}
+	storedName := name
+	if fields["original_filename"] != "1" && fields["original_filename"] != "true" {
+		extension := path.Ext(name)
+		if len(extension) > 32 {
+			extension = ""
+		}
+		storedName = randomID() + extension
+	}
+	dest, d, key, err := a.shareDestination(r, fields["storage_config_id"], fields["path"], storedName)
+	if err != nil {
+		return err
+	}
+	var local *localUpload
+	var file *os.File
+	if driver, ok := d.(*localDriver); ok {
+		// 先登记再创建文件，进程被终止时也能在下次启动准确清理，不扫描存储目录。
+		pending := pendingUpload{ID: randomID(), Expires: time.Now().Add(2 * time.Hour).Unix(), LocalRoot: driver.rootPath, LocalScope: driver.scope, LocalKey: key}
+		if err = a.saveResource(r.Context(), "uploads", pending.ID, "", "", pending); err != nil {
+			return err
+		}
+		defer func() {
+			// 客户端取消后仍清理，清理失败则保留记录供下次启动或到期重试。
+			if local != nil {
+				if cleanupErr := local.close(); cleanupErr != nil {
+					a.logger.Error("清理本地上传临时文件失败", "error", cleanupErr)
+					return
+				}
+			}
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+			defer cancel()
+			if cleanupErr := a.deleteResource(ctx, "uploads", pending.ID); cleanupErr != nil {
+				a.logger.Error("清理上传记录失败", "error", cleanupErr)
+			}
+		}()
+		local, err = driver.beginUpload(key, pending.ID)
+		if err != nil {
+			return err
+		}
+		file = local.file
+	} else {
+		// S3 继续使用私有暂存和顺序分片，避免在内存中保存完整文件。
+		temporary := filepath.Join(a.uploadDir, randomID())
+		file, err = os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+		if err != nil {
+			return err
+		}
+		defer os.Remove(temporary)
+		defer file.Close()
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, min(maximum, reserve))
+	size, err := uploadCopy(r.Context(), file, r.Body, min(maximum, reserve))
+	if err != nil {
+		return err
+	}
+	if r.ContentLength >= 0 && size != r.ContentLength {
+		return badRequest("实际文件大小与声明不一致")
+	}
+	// 上传期间可能撤销账号、访客开关或修改存储，发布前必须再次检查当前权限。
 	p, err := a.creationPrincipal(r, guestUpload, MountUpload|FileShare)
 	if err != nil {
 		return err
@@ -462,30 +540,27 @@ func (a *App) uploadFile(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	storedName := name
-	if fields["original_filename"] != "1" && fields["original_filename"] != "true" {
-		extension := path.Ext(name)
-		if len(extension) > 32 {
-			extension = ""
+	d, key, err = a.recheckDestination(r, dest, MountUpload)
+	if err != nil {
+		return err
+	}
+	if local != nil {
+		driver, ok := d.(*localDriver)
+		if !ok {
+			return forbidden()
 		}
-		storedName = randomID() + extension
+		err = local.publish(r.Context(), driver, key, size)
+	} else {
+		writer, ok := d.(uploadWriter)
+		if !ok {
+			return unsupported()
+		}
+		if _, err = file.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		err = writer.PutNew(r.Context(), key, file, size, contentType)
 	}
-	dest, _, _, err := a.shareDestination(r, fields["storage_config_id"], fields["path"], storedName)
 	if err != nil {
-		return err
-	}
-	d, key, err := a.recheckDestination(r, dest, MountUpload)
-	if err != nil {
-		return err
-	}
-	writer, ok := d.(uploadWriter)
-	if !ok {
-		return unsupported()
-	}
-	if _, err = f.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	if err = writer.PutNew(r.Context(), key, f, size, contentType); err != nil {
 		return err
 	}
 	record.Path = dest.Path

@@ -16,7 +16,7 @@ type zeroReader struct{}
 
 func (zeroReader) Read(data []byte) (int, error) { clear(data); return len(data), nil }
 
-// 测量完整 HTTP 上传处理的分配量，包括私有暂存、授权和本地原子发布。
+// 测量完整 HTTP 上传的分配量，包括目标目录内的临时接收、授权复核和原子发布。
 func BenchmarkLocalUpload(b *testing.B) {
 	for _, size := range []int64{1 << 20, 64 << 20} {
 		b.Run(fmt.Sprintf("%dMiB", size>>20), func(b *testing.B) {

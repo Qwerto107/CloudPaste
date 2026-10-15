@@ -56,39 +56,78 @@ func (r *contextReader) Read(buffer []byte) (int, error) {
 	return r.reader.Read(buffer)
 }
 
-func (d *localDriver) PutNew(ctx context.Context, key string, file *os.File, size int64, contentType string) error {
-	// 逐层创建并固定真实父目录，禁止上传借助根内链接绕过目录保护。
+// 本地上传直接写入目标目录中的隐藏文件，发布时只建立硬链接，不再复制完整文件。
+type localUpload struct {
+	root      *os.Root
+	file      *os.File
+	temporary string
+	name      string
+}
+
+func (d *localDriver) beginUpload(key, id string) (*localUpload, error) {
+	// 固定经过安全检查的父目录，整个上传期间不按绝对路径重新打开临时文件。
 	root, name, err := d.openParent(key, true)
 	if err != nil {
-		return localError(err)
+		return nil, localError(err)
+	}
+	temporary := uploadTempPrefix + id
+	file, err := root.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+	if err != nil {
+		_ = root.Close()
+		return nil, localError(err)
+	}
+	return &localUpload{root: root, file: file, temporary: temporary, name: name}, nil
+}
+
+func (u *localUpload) close() error {
+	_ = u.file.Close()
+	defer u.root.Close()
+	if err := u.root.Remove(u.temporary); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func (u *localUpload) publish(ctx context.Context, current *localDriver, key string, size int64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// 接收期间目录被移动、替换或改成链接时，不向旧目录发布文件。
+	root, name, err := current.openParent(key, false)
+	if err != nil {
+		return err
 	}
 	defer root.Close()
-	temporary := uploadTempPrefix + randomID()
-	output, err := root.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	before, err := u.root.Stat(".")
 	if err != nil {
-		return localError(err)
+		return err
 	}
-	defer root.Remove(temporary)
-	written, copyErr := copyUpload(ctx, output, file)
-	syncErr := output.Sync()
-	closeErr := output.Close()
-	if copyErr != nil {
-		return copyErr
+	after, err := root.Stat(".")
+	if err != nil || name != u.name || !os.SameFile(before, after) {
+		return forbidden()
 	}
-	if written != size {
+	opened, err := u.file.Stat()
+	if err != nil {
+		return err
+	}
+	staged, err := u.root.Lstat(u.temporary)
+	if err != nil || !staged.Mode().IsRegular() || !os.SameFile(opened, staged) {
+		return forbidden()
+	}
+	if opened.Size() != size {
 		return badRequest("实际文件大小与声明不一致")
 	}
-	if syncErr != nil {
-		return syncErr
+	if err = u.file.Sync(); err != nil {
+		return err
 	}
-	if closeErr != nil {
-		return closeErr
+	if err = u.file.Close(); err != nil {
+		return err
 	}
 	if err = ctx.Err(); err != nil {
 		return err
 	}
 	// 硬链接发布不会覆盖已有文件或跟随目的符号链接，且不会暴露半成品。
-	if err = root.Link(temporary, name); errors.Is(err, os.ErrExist) {
+	if err = u.root.Link(u.temporary, name); errors.Is(err, os.ErrExist) {
 		return fileExists()
 	}
 	return localErrorOrNil(err)

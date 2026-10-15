@@ -115,7 +115,7 @@ API Key 必须启用且未过期，并满足权限、路径范围与存储 ACL�
 
 文件上传只使用 PUT /api/share/upload，管理员使用 /api/admin/share/upload。请求体是原始文件，X-Share-Filename 为 URL 编码文件名；X-Share-Options 为 UTF-8 JSON 的标准 Base64，包含 storage_config_id、expires_in（小时，允许小数）、password、remark、max_views、可选 path、slug 和 original_filename。默认以随机名称保存文件，original_filename:true 时保留原名但仍禁止覆盖。
 
-上传先私有暂存，再校验实际大小、当前授权和目标配置。单文件默认最大 10 GiB（10240 MiB），站点设置与环境变量可调低；默认暂存总额度为 20 GiB。冲突返回 409，超过单文件上限返回 413，临时额度不足返回 507。HTTP 分片及 POST 表单上传已移除；S3 驱动仍可在后端内部按需分块写入大文件。
+本地上传直接写入目标目录的隐藏临时文件，校验实际大小、当前授权和目标配置并刷盘后原子发布，不再完整复制文件。上传失败时清理临时文件；进程中断遗留的本地临时文件在下次启动回收。S3 上传仍先写私有暂存，再按需分片保存。单文件默认最大 10 GiB（10240 MiB），站点设置与环境变量可调低；两种存储共用默认 20 GiB 暂存总额度。冲突返回 409，超过单文件上限返回 413，临时额度不足返回 507。HTTP 分片及 POST 表单上传已移除。
 
 新文本省略 expires_at、新文件省略 expires_in 时使用站点默认有效期。文本 expires_at:null、文件 expires_in:0 表示不过期。分享过期只撤销访客访问，不自动删除原文件。
 
