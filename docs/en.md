@@ -64,8 +64,12 @@ Open `/transfer` to connect two devices. Relay downloads support the browser and
 
 The recommended **single-container deployment** includes both the web interface and API. With Docker and Compose installed, create a deployment directory and download the Compose file:
 
+The permission commands below apply to newly created Linux directories. For existing directories or Docker Desktop, see the [deployment guide](deployment.md).
+
 ```sh
 mkdir -p cloudpaste/data cloudpaste/files
+sudo chown 65532:65532 cloudpaste/data cloudpaste/files
+sudo chmod 700 cloudpaste/data cloudpaste/files
 cd cloudpaste
 curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.yml -o docker-compose.yml
 ```
@@ -76,7 +80,7 @@ Create `.env` in the `cloudpaste` directory and set your own administrator passw
 ADMIN_PASSWORD='replace-with-your-own-strong-password'
 ```
 
-On Linux, grant UID/GID `65532` access to both directories. For newly created dedicated directories, use `sudo chown 65532:65532 data files`.
+Pull the image and start the service:
 
 ```sh
 docker compose up -d --pull always

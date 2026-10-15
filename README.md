@@ -72,8 +72,12 @@
 
 推荐使用**单容器镜像**，一个容器提供界面和 API。安装 Docker 与 Compose 后，创建运行目录并下载 Compose 文件即可：
 
+以下权限命令用于 Linux 新建专用目录；已有目录或 Docker Desktop 的权限设置见 [部署指南](docs/deployment.md)。
+
 ```sh
 mkdir -p cloudpaste/data cloudpaste/files
+sudo chown 65532:65532 cloudpaste/data cloudpaste/files
+sudo chmod 700 cloudpaste/data cloudpaste/files
 cd cloudpaste
 curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.yml -o docker-compose.yml
 ```
@@ -84,7 +88,7 @@ curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-comp
 ADMIN_PASSWORD='请替换为自己的长随机密码'
 ```
 
-Linux 上，新建的专用目录执行 `sudo chown 65532:65532 data files`。然后拉取镜像并启动：
+然后拉取镜像并启动：
 
 ```sh
 docker compose up -d --pull always

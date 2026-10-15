@@ -8,8 +8,12 @@
 
 ### 1. 创建运行目录并下载 Compose 文件
 
+Linux 容器使用 UID/GID `65532`。以下权限命令用于新建专用目录；已有目录按原所有权或 ACL 授权，Docker Desktop 按宿主机设置访问权限。
+
 ```sh
 mkdir -p cloudpaste/data cloudpaste/files
+sudo chown 65532:65532 cloudpaste/data cloudpaste/files
+sudo chmod 700 cloudpaste/data cloudpaste/files
 cd cloudpaste
 curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.yml -o docker-compose.yml
 ```
@@ -62,7 +66,7 @@ ALLOWED_ORIGINS=
 ENCRYPTION_SECRET=
 ```
 
-Linux 上，新建的专用目录执行 `sudo chown 65532:65532 data files`。已有目录按原所有权设置权限或 ACL，确保容器用户 UID/GID `65532` 能进入、读写；Docker Desktop 的目录授权方式以宿主机为准。然后拉取镜像并启动：
+然后拉取镜像并启动：
 
 ```sh
 docker compose up -d --pull always
@@ -86,7 +90,7 @@ ssh -L 8081:127.0.0.1:8081 用户名@服务器地址
 
 ## 多容器部署（前后端分离）
 
-需要单独管理静态前端和 Go 后端时，使用 [多容器配置模板](../docker-compose.split.yml)。同样创建 `cloudpaste/data`、`cloudpaste/files`，进入运行目录并新建 `.env`，下载后仍保存为 **`docker-compose.yml`**，启动命令与单容器相同。已有运行中的部署请按下文的切换步骤操作。
+需要单独管理静态前端和 Go 后端时，使用 [多容器配置模板](../docker-compose.split.yml)。先按上方步骤创建目录并设置权限，进入运行目录并新建 `.env`，下载后仍保存为 **`docker-compose.yml`**，启动命令与单容器相同。已有运行中的部署请按下文的切换步骤操作。
 
 ```sh
 curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.split.yml -o docker-compose.yml
