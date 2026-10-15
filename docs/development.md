@@ -103,7 +103,9 @@ SHARING_TEST_BINARY=../backend/bin/sharing-backend npm run test:e2e
 
 Windows 可构建 `backend/bin/sharing-backend.exe`，测试默认使用这个路径；也可设置 `SHARING_TEST_BINARY`。浏览器使用本机 Chrome / Edge 或 Playwright Chromium，支持 `SHARING_TEST_BROWSER` 指定可执行文件。
 
-端到端检查启动独立临时服务与数据库，覆盖登录、分享、上传、媒体预览、设置、权限、主题和屏宽。设置 `SHARING_TEST_STANDALONE=1` 并将 `SHARING_TEST_BINARY` 指向带 `with_frontend` 的程序，可运行相同回归直接验证 Go 提供的页面。CI 检查这两种模式，另运行 `go test -race ./... -count=1 -timeout=600s`、依赖漏洞检查及两套真实 Docker 集成测试。
+端到端检查启动独立临时服务与数据库，覆盖登录、分享、上传、媒体预览、设置、权限、主题和屏宽。设置 `SHARING_TEST_STANDALONE=1` 并将 `SHARING_TEST_BINARY` 指向带 `with_frontend` 的程序，可运行相同回归直接验证 Go 提供的页面。
+
+日常 CI 只运行单元测试、构建、核心并发竞态、静态与依赖漏洞检查。发版或手动运行时增加内嵌模式浏览器回归、设备互传浏览器回归及两套真实 Docker 集成测试，不再重复运行分离模式的完整浏览器回归。全量 `go test -race ./... -count=1 -timeout=600s` 保留在手动运行中。详见[构建与发布](releasing.md)。
 
 ## 设备互传测试
 
