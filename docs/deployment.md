@@ -234,6 +234,8 @@ Windows 的 LOCAL 存储只接受与磁盘实际名称一致的路径，拒绝�
 
 固定上限为 16 个连接房间、40 条 WebSocket（每 IP 最多 8 条）；同一创建者或 IP 最多创建 2 个房间。中继使用小块缓冲和背压，不将文件完整放入内存或服务器磁盘。浏览器、操作系统和代理仍有各自缓冲，内存不等于零；超额请求会失败，不无限排队。默认 64 MiB/s 是整个服务的中继发送总预算，与普通分享下载分开，也不限制 WebRTC 直连。
 
+**局域网或公网的点对点文件下载需要 HTTPS**，证书须被接收设备的浏览器信任，且浏览器支持 `showSaveFilePicker`。普通 HTTP 局域网 IP 地址即使已建立 WebRTC 连接，也无法直接保存文件，页面只提供中继下载。本机 `localhost`、`127.0.0.1` 是安全上下文例外；配置 STUN 不会解除浏览器的保存限制。
+
 HTTPS 反向代理需允许 WebSocket Upgrade，关闭 `/api/transfer/upload/` 的请求缓冲和 `/api/transfer/download/` 的响应缓冲，并允许所设单文件大小。仓库自带的前端 Nginx 已配置；外层 Nginx 可在现有 `/api/` location 中合并以下选项，保留原有 `proxy_pass`、Host 和可信来源设置：
 
 ```nginx

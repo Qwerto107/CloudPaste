@@ -58,7 +58,7 @@ Self-hosted text and file sharing, with custom links, expiration, passwords and 
 
 New shares expire after 24 hours by default. Owners and administrators can still view expired shares without consuming views. Expiration keeps the stored file; deleting a file share removes its original file by default, with an option to delete only the record. Single-file uploads allow up to 10 GiB by default. Editing a filename changes its display name only.
 
-Open `/transfer` to connect two devices. Relay downloads support the browser and external download tools such as AB Download Manager through the same link. Both pages must remain online; the server does not cache files. WebRTC downloads are available when the receiving browser supports saving directly to disk.
+Open `/transfer` to connect two devices. Relay downloads support the browser and external download tools such as AB Download Manager through the same link. Both pages must remain online; the server does not cache files. Peer-to-peer file downloads over LAN or public addresses require **HTTPS with a browser-trusted certificate** and a receiving browser that supports `showSaveFilePicker`. Plain HTTP LAN addresses only offer relay downloads, even if the WebRTC connection succeeds. Local `localhost` and `127.0.0.1` are secure-context exceptions, but still require browser support for saving files.
 
 ## Docker quick start
 
