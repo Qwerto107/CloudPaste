@@ -82,7 +82,7 @@ cd cloudpaste
 curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.yml -o docker-compose.yml
 ```
 
-在 `cloudpaste` 目录新建 `.env`，填写自己的管理员密码（至少 12 字节）：
+在 `cloudpaste` 目录新建 `.env`，填写自己的管理员密码（至少 6 个字符，最多 72 字节）：
 
 ```dotenv
 ADMIN_PASSWORD='请替换为自己的长随机密码'

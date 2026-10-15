@@ -6,7 +6,7 @@ services:
     # 应用参数统一从文件读取，下面仅覆盖容器路径、代理与启动约束。
     env_file: .env
     environment:
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 中设置至少12字节的管理员密码}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 中设置至少6个字符的管理员密码}
       DATA_DIR: /data
       PORT: 8787
       # 仅信任内部 DNS 对应的前端服务，不依赖固定 Docker 子网。

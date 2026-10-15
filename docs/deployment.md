@@ -20,7 +20,7 @@ curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-comp
 
 ### 2. 创建环境文件并启动
 
-在运行目录新建 `.env`，下面是完整的容器部署配置示例。替换 `ADMIN_PASSWORD` 为自己的 12–72 字节长随机密码，其余可先使用默认值；可选项留空即可。
+在运行目录新建 `.env`，下面是完整的容器部署配置示例。替换 `ADMIN_PASSWORD` 为自己的密码，至少 6 个字符、最多 72 字节，其余可先使用默认值；可选项留空即可。
 
 ```dotenv
 # 管理员：首次初始化使用，之后在管理后台修改账号和密码。
@@ -145,7 +145,7 @@ docker compose up -d --pull always
 | 变量                              | 默认值    | 说明                                                                                                |
 | --------------------------------- | --------- | --------------------------------------------------------------------------------------------------- |
 | `ADMIN_USERNAME`                  | `admin`   | 首次创建管理员的用户名；已有账号不随此值更新                                                        |
-| `ADMIN_PASSWORD`                  | 无，必填  | 首次创建管理员的密码，12–72 字节；已有密码在后台修改，Compose 仍要求此项非空                        |
+| `ADMIN_PASSWORD`                  | 无，必填  | 首次创建管理员的密码，至少 6 个字符、最多 72 字节；已有密码在后台修改，Compose 仍要求此项非空       |
 | `LOCAL_FILES_DIR`                 | `./files` | 宿主机文件目录；启动前创建，Linux 上授权 UID/GID `65532` 读写                                       |
 | `LOCAL_FILES_READ_ONLY`           | `false`   | 设为 `true` 只读挂载文件目录；后台相应存储也应设置只读，不影响 `./data`                             |
 | `GOMEMLIMIT`                      | `80MiB`   | Go GC 软目标；容器内存上限仍由 Compose 的 `mem_limit` 控制                                          |

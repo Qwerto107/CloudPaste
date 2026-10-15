@@ -171,7 +171,7 @@ func writeFile(t *testing.T, root, name, content string) {
 }
 
 func TestBootstrapAndEncryptedConfiguration(t *testing.T) {
-	_, err := New(Config{DataDir: t.TempDir(), AdminUsername: "admin", AdminPassword: "admin123"}, nil)
+	_, err := New(Config{DataDir: t.TempDir(), AdminUsername: "admin", AdminPassword: "12345"}, nil)
 	if err == nil {
 		t.Fatal("weak initial password accepted")
 	}
@@ -202,6 +202,31 @@ func TestBootstrapAndEncryptedConfiguration(t *testing.T) {
 	if f.app.verifyTicket(token, "share", "other", "id", "") {
 		t.Fatal("ticket reused across paths")
 	}
+}
+
+func TestAdminPasswordLengthBoundary(t *testing.T) {
+	for _, password := range []string{"12345", "中文", strings.Repeat("a", 73)} {
+		if _, err := New(Config{DataDir: t.TempDir(), AdminPassword: password}, nil); err == nil {
+			t.Fatal("invalid initial password accepted")
+		}
+	}
+	for _, password := range []string{"123456", "中文密码六位"} {
+		app, err := New(Config{DataDir: t.TempDir(), AdminUsername: "admin", AdminPassword: password}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = app.Close() })
+		f := &fixture{app: app, handler: app.Handler()}
+		f.request(t, "POST", "/api/admin/login", "", map[string]any{"username": "admin", "password": password}, nil, 200)
+	}
+	f := newFixture(t)
+	// 后台修改遵守同一规则；成功后旧会话失效，并能用六位新密码登录。
+	for _, password := range []string{"12345", "中文", strings.Repeat("a", 73)} {
+		f.request(t, "POST", "/api/admin/change-password", f.admin, map[string]any{"currentPassword": testPassword, "newPassword": password}, nil, 400)
+	}
+	f.request(t, "POST", "/api/admin/change-password", f.admin, map[string]any{"currentPassword": testPassword, "newPassword": "123456"}, nil, 200)
+	f.request(t, "GET", "/api/admin/settings", f.admin, nil, nil, 401)
+	f.request(t, "POST", "/api/admin/login", "", map[string]any{"username": "admin", "password": "123456"}, nil, 200)
 }
 
 func TestSourceChangeRevokesLinksAndShares(t *testing.T) {

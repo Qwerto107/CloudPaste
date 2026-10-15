@@ -27,7 +27,7 @@ sha256sum -c cloudpaste-linux-amd64.tar.gz.sha256
 tar -xzf cloudpaste-linux-amd64.tar.gz
 cd cloudpaste-linux-amd64
 export ADMIN_USERNAME=admin
-export ADMIN_PASSWORD='请替换为至少12字节的强密码'
+export ADMIN_PASSWORD='请替换为至少6个字符的密码'
 export DATA_DIR=./data
 export PORT=8787
 ./cloudpaste
@@ -48,7 +48,7 @@ if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $expected) {
 Expand-Archive $archive -DestinationPath .
 Set-Location cloudpaste-windows-amd64
 $env:ADMIN_USERNAME = 'admin'
-$env:ADMIN_PASSWORD = '请替换为至少12字节的强密码'
+$env:ADMIN_PASSWORD = '请替换为至少6个字符的密码'
 $env:DATA_DIR = './data'
 $env:PORT = '8787'
 ./cloudpaste.exe
@@ -60,7 +60,7 @@ $env:PORT = '8787'
 shasum -a 256 -c cloudpaste-darwin-arm64.tar.gz.sha256
 tar -xzf cloudpaste-darwin-arm64.tar.gz
 cd cloudpaste-darwin-arm64
-export ADMIN_PASSWORD='请替换为至少12字节的强密码'
+export ADMIN_PASSWORD='请替换为至少6个字符的密码'
 export DATA_DIR=./data
 export PORT=8787
 ./cloudpaste

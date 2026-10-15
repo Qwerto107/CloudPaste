@@ -74,7 +74,7 @@ cd cloudpaste
 curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.yml -o docker-compose.yml
 ```
 
-Create `.env` in the `cloudpaste` directory and set your own administrator password of at least 12 bytes:
+Create `.env` in the `cloudpaste` directory and set your own administrator password of at least 6 characters and at most 72 bytes:
 
 ```dotenv
 ADMIN_PASSWORD='replace-with-your-own-strong-password'

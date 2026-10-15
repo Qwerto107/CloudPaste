@@ -478,7 +478,7 @@ onBeforeUnmount(() => {
           >新密码<UiInput
             v-model="newPassword"
             type="password"
-            minlength="12"
+            minlength="6"
             maxlength="72"
             required
             autocomplete="new-password" /></label

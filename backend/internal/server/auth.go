@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 func (a *App) bootstrapAdmin() error {
@@ -19,8 +20,9 @@ func (a *App) bootstrapAdmin() error {
 	if count > 0 {
 		return nil
 	}
-	if len(a.cfg.AdminPassword) < 12 {
-		return errors.New("首次启动请设置至少 12 字节的 ADMIN_PASSWORD")
+	// 最小长度按字符计算，避免把两个中文字符误算成六位密码。
+	if utf8.RuneCountInString(a.cfg.AdminPassword) < 6 {
+		return errors.New("首次启动请设置至少 6 个字符的 ADMIN_PASSWORD")
 	}
 	hash, err := passwordHash(a.cfg.AdminPassword)
 	if err != nil {
@@ -240,8 +242,8 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("需要提供新密码或用户名")
 	}
 	if body.NewPassword != "" {
-		if len(body.NewPassword) < 12 {
-			return badRequest("管理员密码至少 12 字节")
+		if utf8.RuneCountInString(body.NewPassword) < 6 {
+			return badRequest("管理员密码至少 6 个字符")
 		}
 		var err error
 		hash, err = passwordHash(body.NewPassword)

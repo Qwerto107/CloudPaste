@@ -22,7 +22,7 @@ docker-compose.split.yml  前后端分离镜像部署
 
 ```sh
 cd backend
-export ADMIN_PASSWORD='请替换为至少12字节的强密码'
+export ADMIN_PASSWORD='请替换为至少6个字符的密码'
 export DATA_DIR=./data
 go run ./cmd/cloudpaste
 ```

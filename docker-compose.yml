@@ -9,7 +9,7 @@ services:
     ports:
       - "127.0.0.1:8081:8787"
     environment:
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 中设置至少12字节的管理员密码}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 中设置至少6个字符的管理员密码}
       DATA_DIR: /data
       PORT: 8787
       GOMEMLIMIT: ${GOMEMLIMIT:-80MiB}
