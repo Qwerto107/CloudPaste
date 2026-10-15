@@ -2,6 +2,7 @@
 import { useId } from "vue";
 import { MdPreview, config } from "md-editor-v3";
 import "md-editor-v3/lib/preview.css";
+import "medium-zoom/dist/style.css";
 import { sanitizeHTML } from "./sanitize.js";
 import { useTheme } from "./ui/theme.js";
 import { settings } from "./settings.js";

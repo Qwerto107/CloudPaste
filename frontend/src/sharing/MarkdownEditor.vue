@@ -4,6 +4,7 @@ import { MdEditor, config } from "md-editor-v3";
 import { EditorView } from "@codemirror/view";
 import screenfull from "screenfull";
 import "md-editor-v3/lib/style.css";
+import "medium-zoom/dist/style.css";
 import { sanitizeHTML } from "./sanitize.js";
 import { settings } from "./settings.js";
 import { useDisabled, styleNonce } from "./ui/context.js";

@@ -178,6 +178,14 @@ try {
     if (!request.url().startsWith(origin)) external.push(request.url());
   });
   page.on("pageerror", (error) => errors.push(error.message));
+  // 样式被 CSP 拦截通常只报告控制台错误，不能只检查页面异常。
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      /Content Security Policy/.test(message.text())
+    )
+      errors.push(message.text());
+  });
   await page.goto(origin + "/login");
   await page.getByRole("link", { name: "管理员登录 →", exact: true }).click();
   await page.waitForURL("**/admin/login");
@@ -616,11 +624,9 @@ try {
     .getByLabel("GitHub 地址", { exact: true })
     .fill("https://github.com/Qwerto107/CloudPaste/issues");
   await page.getByLabel("显示站点公告", { exact: true }).check();
-  const announcementCard = page
-    .locator(".settings-card")
-    .filter({
-      has: page.getByRole("heading", { name: "站点公告", exact: true }),
-    });
+  const announcementCard = page.locator(".settings-card").filter({
+    has: page.getByRole("heading", { name: "站点公告", exact: true }),
+  });
   await announcementCard
     .getByLabel("Markdown 内容")
     .fill("**维护通知**：请及时保存所需文件。\n欢迎使用本站。");
