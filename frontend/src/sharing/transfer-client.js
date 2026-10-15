@@ -39,6 +39,7 @@ export class TransferClient {
     this.peerGeneration = 0;
     this.candidates = [];
     this.transferTimings = new Map();
+    this.directEndpoints = null;
     this.closed = false;
   }
 
@@ -53,48 +54,61 @@ export class TransferClient {
     });
   }
 
+  async connectionDetails(peer = this.peer) {
+    if (this.closed || !peer?.getStats) return null;
+    const stats = await peer.getStats();
+    // 异步读取期间可能已重建或关闭连接，旧统计不能归入新的连接代次。
+    if (this.closed || this.peer !== peer) return null;
+    const reports = [...stats.values()];
+    const transport = reports.find(
+      (item) => item.type === "transport" && item.selectedCandidatePairId,
+    );
+    const pair = transport
+      ? stats.get(transport.selectedCandidatePairId)
+      : reports.find(
+          (item) =>
+            item.type === "candidate-pair" &&
+            item.state === "succeeded" &&
+            (item.selected || item.nominated),
+        );
+    if (!pair) return null;
+    const endpoint = (candidate) => ({
+      address: candidate?.address ?? candidate?.ip ?? null,
+      port: candidate?.port ?? null,
+      type: candidate?.candidateType ?? null,
+      protocol: candidate?.protocol ?? null,
+      relayProtocol: candidate?.relayProtocol ?? null,
+    });
+    return {
+      local: endpoint(stats.get(pair.localCandidateId)),
+      remote: endpoint(stats.get(pair.remoteCandidateId)),
+      pairState: pair.state,
+      roundTripMs: Number.isFinite(pair.currentRoundTripTime)
+        ? Math.round(pair.currentRoundTripTime * 100000) / 100
+        : null,
+      dtlsState: transport?.dtlsState ?? null,
+      dtlsCipher: transport?.dtlsCipher ?? null,
+      // 这是整条链路的累计统计，与单个文件的已确认字节分别记录。
+      bytesSent: pair.bytesSent ?? null,
+      bytesReceived: pair.bytesReceived ?? null,
+    };
+  }
+
   async logConnectionDetails(peer = this.peer) {
-    if (!this.debugEnabled() || this.closed || !peer?.getStats) return;
+    if (!this.debugEnabled() && !this.auditEnabled) return;
     try {
-      const stats = await peer.getStats();
-      // 异步读取期间可能已重建或关闭连接，旧统计不能归入新的连接代次。
-      if (this.closed || this.peer !== peer || !this.debugEnabled()) return;
-      const reports = [...stats.values()];
-      const transport = reports.find(
-        (item) => item.type === "transport" && item.selectedCandidatePairId,
-      );
-      const pair = transport
-        ? stats.get(transport.selectedCandidatePairId)
-        : reports.find(
-            (item) =>
-              item.type === "candidate-pair" &&
-              item.state === "succeeded" &&
-              (item.selected || item.nominated),
-          );
-      if (!pair) {
+      const details = await this.connectionDetails(peer);
+      if (details && this.peer === peer) {
+        this.directEndpoints = {
+          local: { address: details.local.address, port: details.local.port },
+          remote: {
+            address: details.remote.address,
+            port: details.remote.port,
+          },
+        };
+        if (this.debugEnabled()) this.debug("直连链路详情", details);
+      } else if (this.debugEnabled() && !this.closed && this.peer === peer)
         this.debug("直连链路统计暂不可用");
-        return;
-      }
-      const endpoint = (candidate) => ({
-        address: candidate?.address ?? candidate?.ip ?? null,
-        port: candidate?.port ?? null,
-        type: candidate?.candidateType ?? null,
-        protocol: candidate?.protocol ?? null,
-        relayProtocol: candidate?.relayProtocol ?? null,
-      });
-      this.debug("直连链路详情", {
-        local: endpoint(stats.get(pair.localCandidateId)),
-        remote: endpoint(stats.get(pair.remoteCandidateId)),
-        pairState: pair.state,
-        roundTripMs: Number.isFinite(pair.currentRoundTripTime)
-          ? Math.round(pair.currentRoundTripTime * 100000) / 100
-          : null,
-        dtlsState: transport?.dtlsState ?? null,
-        dtlsCipher: transport?.dtlsCipher ?? null,
-        // 这是整条链路的累计统计，与单个文件的已确认字节分别记录。
-        bytesSent: pair.bytesSent ?? null,
-        bytesReceived: pair.bytesReceived ?? null,
-      });
     } catch (error) {
       if (!this.closed && this.peer === peer)
         this.debug("读取直连统计失败", { error: error.name }, true);
@@ -592,6 +606,7 @@ export class TransferClient {
     // 先切断旧事件与当前连接的关联，再关闭资源，避免迟到的关闭事件破坏新连接。
     this.peer = null;
     this.channel = null;
+    this.directEndpoints = null;
     this.candidates = [];
     this.signalChain = Promise.resolve();
     this.peerGeneration++;
@@ -602,6 +617,7 @@ export class TransferClient {
 
   startPeer(message) {
     this.peerSettings = message;
+    this.auditEnabled = message.audit_enabled === true;
     if (message.relay_only || typeof RTCPeerConnection === "undefined") {
       this.debug("使用中继连接", {
         reason: message.relay_only ? "仅中继模式" : "浏览器不支持 WebRTC",
@@ -922,7 +938,13 @@ export class TransferClient {
             // 关闭文件期间可能已取消并开始下一次接收，旧任务不能清空新任务。
             if (job.cancelled || this.receiving !== job) return;
             this.receiving = null;
-            this.send({ type: "complete", id: job.id, bytes: job.bytes });
+            // 连接建立时已异步采集地址，完成通知直接使用缓存，不等待统计接口。
+            this.send({
+              type: "complete",
+              id: job.id,
+              bytes: job.bytes,
+              connection: this.directEndpoints,
+            });
           })
           .catch((error) => this.fileFailed(job.id, error));
       } else throw new Error("直连控制消息无效");

@@ -475,10 +475,12 @@ func (a *App) deleteShares(w http.ResponseWriter, r *http.Request) error {
 	if len(body.IDs) == 0 || len(body.IDs) > 200 {
 		return badRequest("一次删除 1-200 条记录")
 	}
+	setAuditTarget(r, strings.Join(body.IDs, ","))
 	if body.DeleteMode != "" && body.DeleteMode != "record_only" && body.DeleteMode != "both" {
 		return badRequest("delete_mode 必须为 both 或 record_only")
 	}
 	deleteFiles := body.DeleteMode != "record_only"
+	setAuditDetails(r, map[string]any{"delete_files": deleteFiles})
 	count := 0
 	for _, id := range body.IDs {
 		deleted, err := a.deleteShare(r, id, deleteFiles)

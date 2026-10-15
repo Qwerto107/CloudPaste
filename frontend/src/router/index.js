@@ -5,6 +5,7 @@ import {
   hasPermission,
 } from "../sharing/session.js";
 import { loadSettings, settings } from "../sharing/settings.js";
+import { auditModules } from "../sharing/audit-modules.js";
 const management = () => import("../sharing/AdminView.vue");
 const routes = [
   {
@@ -55,6 +56,21 @@ const routes = [
     meta: { requiresAuth: true, adminArea: true },
     children: [
       {
+        path: "operation-logs",
+        component: () => import("../sharing/AuditView.vue"),
+        meta: { title: "操作日志" },
+      },
+      {
+        path: "log-cleanup",
+        redirect: "/admin/settings/logs",
+      },
+      // 每个分类使用固定路由，防止无效模块进入日志查询。
+      ...auditModules.map(({ key, label }) => ({
+        path: `operation-logs/${key}`,
+        component: () => import("../sharing/AuditView.vue"),
+        meta: { title: `${label}日志`, auditModule: key },
+      })),
+      {
         path: "",
         name: "AdminHome",
         component: management,
@@ -70,6 +86,7 @@ const routes = [
         ["settings/preview", "preview", "文件预览设置", 0],
         ["settings/transfer", "transfer", "设备互传设置", 0],
         ["settings/site", "site", "站点外观设置", 0],
+        ["settings/logs", "logs", "日志设置", 0],
       ].map(([path, panel, title, permission]) => ({
         path,
         component: path.startsWith("settings/")

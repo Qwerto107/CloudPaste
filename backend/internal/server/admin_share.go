@@ -68,9 +68,10 @@ func (a *App) adminDownloadPrincipal(r *http.Request) (*Principal, error) {
 	if err != nil || lease.Session == "" {
 		return nil, forbidden()
 	}
-	var id string
-	if err := a.db.QueryRowContext(r.Context(), "SELECT a.id FROM sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=? AND s.expires_at>?", lease.Session, time.Now().Unix()).Scan(&id); err != nil {
+	var id, name string
+	if err := a.db.QueryRowContext(r.Context(), "SELECT a.id,a.username FROM sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=? AND s.expires_at>?", lease.Session, time.Now().Unix()).Scan(&id, &name); err != nil {
 		return nil, forbidden()
 	}
-	return &Principal{ID: id, Admin: true, BasicPath: "/", CredentialHash: lease.Session}, nil
+	// 原生文件请求通过票据恢复会话时，也保留管理员用户名供操作日志使用。
+	return &Principal{ID: id, Name: name, Admin: true, BasicPath: "/", CredentialHash: lease.Session}, nil
 }

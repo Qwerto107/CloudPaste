@@ -48,6 +48,7 @@ type App struct {
 	db                    *sql.DB
 	key                   []byte
 	logger                *slog.Logger
+	audit                 *auditLogger
 	downloads             chan struct{}
 	downloadMu            sync.Mutex
 	downloadsByIP         map[string]int
@@ -126,11 +127,18 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		_ = a.Close()
 		return nil, err
 	}
+	if err = a.startAudit(); err != nil {
+		_ = a.Close()
+		return nil, err
+	}
 	return a, nil
 }
 func (a *App) Close() error {
 	if a.transfers != nil {
 		a.transfers.close()
+	}
+	if a.audit != nil {
+		a.audit.close()
 	}
 	a.clientsMu.Lock()
 	for _, entry := range a.storageClients {
@@ -234,10 +242,12 @@ func (a *App) Handler() http.Handler {
 	a.registerSystem(mux)
 	a.registerUploads(mux)
 	a.registerTransfers(mux)
+	mux.HandleFunc("GET /api/admin/operation-logs", a.protected(0, true, a.listAudit))
+	mux.HandleFunc("DELETE /api/admin/operation-logs", a.protected(0, true, a.deleteAudit))
 	mux.HandleFunc("/", a.handle(func(w http.ResponseWriter, r *http.Request) error {
 		return notFound()
 	}))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return a.auditHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
@@ -309,6 +319,9 @@ func (a *App) Handler() http.Handler {
 			return
 		}
 		// 管理员凭据只能用于管理前缀，API Key 只能用于普通用户入口。
+		if p != nil {
+			setAuditActor(r, p)
+		}
 		if p != nil && p.Admin != adminScope {
 			a.fail(w, forbidden())
 			return
@@ -319,5 +332,5 @@ func (a *App) Handler() http.Handler {
 		}
 		r = r.WithContext(context.WithValue(r.Context(), contextKey{}, p))
 		mux.ServeHTTP(w, r)
-	})
+	}))
 }

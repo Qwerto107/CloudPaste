@@ -17,6 +17,7 @@ const paths = {
   key: "M15 14a6 6 0 1 0-5-5L2 17v5h5v-3h3v-3l5-2Z",
   user: "M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM4 21v-2a8 8 0 0 1 16 0v2",
   settings: "M4 6h16M4 12h16M4 18h16M8 3v6m8 0v6m-6 0v6",
+  trash: "M4 7h16M9 4h6M6 7l1 14h10l1-14M10 11v6m4-6v6",
   storage: "M3 6h18v6H3V6Zm0 6v6h18v-6M7 9h.01M7 15h.01",
   link: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2m3 6a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2",
   bell: "M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4",

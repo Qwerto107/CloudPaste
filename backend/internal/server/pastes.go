@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -111,6 +112,7 @@ func (a *App) createPaste(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	view["url"] = "/paste/" + p.Slug
+	setAuditTarget(r, p.ID)
 	a.write(w, 201, view, "文本创建成功")
 	return nil
 }
@@ -382,6 +384,7 @@ func (a *App) deletePastes(w http.ResponseWriter, r *http.Request) error {
 	if len(body.IDs) == 0 || len(body.IDs) > 200 {
 		return badRequest("一次删除 1-200 条记录")
 	}
+	setAuditTarget(r, strings.Join(body.IDs, ","))
 	a.mutationMu.Lock()
 	defer a.mutationMu.Unlock()
 	count := 0

@@ -189,6 +189,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(w, r, &body); err != nil {
 		return err
 	}
+	setAuditTarget(r, body.Username)
 	var id, hash string
 	err := a.db.QueryRowContext(r.Context(), "SELECT id,password FROM admins WHERE username=?", body.Username).Scan(&id, &hash)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -200,6 +201,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) error {
 	if err = a.checkPassword(hash, body.Password); err != nil {
 		return &apiError{401, "UNAUTHORIZED", "用户名或密码错误"}
 	}
+	setAuditActor(r, &Principal{ID: id, Name: body.Username, Admin: true})
 	token := randomID()
 	expires := time.Now().Add(7 * 24 * time.Hour)
 	tx, err := a.db.BeginTx(r.Context(), nil)
@@ -397,6 +399,7 @@ func (a *App) createKey(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("密钥不可用")
 	}
 	k.Key = key
+	setAuditTarget(r, k.ID)
 	a.write(w, 201, k, "密钥创建成功，请保存完整密钥")
 	return nil
 }

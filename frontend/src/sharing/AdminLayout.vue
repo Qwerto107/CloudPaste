@@ -13,6 +13,7 @@ function iconFor(path) {
   if (path === "file-management") return "folder";
   if (path === "storage") return "storage";
   if (path === "key-management") return "key";
+  if (path === "operation-logs") return "file";
   return path === "account" ? "user" : "settings";
 }
 const shareLinks = computed(() => [
@@ -28,6 +29,9 @@ const systemLinks = computed(() => [
       ]
     : []),
   { path: "account", label: "账号管理" },
+  ...(session.type === "admin"
+    ? [{ path: "operation-logs", label: "操作日志" }]
+    : []),
 ]);
 </script>
 <template>
@@ -49,8 +53,10 @@ const systemLinks = computed(() => [
         :to="base + item.path"
         :class="{
           'nav-selected':
-            item.path.startsWith('settings/') &&
-            route.path.startsWith('/admin/settings/'),
+            (item.path.startsWith('settings/') &&
+              route.path.startsWith('/admin/settings/')) ||
+            (item.path === 'operation-logs' &&
+              route.path.startsWith('/admin/operation-logs/')),
         }"
         ><Icon :name="iconFor(item.path)" />{{ item.label }}</RouterLink
       >

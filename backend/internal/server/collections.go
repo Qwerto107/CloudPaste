@@ -103,6 +103,7 @@ func (a *App) createCollection(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	setAuditTarget(r, collection.ID)
 	a.write(w, 201, view, "文件合集已创建")
 	return nil
 }

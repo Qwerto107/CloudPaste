@@ -1,5 +1,24 @@
+import { auditModules } from "./audit-modules.js";
+
 // 展示信息与后端配置键分开维护；服务端仍负责权限和最终数值校验。
 export const fields = {
+  ...Object.fromEntries(
+    auditModules.map(({ key, label, description }) => [
+      `audit_${key}_enabled`,
+      { label, help: description },
+    ]),
+  ),
+  audit_enabled: {
+    label: "启用操作日志",
+    help: "默认关闭。开启后记录新操作；关闭后仍可查看和清理已有日志。",
+  },
+  audit_retention_days: {
+    label: "操作日志保留天数",
+    help: "默认 30 天，可设置 1–3650 天。缩短后到期记录自动清理，无法恢复。",
+    unit: "天",
+    min: 1,
+    max: 3650,
+  },
   guest_text_share_enabled: {
     label: "创建文本",
     help: "允许未登录访客创建文本分享。",
@@ -164,6 +183,21 @@ export const fields = {
   },
 };
 export const sections = {
+  logs: [
+    {
+      title: "操作日志",
+      description: "控制日志记录与保留时间，仅管理员可查看和清理。",
+      icon: "file",
+      keys: ["audit_enabled", "audit_retention_days"],
+    },
+    {
+      title: "模块记录开关",
+      description:
+        "仅在操作日志总开关开启时记录。关闭模块后停止记录新操作，已有日志仍会保留。",
+      icon: "grid",
+      keys: auditModules.map(({ key }) => `audit_${key}_enabled`),
+    },
+  ],
   transfer: [
     {
       title: "传输保护",

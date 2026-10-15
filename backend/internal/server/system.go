@@ -21,6 +21,15 @@ type setting struct {
 
 // 公开设置采用白名单；凭证、管理员密码和运行环境变量不会进入返回值。
 var defaultSettings = []setting{
+	{"audit_enabled", "false", "bool", 5, 0, "启用操作日志（默认关闭）"},
+	{"audit_retention_days", "30", "number", 5, 0, "操作日志保留天数（1–3650，到期自动清理）"},
+	{"audit_auth_enabled", "true", "bool", 5, 0, "记录账号认证日志"},
+	{"audit_text_enabled", "true", "bool", 5, 0, "记录文本分享日志"},
+	{"audit_file_enabled", "true", "bool", 5, 0, "记录文件分享日志"},
+	{"audit_transfer_enabled", "true", "bool", 5, 0, "记录设备互传日志"},
+	{"audit_storage_enabled", "true", "bool", 5, 0, "记录存储管理日志"},
+	{"audit_keys_enabled", "true", "bool", 5, 0, "记录密钥管理日志"},
+	{"audit_settings_enabled", "true", "bool", 5, 0, "记录系统设置日志"},
 	{guestText, "false", "bool", 1, 0, "允许访客创建文本分享"},
 	{guestUpload, "false", "bool", 1, 0, "允许访客上传文件"},
 	{guestCreateTransfer, "false", "bool", 1, 0, "允许访客创建互传"},
@@ -135,8 +144,11 @@ func (a *App) settings(w http.ResponseWriter, r *http.Request) error {
 	group := r.URL.Query().Get("group")
 	if group != "" {
 		id, err := strconv.Atoi(group)
-		if err != nil || (id != 1 && id != 2 && id != 3 && id != 4) {
+		if err != nil || id < 1 || id > 5 {
 			return badRequest("分组编号无效")
+		}
+		if id == 5 && !adminRequest(r) {
+			return forbidden()
 		}
 		filtered := []setting{}
 		for _, s := range items {
@@ -149,6 +161,10 @@ func (a *App) settings(w http.ResponseWriter, r *http.Request) error {
 	}
 	groups := map[int][]setting{2: {}}
 	for _, s := range items {
+		// 日志记录规则只提供给管理员，公开设置中不暴露这些开关。
+		if s.Group == 5 && !adminRequest(r) {
+			continue
+		}
 		groups[s.Group] = append(groups[s.Group], s)
 	}
 	a.write(w, 200, groups, "获取设置成功")
@@ -156,7 +172,7 @@ func (a *App) settings(w http.ResponseWriter, r *http.Request) error {
 }
 func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 	group, err := strconv.Atoi(r.PathValue("group"))
-	if err != nil || (group != 1 && group != 2 && group != 3 && group != 4) {
+	if err != nil || group < 1 || group > 5 {
 		return badRequest("分组编号无效")
 	}
 	var body map[string]json.RawMessage
@@ -216,6 +232,9 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 			if key == "preview_max_text_kb" {
 				minimum, maximum = 16, 2048
 			}
+			if key == "audit_retention_days" {
+				minimum, maximum = 1, 3650
+			}
 			if definition.Group == 3 {
 				minimum, maximum = a.transferSettingRange(key)
 			}
@@ -238,6 +257,7 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 		values[key] = value
 	}
 	// 请求解码与响应写入不占用全局写锁；只序列化提交及运行时限制更新。
+	changes := map[string]any{}
 	err = func() error {
 		a.mutationMu.Lock()
 		defer a.mutationMu.Unlock()
@@ -247,6 +267,22 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 		}
 		defer tx.Rollback()
 		for key, value := range values {
+			var previous string
+			err := tx.QueryRowContext(r.Context(), "SELECT value FROM settings WHERE key=?", key).Scan(&previous)
+			if err != nil && err != sql.ErrNoRows {
+				return err
+			}
+			if err == sql.ErrNoRows {
+				for _, definition := range defaultSettings {
+					if definition.Key == key {
+						previous = definition.Value
+						break
+					}
+				}
+			}
+			if previous != value {
+				changes[key] = map[string]string{"before": auditSettingValue(key, previous), "after": auditSettingValue(key, value)}
+			}
 			if _, err = tx.ExecContext(r.Context(), "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value); err != nil {
 				return err
 			}
@@ -261,11 +297,23 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 		if group == 3 {
 			a.applyTransferSettings(values)
 		}
+		if a.audit != nil {
+			a.audit.applySettings(values)
+		}
+		if value, ok := values["audit_retention_days"]; ok && a.audit != nil {
+			days, _ := strconv.ParseInt(value, 10, 64)
+			a.audit.days.Store(days)
+			select {
+			case a.audit.cleanup <- struct{}{}:
+			default:
+			}
+		}
 		return nil
 	}()
 	if err != nil {
 		return err
 	}
+	setAuditDetails(r, changes)
 	a.write(w, 200, map[string]any{"groupId": group, "updatedCount": len(values), "totalCount": len(values), "errors": []string{}, "success": true}, "设置已更新")
 	return nil
 }

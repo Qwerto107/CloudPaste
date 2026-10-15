@@ -63,6 +63,7 @@ type transferRoom struct {
 }
 
 type transferMember struct {
+	audit       auditEvent // 仅保存操作人摘要，不保留其登录凭据。
 	room        *transferRoom
 	index       int
 	name, token string
@@ -72,18 +73,30 @@ type transferMember struct {
 }
 
 type transferMessage struct {
-	Type      string          `json:"type"`
-	Token     string          `json:"token,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	ClientID  string          `json:"client_id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Text      string          `json:"text,omitempty"`
-	Mode      string          `json:"mode,omitempty"`
-	Size      int64           `json:"size,omitempty"`
-	Bytes     int64           `json:"bytes,omitempty"`
-	Data      json.RawMessage `json:"data,omitempty"`
-	ImageType string          `json:"image_type,omitempty"`
-	RequestID string          `json:"request_id,omitempty"`
+	Type       string              `json:"type"`
+	Token      string              `json:"token,omitempty"`
+	ID         string              `json:"id,omitempty"`
+	ClientID   string              `json:"client_id,omitempty"`
+	Name       string              `json:"name,omitempty"`
+	Text       string              `json:"text,omitempty"`
+	Mode       string              `json:"mode,omitempty"`
+	Size       int64               `json:"size,omitempty"`
+	Bytes      int64               `json:"bytes,omitempty"`
+	Data       json.RawMessage     `json:"data,omitempty"`
+	ImageType  string              `json:"image_type,omitempty"`
+	Connection *transferConnection `json:"connection,omitempty"`
+	RequestID  string              `json:"request_id,omitempty"`
+}
+
+// 直连地址由接收端浏览器上报，仅作为诊断信息，不参与鉴权或传输判断。
+type transferConnection struct {
+	Local  transferEndpoint `json:"local"`
+	Remote transferEndpoint `json:"remote"`
+}
+
+type transferEndpoint struct {
+	Address string `json:"address"`
+	Port    int    `json:"port"`
 }
 
 func transferSecret() string {
@@ -121,6 +134,7 @@ func (h *transferHub) removeLocked(room *transferRoom) {
 		return
 	}
 	delete(h.rooms, room.id)
+	h.auditTransfer(room.members[0], "连接结束", room.id, "success", room.created, nil)
 	room.cancel()
 	for _, file := range room.files {
 		h.finishLocked(file, "cancelled")
@@ -332,12 +346,14 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := context.WithDeadline(h.ctx, time.Now().Add(transferLifetime))
 	room := &transferRoom{id: randomID(), code: code, owner: *p, ip: ip, created: time.Now(), expires: time.Now().Add(transferLifetime), files: map[string]*transferFile{}, ctx: ctx, cancel: cancel, relayOnly: body.RelayOnly, maxFile: h.maxFile}
 	member := &transferMember{room: room, index: 0, name: name, created: time.Now(), out: make(chan any, transferQueue)}
+	member.audit = a.transferAuditIdentity(r)
 	// 返回给浏览器的凭证只保留在页面内存，服务端只保存其摘要。
 	secret := transferSecret()
 	member.token = secretHash(secret)
 	room.members[0] = member
 	h.rooms[room.id] = room
 	h.mu.Unlock()
+	setAuditTarget(r, room.id)
 	a.write(w, 201, map[string]any{"token": secret, "code": code, "member": 0, "expires_at": room.expires, "max_file_size": room.maxFile}, "连接已创建")
 	return nil
 }
@@ -391,8 +407,10 @@ func (a *App) joinTransfer(w http.ResponseWriter, r *http.Request) error {
 		}
 		secret := transferSecret()
 		room.members[1] = &transferMember{room: room, index: 1, name: name, token: secretHash(secret), created: time.Now(), out: make(chan any, transferQueue)}
+		room.members[1].audit = a.transferAuditIdentity(r)
 		room.relayOnly = room.relayOnly || body.RelayOnly
 		h.mu.Unlock()
+		setAuditTarget(r, room.id)
 		a.write(w, 200, map[string]any{"token": secret, "member": 1, "expires_at": room.expires, "max_file_size": room.maxFile}, "等待对方确认")
 		return nil
 	}
@@ -552,7 +570,10 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		}
 		r.paired = true
 		r.code = ""
-		h.broadcastLocked(r, map[string]any{"type": "paired", "names": []string{r.members[0].name, r.members[1].name}, "relay_only": r.relayOnly, "stun": h.app.cfg.TransferSTUN})
+		// 仅在创建者确认、双方配对成功后记录加入；申请本身由 HTTP 日志单独记录。
+		h.auditTransfer(r.members[1], "加入互传", r.id, "success", r.members[1].created, nil)
+		// 前端只在日志开启或调试模式下读取一次直连统计。
+		h.broadcastLocked(r, map[string]any{"type": "paired", "names": []string{r.members[0].name, r.members[1].name}, "relay_only": r.relayOnly, "stun": h.app.cfg.TransferSTUN, "audit_enabled": h.app.audit.allows("transfer")})
 		return nil
 	}
 	if !r.paired {
@@ -564,7 +585,10 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 			return badRequest("文字长度应为 1-4096 字节")
 		}
 		// 服务端统一记录发送时间，双方看到同一个时间值，不接受客户端伪造时间。
-		h.broadcastLocked(r, map[string]any{"type": "text", "text": msg.Text, "from": m.index, "sent_at": time.Now().UTC().Format(time.RFC3339Nano)})
+		sent := time.Now()
+		h.broadcastLocked(r, map[string]any{"type": "text", "text": msg.Text, "from": m.index, "sent_at": sent.UTC().Format(time.RFC3339Nano)})
+		// 用户选择保存互传文字正文；仅在日志开启时进入有界异步队列。
+		h.auditTransfer(m, "发送文本", r.id, "success", sent, map[string]any{"text": msg.Text, "bytes": len(msg.Text)})
 	case "signal":
 		if r.relayOnly || len(msg.Data) > 12000 || !json.Valid(msg.Data) {
 			return badRequest("连接协商信息无效")
@@ -578,7 +602,7 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		if transferName(msg.Name) == "" || len(msg.ClientID) > 64 || msg.ClientID == "" || msg.Size < 0 || msg.Size > r.maxFile || len(r.files) >= transferFiles || r.offeredBytes+msg.Size > r.maxFile*4 {
 			return badRequest("文件名称、大小或本次连接的文件额度不符合限制")
 		}
-		f := &transferFile{id: randomID(), clientID: msg.ClientID, name: transferName(msg.Name), size: msg.Size, sender: m.index, room: r, state: "offered", created: time.Now()}
+		f := &transferFile{id: randomID(), clientID: msg.ClientID, name: transferName(msg.Name), imageType: msg.ImageType, size: msg.Size, sender: m.index, room: r, state: "offered", created: time.Now()}
 		r.files[f.id] = f
 		r.offeredBytes += f.size
 		h.broadcastLocked(r, map[string]any{"type": "file", "id": f.id, "client_id": f.clientID, "name": f.name, "size": f.size, "from": f.sender, "state": "offered", "image_type": msg.ImageType, "sent_at": f.created.UTC().Format(time.RFC3339Nano)})
@@ -626,6 +650,12 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 			h.sendLocked(r.members[f.sender], map[string]any{"type": "start", "id": f.id, "mode": "p2p"})
 		}
 		h.broadcastLocked(r, map[string]any{"type": "state", "id": f.id, "state": "active", "mode": f.mode})
+		// 接受后即记录开始事件，下载工具等待人工结束时也可追溯任务。
+		action := "文件传输开始"
+		if f.imageType != "" {
+			action = "图片传输开始"
+		}
+		h.auditTransfer(r.members[f.sender], action, f.id, "success", f.progress, transferAuditDetails(f))
 	case "cancel":
 		if f := r.files[msg.ID]; f != nil {
 			h.finishLocked(f, "cancelled")
@@ -663,6 +693,7 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 			if f.bytes != f.size {
 				return badRequest("文件长度不一致")
 			}
+			f.connection = msg.Connection
 			h.finishLocked(f, "complete")
 		} else {
 			h.broadcastLocked(r, map[string]any{"type": "progress", "id": f.id, "bytes": f.bytes})

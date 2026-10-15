@@ -418,6 +418,7 @@ func (a *App) saveStorage(w http.ResponseWriter, r *http.Request) error {
 	if old.ID == "" {
 		status = 201
 	}
+	setAuditTarget(r, s.ID)
 	a.write(w, status, storageView(s, true), "存储已保存")
 	return nil
 }

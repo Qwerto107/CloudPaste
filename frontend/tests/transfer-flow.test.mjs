@@ -261,6 +261,26 @@ test("调试统计忽略旧连接结果，关闭时不读取统计，统计失�
   }
 });
 
+test("操作日志开启时缓存直连两端地址，调试关闭也不输出控制台日志", async () => {
+  const client = new TransferClient(() => {});
+  client.auditEnabled = true;
+  client.peer = {
+    async getStats() {
+      return new Map([
+        ["transport", { type: "transport", selectedCandidatePairId: "pair" }],
+        ["pair", { type: "candidate-pair", state: "succeeded", localCandidateId: "local", remoteCandidateId: "remote" }],
+        ["local", { address: "192.0.2.1", port: 10001 }],
+        ["remote", { address: "198.51.100.2", port: 10002 }],
+      ]);
+    },
+  };
+  await client.logConnectionDetails();
+  assert.deepEqual(client.directEndpoints, {
+    local: { address: "192.0.2.1", port: 10001 },
+    remote: { address: "198.51.100.2", port: 10002 },
+  });
+});
+
 test("下载工具按需切片，分段取消相互独立，断开后全部释放", async () => {
   const originalFetch = globalThis.fetch;
   const captured = [];
@@ -801,6 +821,10 @@ test("接收窗口只接受有界整数声明，缺失或无效时兼容旧页�
 
 test("慢写盘保持有界队列，批量确认只包含已写入字节，尾块也被保存", async () => {
   const client = new TransferClient(() => {});
+  client.directEndpoints = {
+    local: { address: "192.0.2.1", port: 10001 },
+    remote: { address: "198.51.100.2", port: 10002 },
+  };
   const acks = [],
     writes = [],
     controls = [];
@@ -855,4 +879,5 @@ test("慢写盘保持有界队列，批量确认只包含已写入字节，尾�
   assert.equal(closed, true);
   assert.equal(controls.at(-1).type, "complete");
   assert.equal(controls.at(-1).bytes, job.size);
+  assert.deepEqual(controls.at(-1).connection, client.directEndpoints);
 });

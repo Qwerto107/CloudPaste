@@ -127,6 +127,39 @@ func (p *trustedProxySet) resolve(ctx context.Context, host string) []netip.Addr
 }
 
 func (a *App) clientIP(r *http.Request) string {
+	return resolveClientIP(r, a.cfg.TrustedProxies.contains)
+}
+
+// 日志只使用已知的可信代理，不触发 DNS 或等待正在解析的缓存锁。
+func (a *App) auditClientIP(r *http.Request) string {
+	return resolveClientIP(r, func(_ context.Context, address netip.Addr) bool {
+		p := a.cfg.TrustedProxies
+		if p == nil {
+			return false
+		}
+		for _, prefix := range p.prefixes {
+			if prefix.Contains(address) {
+				return true
+			}
+		}
+		if !p.mu.TryLock() {
+			return false
+		}
+		defer p.mu.Unlock()
+		for _, entry := range p.cache {
+			if time.Now().Before(entry.expires) {
+				for _, resolved := range entry.addresses {
+					if resolved.Unmap() == address {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	})
+}
+
+func resolveClientIP(r *http.Request, trusted func(context.Context, netip.Addr) bool) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
@@ -149,7 +182,7 @@ func (a *App) clientIP(r *http.Request) string {
 	defer cancel()
 	current := peer
 	for i := len(chain) - 1; i >= 0; i-- {
-		if !a.cfg.TrustedProxies.contains(ctx, current) {
+		if !trusted(ctx, current) {
 			return current.String()
 		}
 		address, err := netip.ParseAddr(strings.TrimSpace(chain[i]))

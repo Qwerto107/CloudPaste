@@ -18,15 +18,19 @@ import { request } from "./api.js";
 import { loadSettings } from "./settings.js";
 import { fields, sections } from "./settings-fields.js";
 import Icon from "./Icon.vue";
+const AuditCleanupView = defineAsyncComponent(
+  () => import("./AuditCleanupView.vue"),
+);
 
 const route = useRoute();
 const panel = computed(() => route.meta.panel);
-const groups = { global: 1, preview: 2, transfer: 3, site: 4 };
+const groups = { global: 1, preview: 2, transfer: 3, site: 4, logs: 5 };
 const tabs = [
   { key: "global", label: "常规", icon: "settings" },
   { key: "preview", label: "文件预览", icon: "file" },
   { key: "transfer", label: "设备互传", icon: "transfer" },
   { key: "site", label: "站点外观", icon: "cloud" },
+  { key: "logs", label: "日志设置", icon: "file" },
 ];
 const definitions = ref([]);
 const values = reactive({});
@@ -179,7 +183,7 @@ watch(panel, load, { immediate: true });
 <template>
   <div class="settings-heading">
     <h1>系统设置</h1>
-    <p class="muted">管理分享规则、文件预览与站点外观。</p>
+    <p class="muted">管理分享规则、文件预览、站点外观与操作日志。</p>
   </div>
   <nav class="settings-tabs" aria-label="设置分类">
     <RouterLink
@@ -330,4 +334,6 @@ watch(panel, load, { immediate: true });
       </div>
     </div>
   </form>
+  <!-- 清理使用独立表单，避免误触设置保存或产生嵌套表单。 -->
+  <AuditCleanupView v-if="panel === 'logs' && !loading && definitions.length" />
 </template>

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"mime"
+	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 // 实时中继没有文件缓存；io.Pipe 把接收端背压一直传递到上传端。
 type transferFile struct {
 	id, clientID, name, state, mode   string
+	imageType                         string
 	size, bytes                       int64
 	sender                            int
 	room                              *transferRoom
@@ -25,6 +28,43 @@ type transferFile struct {
 	reader                            *io.PipeReader
 	writer                            *io.PipeWriter
 	tool                              *transferTool
+	connection                        *transferConnection
+}
+
+func transferEndpointLabel(endpoint transferEndpoint) string {
+	if endpoint.Port < 1 || endpoint.Port > 65535 {
+		return "不可用"
+	}
+	address, err := netip.ParseAddr(endpoint.Address)
+	if err != nil {
+		return "浏览器未公开（端口 " + strconv.Itoa(endpoint.Port) + "）"
+	}
+	return net.JoinHostPort(address.Unmap().String(), strconv.Itoa(endpoint.Port))
+}
+
+// 文件与图片只记录必要的传输元数据，开始和结束事件使用同一套字段。
+func transferAuditDetails(f *transferFile) map[string]any {
+	details := map[string]any{
+		"name": f.name, "state": f.state, "mode": f.mode,
+		"bytes": f.bytes, "size": f.size, "room": f.room.id,
+		"started_at": f.created.UTC().Format(time.RFC3339Nano),
+	}
+	// 两侧 IP 来自服务端连接信息；直连端口只采用经过格式校验的浏览器统计。
+	if sender := f.room.members[f.sender]; sender != nil {
+		details["sender_ip"] = sender.audit.IP
+	}
+	if receiver := f.room.members[1-f.sender]; receiver != nil {
+		details["receiver_ip"] = receiver.audit.IP
+	}
+	if f.mode == "p2p" && f.connection != nil {
+		details["p2p_local"] = transferEndpointLabel(f.connection.Local)
+		details["p2p_remote"] = transferEndpointLabel(f.connection.Remote)
+		details["p2p_reporter"] = "接收端浏览器"
+	}
+	if f.imageType != "" {
+		details["image_type"] = f.imageType
+	}
+	return details
 }
 
 func (h *transferHub) finishLocked(f *transferFile, state string) {
@@ -32,6 +72,19 @@ func (h *transferHub) finishLocked(f *transferFile, state string) {
 		return
 	}
 	f.state = state
+	result := "failure"
+	if state == "complete" {
+		result = "success"
+	}
+	if state == "cancelled" || state == "rejected" {
+		result = "cancelled"
+	}
+	details := transferAuditDetails(f)
+	action := "文件传输结束"
+	if f.imageType != "" {
+		action = "图片传输结束"
+	}
+	h.auditTransfer(f.room.members[f.sender], action, f.id, result, f.created, details)
 	f.uploadToken = ""
 	f.downloadToken = ""
 	if f.cancel != nil {

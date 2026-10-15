@@ -505,6 +505,7 @@ func (a *App) uploadFile(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	v["url"] = "/file/" + record.Slug
+	setAuditTarget(r, record.ID)
 	a.write(w, 201, v, "文件已上传并创建分享")
 	return nil
 }

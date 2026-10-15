@@ -18,6 +18,18 @@ API Key 必须启用且未过期，并满足权限、路径范围与存储 ACL�
 
 访客上传仅可使用公开、启用且可写的存储，`path` 只能为空或 `/`，实际写入隔离目录。浏览器为同一批上传生成 32 字节随机凭证，以无填充 Base64URL 的 `X-Guest-Token` 请求头发送，创建合集时沿用同一凭证；服务端只保存其摘要作为归属。此凭证不能用于登录、管理或查看失效内容。自定义客户端合并文件时也需保持该随机凭证，禁止使用可猜测的值。
 
+## 操作日志
+
+`GET /api/admin/operation-logs` 仅管理员可调用，返回 `items`、`has_more`、`retention_days`、`enabled`。支持 `limit`（默认 50，最大 200）、`offset`、`module`、`actor_type`、`actor`（名称包含匹配或完整 ID）、`result`、`from` / `to`（RFC3339）。查询参数均绑定，查询超时为 3 秒；不执行全表总数统计。
+
+`DELETE /api/admin/operation-logs` 仅管理员可调用，JSON 请求体必须包含 RFC3339 格式的 `from`、`to`，可选 `module`（留空表示全部模块）；删除闭区间内已保存的日志。每次最多删除 1000 条，返回 `deleted` 和 `has_more`；若 `has_more=true`，用相同条件继续调用。删除不可恢复，刚进入异步队列的记录可能稍后写入。
+
+模块：`auth`、`text`、`file`、`transfer`、`storage`、`keys`、`settings`；身份：`admin`、`apikey`、`guest`、`unknown`；结果：`success`、`failure`、`cancelled`。记录字段包含 `id`、`time`（Unix 毫秒）、`module`、`action`、`actor_type`、`actor_id`、`actor_name`、`ip`、`target`、`method`、`endpoint`（不含查询串的路由模板）、`status`（WebSocket 事件为 0）、`result`、`duration_ms`、`details`（JSON 字符串）。互传直连完成状态由接收端上报。
+
+通过 `PUT /api/admin/settings/group/5` 设置 `audit_enabled`（默认 `false`）和 `audit_retention_days`（1–3650，默认 30）。日志设置对应“系统设置 → 日志设置”选项卡，并可通过 `GET /api/admin/settings?group=5` 读取；公开设置不返回此分组。七个模块分别使用 `audit_auth_enabled`、`audit_text_enabled`、`audit_file_enabled`、`audit_transfer_enabled`、`audit_storage_enabled`、`audit_keys_enabled`、`audit_settings_enabled`（布尔值，默认 `true`）。仅当总开关与对应模块开关均开启时记录新操作；保存后立即生效并持久化。关闭开关后不再接收新日志，已有记录仍可查询或清理。日志写入为异步有界批处理，可能稍有延迟；不提供公开接口、修改接口或跨用户访问。互传文字会记录正文（单条最多 4096 字节），文件与图片仅记录名称、大小、时间等元数据，不保存文件或图片内容；密码、凭据和分享正文不进入日志。文件与图片被接受时记录开始，任务结束时记录最终结果。互传文件和图片日志包含两端服务端可见 IP；点对点完成事件还可包含接收端浏览器上报的直连 `IP:端口`，若浏览器隐藏地址或统计不可用则可能缺失。普通文件 Range、互传分段和进度请求不逐条记录。后台日志页面读取本身不产生日志。
+
+同一 IP 的高频同类失败请求，以及重复读取同一分享的请求，在一分钟内合并。首条请求单独记录，其余请求写成带 `merged_requests` 数量的汇总；扫描不同无效路径不会逐条落库。来源过多时按模块汇总。此机制只限制日志增长，不改变请求响应。
+
 ## 限频策略
 
 不再设置跨 IP 的每分钟总次数。下表使用一分钟固定窗口，环境变量为空或未配置时使用默认值，配置范围为 1–1000000 的整数；`0` 不表示关闭限频，非法配置会阻止启动。
