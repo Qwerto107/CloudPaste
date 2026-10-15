@@ -309,14 +309,14 @@ function event(message) {
       file.completedRound = message.round;
     }
     if (message.type === "download-tool") {
-      // 手动中继接收先展示下载操作，浏览器和外部工具共用此链接，不提前发起 GET。
-      file.url = client.downloadURL(message.url);
+      // 保留可重复下载的中继链接，也允许复制给外部下载工具。
       file.expiresLabel = new Date(message.expires_at).toLocaleTimeString(
         "zh-CN",
         { hour12: false },
       );
       file.maxConnections = message.max_connections;
-    } else if (message.type === "download") {
+    }
+    if (["download", "download-tool"].includes(message.type)) {
       file.url = client.downloadURL(message.url);
       // 接收确认后直接交给原生下载器，不把整个响应读成 Blob，也不要求第二次点击。
       const link = document.createElement("a");
@@ -327,6 +327,7 @@ function event(message) {
       link.click();
       link.remove();
       file.urlUsed = true;
+      file.requested = true;
     }
     if (message.state) {
       file.state = message.state;
@@ -471,7 +472,7 @@ async function accept(file, directly) {
   error.value = "";
   file.accepting = true;
   try {
-    // 手动接收只按传输方式选择：中继先展示链接，点对点直接选择保存位置。
+    // 中继获取链接后立即开始原生下载，点对点直接选择保存位置。
     await client.accept(file, directly, !directly);
   } catch (reason) {
     if (reason.name !== "AbortError") error.value = reason.message;
@@ -1113,7 +1114,7 @@ onBeforeUnmount(() => {
                 @focus="$event.target.select()"
               />
               <p class="transfer-hint muted">
-                点击“下载文件”直接下载，也可复制链接到下载工具（支持 AB
+                已自动发起下载，也可复制链接到下载工具（支持 AB
                 扩展接管）。最多
                 {{ file.maxConnections }} 路连接，链接到
                 {{ file.expiresLabel }}
@@ -1136,7 +1137,7 @@ onBeforeUnmount(() => {
         </dd>
         <dt>文件接收</dt>
         <dd>
-          文件逐个接收。选择“中继下载”后，可直接下载或复制链接到下载工具，中继边传边下载；“点对点下载”取决于浏览器支持。开启自动接收后直接启动中继下载，浏览器仍可能询问保存位置或多文件下载许可。
+          文件逐个接收。点击“中继下载”即开始下载，也可复制链接到下载工具，中继边传边下载；“点对点下载”取决于浏览器支持。开启自动接收后直接启动中继下载，浏览器仍可能询问保存位置或多文件下载许可。
         </dd>
         <dt>连接与隐私</dt>
         <dd>
@@ -1144,7 +1145,7 @@ onBeforeUnmount(() => {
         </dd>
         <dt>下载工具</dt>
         <dd>
-          选择“中继下载”后，可通过“下载文件”直接下载，或将链接交给 AB Download
+          点击“中继下载”后自动开始下载，也可将链接交给 AB Download
           Manager
           等软件下载。支持文件探测、分段和本次连接内重试，使用实时中继，双方页面必须在线。链接最长
           30 分钟有效，停用 10

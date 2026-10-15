@@ -339,7 +339,7 @@ WebSocket `error` 消息不包含 HTTP 状态或 `code`。HTTP 创建、加入�
 
 中继接收方先 `accept`，得到 `download` 消息内的临时 URL。**实际 GET 开始后**发送方才收到 `start` 及独立上传票据；上传和下载票据不能互换，单次使用、绑定文件、房间结束即失效。HEAD、Range 和重新消费票据不提供文件；上传字节数必须与申报大小一致。中途失败会截断下载而不追加 JSON，请检查下载是否完整。
 
-下载工具接收使用 `accept` 的 `mode:"tool"`，收到 `download-tool`（`url/expires_at/max_connections`）后由用户交给下载工具，不提前自动 GET。HEAD 仅返回元数据；GET 支持 200 全文件、206 单个区间（含开放结尾与后缀）、416 不可满足区间，并提供稳定 ETag、Last-Modified 和 If-Range 校验。多段 multipart 请求不支持；并行分段使用多个独立 GET。
+下载工具接收使用 `accept` 的 `mode:"tool"`，收到 `download-tool`（`url/expires_at/max_connections`）后，前端立即发起原生下载，并保留链接供复制和重新下载。HEAD 仅返回元数据；GET 支持 200 全文件、206 单个区间（含开放结尾与后缀）、416 不可满足区间，并提供稳定 ETag、Last-Modified 和 If-Range 校验。多段 multipart 请求不支持；并行分段使用多个独立 GET。
 
 每个实际下载请求向发送页面发送 `range-start`（`id/request_id/token/start/end`，end 不包含），页面对原 File 做 slice 后 PUT 到分段上传入口。票据只用于该次分段上传，不能互换或重复消费；`range-stop` 取消相应上传，发送端也可用 `range-failed`（`id/request_id`）结束失败分段。单段中止不终止任务，可在票据期限内重试。整轮所有分段正常完成后，双方收到 `tool-complete`（`id/round/bytes`）；此时会写入一条“下载完成”日志，链接仍可再次下载。仅接收端的 `finish-download` 结束任务并撤销下载链接；取消、配对断开或权限撤销也使链接失效。
 

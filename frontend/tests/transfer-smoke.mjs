@@ -396,9 +396,8 @@ try {
       .filter({ has: receiver.getByText(name, { exact: true }) });
     const downloadEvent = receiver.waitForEvent("download");
     const started = performance.now();
-    // 手动中继先展示下载操作，点击下载后仍由浏览器原生保存，不聚合文件。
+    // 点击中继下载便由浏览器原生保存，无需再次点击下载链接。
     await row.getByRole("button", { name: "中继下载", exact: true }).click();
-    await row.getByRole("link", { name: "下载文件", exact: true }).click();
     const download = await downloadEvent;
     assert.equal(await download.failure(), null);
     if (benchmarkBytes && payload.length >= benchmarkBytes)
@@ -423,7 +422,7 @@ try {
   await relay(b, a, "双向文件-2.txt", Buffer.from("反向实时传输\n"));
   await relay(a, b, "空文件.txt", Buffer.alloc(0));
 
-  // 下载工具只持有短期链接；真实发送页面按请求区间切片，不提前触发浏览器下载。
+  // 中继先自动下载，短期链接仍支持外部工具按请求区间下载。
   const toolPayload = Buffer.alloc(
     process.env.TRANSFER_TEST_AB ? 32 * 1024 * 1024 : 2 * 1024 * 1024,
   );
@@ -440,11 +439,6 @@ try {
   const toolSenderRow = a
     .locator(".transfer-file")
     .filter({ has: a.getByText("download-tool.bin", { exact: true }) });
-  let unexpectedDownload = false;
-  const monitorDownload = () => {
-    unexpectedDownload = true;
-  };
-  b.on("download", monitorDownload);
   // 初始接收按传输方式分类，外部工具与浏览器下载共用中继入口。
   assert.equal(
     await toolRow
@@ -458,7 +452,12 @@ try {
       .count(),
     1,
   );
+  const toolDownloadEvent = b.waitForEvent("download");
   await toolRow.getByRole("button", { name: "中继下载", exact: true }).click();
+  const toolDownload = await toolDownloadEvent;
+  assert.equal(await toolDownload.failure(), null);
+  assert.deepEqual(await readFile(await toolDownload.path()), toolPayload);
+  await toolRow.getByText("下载完成", { exact: true }).waitFor();
   const linkInput = toolRow.getByRole("textbox", {
     name: "download-tool.bin 下载链接",
     exact: true,
@@ -469,14 +468,12 @@ try {
     await toolRow
       .getByRole("button", { name: "结束传输", exact: true })
       .isDisabled(),
-    true,
+    false,
   );
   assert.equal(
-    await toolRow.getByRole("link", { name: "下载文件", exact: true }).count(),
+    await toolRow.getByRole("link", { name: "重新下载", exact: true }).count(),
     1,
   );
-  assert.equal(unexpectedDownload, false);
-  b.off("download", monitorDownload);
   await linkInput.focus();
   assert.equal(
     await linkInput.evaluate(
@@ -753,10 +750,6 @@ try {
   await retryReceiver
     .nth(1)
     .getByRole("button", { name: "中继下载", exact: true })
-    .click();
-  await retryReceiver
-    .nth(1)
-    .getByRole("link", { name: "下载文件", exact: true })
     .click();
   const receivedRetry = await retriedDownload;
   assert.equal(await receivedRetry.failure(), null);
