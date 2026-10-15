@@ -25,8 +25,9 @@ export function canSaveDirectly() {
 }
 
 export class TransferClient {
-  constructor(onEvent) {
+  constructor(onEvent, debugEnabled = () => false) {
     this.onEvent = onEvent;
+    this.debugEnabled = debugEnabled;
     this.sources = new Map();
     this.pendingOffers = new Set();
     this.files = new Map();
@@ -37,10 +38,98 @@ export class TransferClient {
     this.signalChain = Promise.resolve();
     this.peerGeneration = 0;
     this.candidates = [];
+    this.transferTimings = new Map();
     this.closed = false;
   }
 
+  debug(event, details = {}, warning = false) {
+    if (!this.debugEnabled()) return;
+    // 只记录选取的诊断字段；连接地址仅在开启调试时输出，完整信令、票据和用户内容不输出。
+    console[warning ? "warn" : "debug"]("[CloudPaste P2P]", event, {
+      role:
+        this.member === 0 ? "创建者" : this.member === 1 ? "加入者" : "未配对",
+      generation: this.peerGeneration,
+      ...details,
+    });
+  }
+
+  async logConnectionDetails(peer = this.peer) {
+    if (!this.debugEnabled() || this.closed || !peer?.getStats) return;
+    try {
+      const stats = await peer.getStats();
+      // 异步读取期间可能已重建或关闭连接，旧统计不能归入新的连接代次。
+      if (this.closed || this.peer !== peer || !this.debugEnabled()) return;
+      const reports = [...stats.values()];
+      const transport = reports.find(
+        (item) => item.type === "transport" && item.selectedCandidatePairId,
+      );
+      const pair = transport
+        ? stats.get(transport.selectedCandidatePairId)
+        : reports.find(
+            (item) =>
+              item.type === "candidate-pair" &&
+              item.state === "succeeded" &&
+              (item.selected || item.nominated),
+          );
+      if (!pair) {
+        this.debug("直连链路统计暂不可用");
+        return;
+      }
+      const endpoint = (candidate) => ({
+        address: candidate?.address ?? candidate?.ip ?? null,
+        port: candidate?.port ?? null,
+        type: candidate?.candidateType ?? null,
+        protocol: candidate?.protocol ?? null,
+        relayProtocol: candidate?.relayProtocol ?? null,
+      });
+      this.debug("直连链路详情", {
+        local: endpoint(stats.get(pair.localCandidateId)),
+        remote: endpoint(stats.get(pair.remoteCandidateId)),
+        pairState: pair.state,
+        roundTripMs: Number.isFinite(pair.currentRoundTripTime)
+          ? Math.round(pair.currentRoundTripTime * 100000) / 100
+          : null,
+        dtlsState: transport?.dtlsState ?? null,
+        dtlsCipher: transport?.dtlsCipher ?? null,
+        // 这是整条链路的累计统计，与单个文件的已确认字节分别记录。
+        bytesSent: pair.bytesSent ?? null,
+        bytesReceived: pair.bytesReceived ?? null,
+      });
+    } catch (error) {
+      if (!this.closed && this.peer === peer)
+        this.debug("读取直连统计失败", { error: error.name }, true);
+    }
+  }
+
+  logTransferEnd(message) {
+    const startedAt = this.transferTimings.get(message.id);
+    this.transferTimings.delete(message.id);
+    const elapsedMs =
+      startedAt === undefined ? null : performance.now() - startedAt;
+    const file = this.files.get(message.id);
+    const bytes = message.bytes ?? file?.bytes ?? 0;
+    this.debug(
+      "文件传输结束",
+      {
+        mode: message.mode,
+        state: message.state,
+        direction: file ? (file.from === this.member ? "发送" : "接收") : null,
+        fileBytes: file?.size ?? null,
+        confirmedBytes: bytes,
+        durationMs: elapsedMs === null ? null : Math.round(elapsedMs),
+        averageMiBPerSecond:
+          elapsedMs > 0
+            ? Math.round((bytes / (1 << 20) / (elapsedMs / 1000)) * 100) / 100
+            : null,
+      },
+      message.state === "failed",
+    );
+    if (message.mode === "p2p") void this.logConnectionDetails();
+  }
+
   async open(kind, fields) {
+    if (this.closed) return;
+    this.debug("申请连接", { action: kind });
     const data = await request(`/transfer/${kind}`, {
       method: "POST",
       body: fields,
@@ -50,24 +139,37 @@ export class TransferClient {
     this.member = data.member;
     this.maxFile = data.max_file_size;
     this.onEvent({ type: "created", ...data, token: undefined });
+    this.debug("连接申请成功");
     const url = new URL(apiURL("/transfer/socket", true));
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     this.socket = new WebSocket(url);
     // 临时凭证只通过首条消息提交，不写入 URL 或浏览器存储；公网应部署 HTTPS/WSS。
-    this.socket.onopen = () => this.send({ type: "auth", token: data.token });
+    this.socket.onopen = () => {
+      this.debug("WebSocket 已连接");
+      this.send({ type: "auth", token: data.token });
+    };
     this.socket.onmessage = (event) => {
       try {
         this.handle(JSON.parse(event.data));
       } catch {
+        this.debug("WebSocket 消息处理失败", {}, true);
         this.fail("连接消息无效，请重新配对");
       }
     };
-    this.socket.onerror = () =>
+    this.socket.onerror = () => {
+      this.debug("WebSocket 连接异常", {}, true);
       this.onEvent({
         type: "error",
         message: "连接失败，请检查服务和 WebSocket 代理配置",
       });
-    this.socket.onclose = () => this.close();
+    };
+    this.socket.onclose = (event) => {
+      this.debug("WebSocket 已断开", {
+        code: event.code,
+        clean: event.wasClean,
+      });
+      this.close();
+    };
   }
 
   send(message) {
@@ -84,9 +186,11 @@ export class TransferClient {
     if (message.type === "signal") {
       this.signalChain = this.signalChain
         .then(() => this.signal(message.data))
-        .catch(() => {
-          if ((message.data?.generation ?? 0) === this.peerGeneration)
-            this.peerFailed();
+        .catch((error) => {
+          if ((message.data?.generation ?? 0) === this.peerGeneration) {
+            this.debug("WebRTC 信令处理失败", { error: error.name }, true);
+            this.peerFailed("信令协商失败");
+          }
         });
     }
     if (message.type === "file") {
@@ -120,6 +224,7 @@ export class TransferClient {
       }
     }
     if (message.type === "error") {
+      this.debug("服务端拒绝互传请求", {}, true);
       this.abortDirect(message.id);
       this.pendingOffers.delete(message.client_id);
       this.sources.delete(message.client_id);
@@ -139,8 +244,20 @@ export class TransferClient {
     }
     if (message.type === "state" && this.files.has(message.id)) {
       Object.assign(this.files.get(message.id), message);
+      if (
+        message.state === "active" &&
+        this.debugEnabled() &&
+        !this.transferTimings.has(message.id)
+      ) {
+        this.transferTimings.set(message.id, performance.now());
+        this.debug("文件传输已开始", {
+          mode: message.mode,
+          fileBytes: this.files.get(message.id).size,
+        });
+      }
     }
     if (message.type === "start") {
+      this.debug("开始发送文件", { mode: message.mode });
       const task =
         message.mode === "relay"
           ? this.upload(message)
@@ -183,6 +300,7 @@ export class TransferClient {
       message.type === "state" &&
       ["complete", "failed", "cancelled"].includes(message.state)
     ) {
+      this.logTransferEnd(message);
       this.uploads.get(message.id)?.abort();
       this.uploads.delete(message.id);
       for (const upload of this.rangeUploads.values()) {
@@ -371,6 +489,10 @@ export class TransferClient {
         };
       }
       try {
+        this.debug("选择接收方式", {
+          mode: useDownloadTool ? "tool" : direct ? "p2p" : "relay",
+          bytes: file.size,
+        });
         this.send({
           type: "accept",
           id: file.id,
@@ -463,6 +585,7 @@ export class TransferClient {
 
   restartPeer() {
     if (this.closed || !this.peerSettings) return;
+    this.debug("重建 WebRTC 连接");
     this.directReady = false;
     this.onEvent({ type: "direct", ready: false });
     const peer = this.peer,
@@ -480,25 +603,56 @@ export class TransferClient {
 
   startPeer(message) {
     this.peerSettings = message;
-    if (message.relay_only || typeof RTCPeerConnection === "undefined") return;
+    if (message.relay_only || typeof RTCPeerConnection === "undefined") {
+      this.debug("使用中继连接", {
+        reason: message.relay_only ? "仅中继模式" : "浏览器不支持 WebRTC",
+      });
+      return;
+    }
+    this.debug("开始 WebRTC 协商", { stunEnabled: Boolean(message.stun) });
     const generation = this.peerGeneration;
     const peer = new RTCPeerConnection({
       iceServers: message.stun ? [{ urls: message.stun }] : [],
     });
     this.peer = peer;
+    this.peerStartedAt = performance.now();
     peer.onicecandidate = (event) => {
-      if (!this.closed && this.peer === peer)
+      if (!this.closed && this.peer === peer) {
+        if (event.candidate)
+          this.debug("发现本地 ICE 候选", {
+            type: event.candidate.type,
+            protocol: event.candidate.protocol,
+            address: event.candidate.address ?? null,
+            port: event.candidate.port ?? null,
+          });
+        else this.debug("ICE 候选收集完成");
         this.send({
           type: "signal",
           data: { candidate: event.candidate?.toJSON() ?? null, generation },
         });
+      }
+    };
+    // 按状态变化记录，避免定时轮询和逐个数据分块输出影响传输性能。
+    peer.oniceconnectionstatechange = () => {
+      if (!this.closed && this.peer === peer)
+        this.debug("ICE 连接状态", { state: peer.iceConnectionState });
+    };
+    peer.onicegatheringstatechange = () => {
+      if (!this.closed && this.peer === peer)
+        this.debug("ICE 收集状态", { state: peer.iceGatheringState });
+    };
+    peer.onsignalingstatechange = () => {
+      if (!this.closed && this.peer === peer)
+        this.debug("WebRTC 信令状态", { state: peer.signalingState });
     };
     peer.onconnectionstatechange = () => {
+      if (this.closed || this.peer !== peer) return;
+      this.debug("WebRTC 连接状态", { state: peer.connectionState });
       if (
         this.peer === peer &&
         ["failed", "closed", "disconnected"].includes(peer.connectionState)
       )
-        this.peerFailed();
+        this.peerFailed(`连接状态为 ${peer.connectionState}`);
     };
     if (this.member === 0) {
       this.attachChannel(peer.createDataChannel("transfer", { ordered: true }));
@@ -507,7 +661,8 @@ export class TransferClient {
         .then(async (offer) => {
           if (this.closed || this.peer !== peer) return;
           await peer.setLocalDescription(offer);
-          if (!this.closed && this.peer === peer)
+          if (!this.closed && this.peer === peer) {
+            this.debug("发送 WebRTC offer");
             this.send({
               type: "signal",
               data: {
@@ -517,9 +672,13 @@ export class TransferClient {
                 receive_window: receiveWindow,
               },
             });
+          }
         })
-        .catch(() => {
-          if (this.peer === peer) this.peerFailed();
+        .catch((error) => {
+          if (this.peer === peer) {
+            this.debug("WebRTC offer 创建失败", { error: error.name }, true);
+            this.peerFailed("offer 协商失败");
+          }
         });
     } else
       peer.ondatachannel = (event) => {
@@ -556,6 +715,12 @@ export class TransferClient {
           : legacyReceiveWindow;
       await peer.setRemoteDescription(data.description);
       if (this.closed || this.peer !== peer) return;
+      this.debug("已应用远端描述", { type: expected });
+      this.debug("协商传输参数", {
+        maxChunkBytes: this.peerChunkSize,
+        receiveWindowBytes: this.peerReceiveWindow,
+        sctpMaxMessageBytes: peer.sctp?.maxMessageSize ?? null,
+      });
       for (const candidate of this.candidates)
         await peer.addIceCandidate(candidate);
       if (this.closed || this.peer !== peer) return;
@@ -565,6 +730,7 @@ export class TransferClient {
         if (this.closed || this.peer !== peer) return;
         await peer.setLocalDescription(answer);
         if (this.closed || this.peer !== peer) return;
+        this.debug("发送 WebRTC answer");
         this.send({
           type: "signal",
           data: {
@@ -576,6 +742,24 @@ export class TransferClient {
         });
       }
     } else if ("candidate" in data) {
+      if (
+        this.debugEnabled() &&
+        data.candidate?.candidate &&
+        typeof RTCIceCandidate !== "undefined"
+      ) {
+        try {
+          const candidate = new RTCIceCandidate(data.candidate);
+          this.debug("收到远端 ICE 候选", {
+            type: candidate.type,
+            protocol: candidate.protocol,
+            address: candidate.address,
+            port: candidate.port,
+          });
+        } catch (error) {
+          // 诊断失败不能改变原有候选队列和连接流程，实际校验仍由浏览器执行。
+          this.debug("无法读取远端候选详情", { error: error.name }, true);
+        }
+      }
       if (peer.remoteDescription) await peer.addIceCandidate(data.candidate);
       else if (this.candidates.length < 64)
         this.candidates.push(data.candidate);
@@ -597,17 +781,40 @@ export class TransferClient {
     channel.onopen = () => {
       if (this.closed || this.channel !== channel) return;
       this.directReady = true;
+      this.debug("数据通道已打开，直连可用", {
+        negotiationMs: Math.round(performance.now() - this.peerStartedAt),
+        channelID: channel.id,
+        ordered: channel.ordered,
+        protocol: channel.protocol,
+        sctpMaxMessageBytes: this.peer?.sctp?.maxMessageSize ?? null,
+      });
+      // 只在通道建立和文件终态取统计快照，不定时轮询或逐块打印。
+      void this.logConnectionDetails();
       this.onEvent({ type: "direct", ready: true });
     };
-    channel.onclose = channel.onerror = () => {
-      if (this.channel === channel) this.peerFailed();
+    channel.onclose = () => {
+      if (this.channel === channel) this.peerFailed("数据通道关闭");
+    };
+    channel.onerror = (event) => {
+      if (this.channel !== channel || this.closed) return;
+      this.debug(
+        "数据通道异常",
+        {
+          error: event.error?.name,
+          detail: event.error?.errorDetail,
+          sctpCauseCode: event.error?.sctpCauseCode,
+        },
+        true,
+      );
+      this.peerFailed("数据通道异常");
     };
     channel.onmessage = (event) => {
       if (this.closed || this.channel !== channel) return;
       try {
         this.receiveDirect(event.data);
       } catch (error) {
-        this.peerFailed();
+        this.debug("直连数据处理失败", { error: error.name }, true);
+        this.peerFailed("直连数据处理失败");
         this.onEvent({ type: "error", message: error.message });
       }
     };
@@ -783,8 +990,9 @@ export class TransferClient {
     }
   }
 
-  peerFailed() {
+  peerFailed(reason = "直连不可用") {
     if (this.closed) return;
+    this.debug("直连不可用", { reason }, true);
     this.directReady = false;
     this.onEvent({ type: "direct", ready: false });
     const id = this.sending?.id || this.receiving?.id;
@@ -799,6 +1007,7 @@ export class TransferClient {
       ["complete", "failed", "cancelled"].includes(this.files.get(id)?.state)
     )
       return;
+    this.debug("文件传输异常", { error: error.name }, true);
     this.abortDirect(id);
     try {
       this.send({ type: "fail", id });
@@ -814,6 +1023,7 @@ export class TransferClient {
 
   close() {
     if (this.closed) return;
+    this.debug("关闭连接并释放资源");
     this.closed = true;
     this.autoReceive = false;
     for (const controller of this.uploads.values()) controller.abort();
@@ -828,6 +1038,7 @@ export class TransferClient {
     this.files.clear();
     this.uploads.clear();
     this.rangeUploads.clear();
+    this.transferTimings.clear();
     this.pendingOffers.clear();
     this.onEvent({ type: "closed" });
   }

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { NModal } from "naive-ui";
 import { onBeforeRouteLeave } from "vue-router";
 import { session, hasPermission } from "./session.js";
+import { settings, loadSettings } from "./settings.js";
 import Icon from "./Icon.vue";
 import PairCodeInput from "./PairCodeInput.vue";
 import { chatImageHistory, validateChatImage } from "./transfer-images.js";
@@ -356,14 +357,20 @@ async function open(kind) {
   messages.value = [];
   followMessages = true;
   pairingCode.value = "";
-  client = new TransferClient(event);
+  client = new TransferClient(
+    event,
+    () => settings.transfer_debug_logs === "true",
+  );
   try {
+    // 每次配对读取最新开关，其他标签页保存的设置也能用于新连接。
+    await loadSettings(true);
     await client.open(kind, {
       name: name.value,
       relay_only: relayOnly.value,
       ...(kind === "join" ? { code: normalizePairingCode(code.value) } : {}),
     });
   } catch (reason) {
+    client.debug("连接申请失败", { error: reason.name }, true);
     error.value = reason.message;
     client.close();
     if (kind === "join" && reason.code === "TRANSFER_UNAVAILABLE") {

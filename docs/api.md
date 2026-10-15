@@ -133,6 +133,8 @@ PUT /api/files/{id} 支持 filename、remark、password、clearPassword、expire
 
 管理员通过 `PUT /api/admin/settings/group/3` 保存保护设置：`transfer_rate_mb`（0–10240 MiB/s，0 为不限速）、`transfer_max_relays`（1–16）和 `transfer_max_file_mb`（1 至环境硬上限，MiB）。速率立即应用，并发限制用于新传输，文件大小用于新房间。GET 同组返回当前有效值；保存后重启仍保留。
 
+同组支持 `transfer_debug_logs`（布尔值，默认 `false`），控制互传浏览器控制台的 `[CloudPaste P2P]` 调试日志。保存后新建或加入连接读取最新值；`GET /api/public/settings?group=3` 返回该开关，方便未登录的加入者使用。开启时记录双方候选地址、端口、协议、选中的链路、往返延迟、协商耗时和传输摘要；浏览器隐藏的地址保留为空或 mDNS 名称。不输出凭证、配对码、用户内容或完整 SDP，也不轮询或逐块打印。
+
 页面入口为 `/transfer`。此功能与持久分享、存储和查看次数无关，房间与传输状态仅保存在进程内存中，文件内容不保存。
 
 | 方法与路径                                      | 凭据与用途                                                                       |

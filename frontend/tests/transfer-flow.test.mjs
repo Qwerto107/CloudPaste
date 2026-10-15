@@ -9,6 +9,258 @@ globalThis.localStorage = { setItem() {}, removeItem() {} };
 const { TransferClient } = await import("../src/sharing/transfer-client.js");
 const { validateChatImage } = await import("../src/sharing/transfer-images.js");
 
+test("调试开关控制详细链路日志，包含地址但不记录凭证、内容、SDP或逐块进度", async () => {
+  const original = {
+    fetch: globalThis.fetch,
+    socket: globalThis.WebSocket,
+    peer: globalThis.RTCPeerConnection,
+    debug: console.debug,
+    warn: console.warn,
+  };
+  const logs = [],
+    sent = [];
+  let enabled = true;
+  console.debug = console.warn = (...args) => logs.push(args);
+  globalThis.fetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        success: true,
+        data: { member: 1, token: "secret-token", code: "secret-code" },
+      };
+    },
+  });
+  globalThis.WebSocket = class {
+    static OPEN = 1;
+    readyState = 1;
+    send(value) {
+      sent.push(JSON.parse(value));
+    }
+    close() {}
+  };
+  globalThis.RTCPeerConnection = class {
+    connectionState = "new";
+    iceConnectionState = "checking";
+    iceGatheringState = "gathering";
+    signalingState = "stable";
+    async setRemoteDescription(value) {
+      this.remoteDescription = value;
+    }
+    async addIceCandidate() {}
+    async createAnswer() {
+      return { type: "answer", sdp: "secret-local-sdp" };
+    }
+    async setLocalDescription(value) {
+      this.localDescription = value;
+    }
+    async getStats() {
+      return new Map([
+        [
+          "transport",
+          {
+            type: "transport",
+            selectedCandidatePairId: "selected",
+            dtlsState: "connected",
+            dtlsCipher: "cipher",
+          },
+        ],
+        [
+          "unused",
+          {
+            type: "candidate-pair",
+            state: "succeeded",
+            nominated: true,
+            localCandidateId: "wrong",
+          },
+        ],
+        [
+          "selected",
+          {
+            type: "candidate-pair",
+            state: "succeeded",
+            localCandidateId: "local",
+            remoteCandidateId: "remote",
+            currentRoundTripTime: 0.0155,
+            bytesSent: 123,
+            bytesReceived: 456,
+          },
+        ],
+        [
+          "local",
+          {
+            candidateType: "host",
+            address: "192.0.2.123",
+            port: 50001,
+            protocol: "udp",
+          },
+        ],
+        [
+          "remote",
+          {
+            candidateType: "srflx",
+            address: "198.51.100.42",
+            port: 50002,
+            protocol: "udp",
+          },
+        ],
+      ]);
+    }
+    close() {}
+  };
+  const client = new TransferClient(
+    () => {},
+    () => enabled,
+  );
+  try {
+    const silent = new TransferClient(() => {});
+    silent.peerFailed();
+    silent.close();
+    assert.equal(logs.length, 0, "默认关闭日志");
+    await client.open("join", { code: "secret-code", name: "secret-name" });
+    client.socket.onopen();
+    assert.equal(sent[0].token, "secret-token", "认证流程仍发送票据");
+    client.socket.onmessage({
+      data: JSON.stringify({ type: "paired", stun: "stun:secret-host" }),
+    });
+    const peer = client.peer;
+    peer.oniceconnectionstatechange();
+    peer.onicegatheringstatechange();
+    peer.onsignalingstatechange();
+    peer.onicecandidate({
+      candidate: {
+        type: "host",
+        protocol: "udp",
+        address: "192.0.2.123",
+        toJSON: () => ({ candidate: "secret-candidate 192.0.2.123" }),
+      },
+    });
+    await client.signal({
+      description: { type: "offer", sdp: "secret-remote-sdp" },
+    });
+    peer.connectionState = "connected";
+    peer.onconnectionstatechange();
+    const channel = { label: "transfer", close() {} };
+    client.attachChannel(channel);
+    channel.onopen();
+    await Promise.resolve();
+    assert.ok(client.directReady);
+    const before = logs.length;
+    client.handle({ type: "text", text: "secret-chat" });
+    for (let i = 0; i < 100; i++) client.handle({ type: "progress", bytes: i });
+    assert.equal(logs.length, before, "内容与进度不产生调试日志");
+    client.files.set("file", {
+      id: "file",
+      state: "offered",
+      size: 10,
+      name: "secret-file",
+    });
+    await client.accept(client.files.get("file"), false);
+    client.handle({
+      type: "state",
+      id: "file",
+      mode: "relay",
+      state: "active",
+    });
+    client.fileFailed("file", new Error("secret-error-body"));
+    client.handle({
+      type: "state",
+      id: "file",
+      mode: "relay",
+      state: "failed",
+    });
+    channel.onerror({
+      error: {
+        name: "RTCError",
+        errorDetail: "sctp-failure",
+        message: "secret-channel-error",
+      },
+    });
+    client.socket.onclose({
+      code: 1006,
+      wasClean: false,
+      reason: "secret-close-reason",
+    });
+    const text = JSON.stringify(logs);
+    assert.match(text, /ICE 连接状态/);
+    assert.match(text, /已应用远端描述/);
+    assert.match(text, /发送 WebRTC answer/);
+    assert.match(text, /数据通道已打开/);
+    assert.match(text, /文件传输异常/);
+    assert.match(text, /WebSocket 已断开/);
+    assert.ok(logs.every(([prefix]) => prefix === "[CloudPaste P2P]"));
+    assert.doesNotMatch(text, /secret-/);
+    const details = logs.find(([, event]) => event === "直连链路详情")[2];
+    assert.equal(details.local.address, "192.0.2.123");
+    assert.equal(details.remote.address, "198.51.100.42");
+    assert.equal(details.remote.port, 50002);
+    assert.equal(details.roundTripMs, 15.5);
+    assert.equal(details.dtlsState, "connected");
+    const summary = logs.find(([, event]) => event === "文件传输结束")[2];
+    assert.equal(summary.fileBytes, 10);
+    assert.equal(typeof summary.durationMs, "number");
+    assert.equal(client.transferTimings.size, 0);
+    enabled = false;
+    const count = logs.length;
+    client.debug("关闭后不再输出");
+    assert.equal(logs.length, count);
+  } finally {
+    enabled = false;
+    client.close();
+    globalThis.fetch = original.fetch;
+    globalThis.WebSocket = original.socket;
+    globalThis.RTCPeerConnection = original.peer;
+    console.debug = original.debug;
+    console.warn = original.warn;
+  }
+});
+
+test("调试统计忽略旧连接结果，关闭时不读取统计，统计失败不破坏直连", async () => {
+  const originalDebug = console.debug,
+    originalWarn = console.warn;
+  const logs = [];
+  console.debug = console.warn = (...args) => logs.push(args);
+  let enabled = false,
+    count = 0,
+    resolveStats;
+  const client = new TransferClient(
+    () => {},
+    () => enabled,
+  );
+  const peer = {
+    getStats() {
+      count++;
+      return new Promise((resolve) => {
+        resolveStats = resolve;
+      });
+    },
+  };
+  client.peer = peer;
+  try {
+    await client.logConnectionDetails();
+    assert.equal(count, 0);
+    enabled = true;
+    const pending = client.logConnectionDetails();
+    client.peer = {};
+    resolveStats(new Map());
+    await pending;
+    assert.equal(logs.length, 0, "旧连接统计不能输出到新连接");
+    client.peer = {
+      async getStats() {
+        throw new Error("secret-stats-error");
+      },
+    };
+    client.directReady = true;
+    await client.logConnectionDetails();
+    assert.equal(client.directReady, true);
+    assert.equal(logs.at(-1)[1], "读取直连统计失败");
+    assert.doesNotMatch(JSON.stringify(logs), /secret-stats-error/);
+  } finally {
+    enabled = false;
+    console.debug = originalDebug;
+    console.warn = originalWarn;
+  }
+});
+
 test("下载工具按需切片，分段取消相互独立，断开后全部释放", async () => {
   const originalFetch = globalThis.fetch;
   const captured = [];

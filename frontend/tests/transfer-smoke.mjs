@@ -832,8 +832,30 @@ try {
 
   // 只替换系统保存对话框；真实 WebRTC、背压确认与浏览器文件写入保持不变。
   // OPFS 是自动化测试的磁盘落点，生产界面仍使用用户选择的普通文件。
+  const debugResponse = await fetch(base + "/api/admin/settings/group/3", {
+    method: "PUT",
+    headers: {
+      Authorization: "Bearer " + login.data.token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ transfer_debug_logs: true }),
+  });
+  assert.ok(debugResponse.ok);
   for (const page of [a, b]) {
     await page.evaluate(() => {
+      // 记录真实浏览器输出，验证另一页面保存的开关在重新连接时读取。
+      window.transferDebugLogs = [];
+      for (const method of ["debug", "warn"]) {
+        const original = console[method];
+        console[method] = (prefix, event, details) => {
+          if (prefix === "[CloudPaste P2P]")
+            window.transferDebugLogs.push({
+              event,
+              details: structuredClone(details),
+            });
+          original(prefix, event, details);
+        };
+      }
       // 记录真实 DataChannel 的分块，确认双方协商实际启用了大块，而非只修改常量。
       window.directChunkSizes = [];
       const send = RTCDataChannel.prototype.send;
@@ -953,6 +975,24 @@ try {
   );
   await direct(b, a, "直连反向.bin", Buffer.alloc(768 * 1024, 17));
   await direct(a, b, "直连空文件.txt", Buffer.alloc(0));
+  for (const page of [a, b]) {
+    const debugLogs = await page.evaluate(() => window.transferDebugLogs);
+    const link = debugLogs.find(
+      (item) => item.event === "直连链路详情",
+    )?.details;
+    assert.ok(link, "真实浏览器没有输出选中的直连链路");
+    assert.equal(link.pairState, "succeeded");
+    assert.equal(link.local.protocol, "udp");
+    assert.equal(typeof link.local.port, "number");
+    assert.equal(typeof link.remote.port, "number");
+    const completed = debugLogs.find(
+      (item) =>
+        item.event === "文件传输结束" && item.details.state === "complete",
+    )?.details;
+    assert.ok(completed.confirmedBytes > 0);
+    assert.ok(completed.durationMs >= 0);
+    assert.ok(completed.averageMiBPerSecond > 0);
+  }
   for (const [sender, receiver, canceller, label] of [
     [a, b, a, "发送方"],
     [a, b, b, "接收方"],

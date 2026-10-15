@@ -11,6 +11,7 @@ export const settings = reactive({
   share_default_expiry_hours: "24",
   preview_max_text_kb: "512",
   max_upload_size: "10240",
+  transfer_debug_logs: "false",
 });
 let pending;
 export function loadSettings(force = false) {

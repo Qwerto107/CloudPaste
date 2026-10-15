@@ -21,6 +21,10 @@ export const fields = {
     min: 1,
     max: 10240,
   },
+  transfer_debug_logs: {
+    label: "点对点调试日志",
+    help: "默认关闭。开启后，浏览器控制台输出双方连接地址、端口、链路指标和传输异常；保存后重新连接生效。",
+  },
   max_upload_size: {
     label: "单文件上传上限",
     help: "单文件最大 10 GiB（10240 MiB），可调低，不能超过服务器配置的上限。",
@@ -151,6 +155,11 @@ export const sections = {
       description:
         "按服务器带宽和负载调整，设置会保存并在重启后恢复。不限速时仍保留背压、固定缓冲和并发保护。",
       keys: ["transfer_rate_mb", "transfer_max_relays", "transfer_max_file_mb"],
+    },
+    {
+      title: "连接调试",
+      icon: "settings",
+      keys: ["transfer_debug_logs"],
     },
   ],
   global: [

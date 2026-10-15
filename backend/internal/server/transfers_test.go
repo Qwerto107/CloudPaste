@@ -530,18 +530,52 @@ func TestTransferReceivesBeforeUploadFinishes(t *testing.T) {
 func TestTransferSettingsValidatePersistAndSnapshot(t *testing.T) {
 	f := newFixture(t)
 	h := f.app.transfers
+	// 调试开关默认关闭，公开读取供未登录的配对设备使用。
+	readDebugSetting := func(app *App) string {
+		items, err := app.loadSettings(httptest.NewRequest("GET", "/api/public/settings?group=3", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range items {
+			if item.Key == "transfer_debug_logs" {
+				return item.Value
+			}
+		}
+		t.Fatal("missing debug setting")
+		return ""
+	}
+	if readDebugSetting(f.app) != "false" {
+		t.Fatal("debug logs must default to disabled")
+	}
 	created := dataMap(t, f.request(t, "POST", "/api/transfer/create", f.admin, map[string]any{"name": "existing"}, nil, 201))
 	oldLimit := int64(created["max_file_size"].(float64))
 	key, _ := f.key(t, "transfer-user", "/", TextShare|FileShare)
-	f.request(t, "PUT", "/api/admin/settings/group/3", key, map[string]any{"transfer_rate_mb": 0}, nil, 403)
+	f.request(t, "PUT", "/api/admin/settings/group/3", key, map[string]any{"transfer_debug_logs": true}, nil, 403)
 	for _, body := range []map[string]any{
 		{"transfer_rate_mb": -1}, {"transfer_rate_mb": "NaN"}, {"transfer_rate_mb": 10241},
 		{"transfer_max_relays": 0}, {"transfer_max_relays": 17}, {"transfer_max_file_mb": 10241},
 		{"transfer_rate_mb": 0, "transfer_max_relays": 99},
+		{"transfer_debug_logs": "yes"}, {"transfer_debug_logs": 1},
 	} {
 		f.request(t, "PUT", "/api/admin/settings/group/3", f.admin, body, nil, 400)
 	}
-	f.request(t, "PUT", "/api/admin/settings/group/3", f.admin, map[string]any{"transfer_rate_mb": 0, "transfer_max_relays": 3, "transfer_max_file_mb": 64}, nil, 200)
+	f.request(t, "PUT", "/api/admin/settings/group/3", f.admin, map[string]any{"transfer_rate_mb": 0, "transfer_max_relays": 3, "transfer_max_file_mb": 64, "transfer_debug_logs": true}, nil, 200)
+	publicSettings := f.request(t, "GET", "/api/public/settings?group=3", "", nil, nil, 200)
+	var publicResult struct {
+		Data []setting
+	}
+	if err := json.Unmarshal(publicSettings.Body.Bytes(), &publicResult); err != nil {
+		t.Fatal(err)
+	}
+	debugVisible := false
+	for _, item := range publicResult.Data {
+		if item.Key == "transfer_debug_logs" && item.Value == "true" {
+			debugVisible = true
+		}
+	}
+	if !debugVisible {
+		t.Fatal("public settings must include the saved debug switch")
+	}
 	h.mu.Lock()
 	if h.bytesPerSecond != 0 || h.maxRelays != 3 || h.maxFile != 64<<20 {
 		t.Error("runtime settings not applied")
@@ -573,5 +607,8 @@ func TestTransferSettingsValidatePersistAndSnapshot(t *testing.T) {
 	values := restarted.transferSettingValues()
 	if values["transfer_rate_mb"] != "0" || values["transfer_max_relays"] != "3" || values["transfer_max_file_mb"] != "64" {
 		t.Fatalf("settings not restored: %v", values)
+	}
+	if readDebugSetting(restarted) != "true" {
+		t.Fatal("debug setting not restored")
 	}
 }

@@ -34,6 +34,7 @@ var defaultSettings = []setting{
 	{"transfer_rate_mb", "64", "number", 3, 0, "全站中继速率（MiB/s，0 表示不限速）"},
 	{"transfer_max_relays", "4", "number", 3, 0, "中继并发请求数（1–16，分段下载各占一路）"},
 	{"transfer_max_file_mb", "10240", "number", 3, 0, "互传单文件上限（MiB，不超过环境配置）"},
+	{"transfer_debug_logs", "false", "bool", 3, 0, "点对点调试日志（浏览器控制台，默认关闭）"},
 	{"site_title", "CloudPaste", "text", 4, 0, "站点标题"},
 	{"site_favicon_url", "", "text", 4, 0, "站点图标 URL"},
 	{"site_footer_markdown", "", "textarea", 4, 0, "站点页脚"},
