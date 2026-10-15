@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,12 +15,16 @@ import (
 
 // 下载工具按需索取原文件区间；这里只保存有界的请求状态和区间，不保存文件内容。
 type transferTool struct {
-	expires   time.Time
-	requests  map[string]*transferRangeRequest
-	attempts  int
-	round     int
-	sent      int64
-	completed []transferByteRange
+	expires      time.Time
+	requests     map[string]*transferRangeRequest
+	attempts     int
+	round        int
+	sent         int64
+	completed    []transferByteRange
+	verified     []transferByteRange
+	loggedRound  int
+	roundStarted time.Time
+	downloadIPs  map[string]struct{}
 }
 
 type transferByteRange struct{ start, end int64 } // end 为不包含的结束位置。
@@ -30,6 +35,8 @@ type transferRangeRequest struct {
 	forwarded int64
 	round     int
 	uploading bool
+	succeeded bool
+	ip        string
 	ctx       context.Context
 	cancel    context.CancelFunc
 	reader    *io.PipeReader
@@ -96,7 +103,7 @@ func mergeTransferRange(ranges []transferByteRange, added transferByteRange) []t
 func (h *transferHub) startToolRoundLocked(f *transferFile) {
 	tool := f.tool
 	if tool.round > 0 {
-		if f.bytes != f.size {
+		if tool.loggedRound != tool.round {
 			return
 		}
 		for _, request := range tool.requests {
@@ -107,8 +114,31 @@ func (h *transferHub) startToolRoundLocked(f *transferFile) {
 	}
 	tool.round++
 	tool.completed = nil
+	tool.verified = nil
+	tool.downloadIPs = map[string]struct{}{}
+	tool.roundStarted = time.Now()
 	f.bytes = 0
 	h.toolProgressLocked(f, true)
+}
+
+// 仅在整轮各分段均正常结束时记录一次，完整转发不等同于接收端已落盘。
+func (h *transferHub) completeToolRoundLocked(f *transferFile) {
+	tool := f.tool
+	if f.state != "active" || tool.round == 0 || tool.loggedRound == tool.round || len(tool.verified) != 1 || tool.verified[0] != (transferByteRange{0, f.size}) {
+		return
+	}
+	tool.loggedRound = tool.round
+	ips := make([]string, 0, len(tool.downloadIPs))
+	for ip := range tool.downloadIPs {
+		ips = append(ips, ip)
+	}
+	sort.Strings(ips)
+	details := transferAuditDetails(f)
+	details["state"] = "download_complete"
+	details["round"] = tool.round
+	details["download_ips"] = ips
+	h.auditTransfer(f.room.members[f.sender], "下载完成", f.id, "success", tool.roundStarted, details)
+	h.broadcastLocked(f.room, map[string]any{"type": "tool-complete", "id": f.id, "round": tool.round, "bytes": f.size})
 }
 
 func (h *transferHub) toolProgressLocked(f *transferFile, force bool) {
@@ -157,7 +187,8 @@ func (a *App) transferToolDownload(w http.ResponseWriter, r *http.Request) error
 		h.mu.Unlock()
 		return err
 	}
-	if !h.allowLocked("tool:"+a.clientIP(r), a.cfg.RateLimits.TransferToolPerIP) {
+	requestIP := a.clientIP(r)
+	if !h.allowLocked("tool:"+requestIP, a.cfg.RateLimits.TransferToolPerIP) {
 		h.mu.Unlock()
 		return transferBusy()
 	}
@@ -188,7 +219,7 @@ func (a *App) transferToolDownload(w http.ResponseWriter, r *http.Request) error
 		ctx, cancel := context.WithCancel(f.ctx)
 		reader, writer := io.Pipe()
 		secret := transferSecret()
-		request = &transferRangeRequest{id: randomID(), token: secretHash(secret), transferByteRange: span, round: f.tool.round, ctx: ctx, cancel: cancel, reader: reader, writer: writer}
+		request = &transferRangeRequest{id: randomID(), token: secretHash(secret), transferByteRange: span, round: f.tool.round, ip: requestIP, ctx: ctx, cancel: cancel, reader: reader, writer: writer}
 		context.AfterFunc(ctx, func() { reader.CloseWithError(context.Canceled); writer.CloseWithError(context.Canceled) })
 		f.tool.requests[request.id] = request
 		f.tool.attempts++
@@ -200,9 +231,20 @@ func (a *App) transferToolDownload(w http.ResponseWriter, r *http.Request) error
 			h.relays--
 			if request.round == f.tool.round {
 				f.tool.completed = mergeTransferRange(f.tool.completed, transferByteRange{request.start, request.start + request.forwarded})
+				if request.succeeded {
+					if f.size == 0 {
+						f.tool.verified = []transferByteRange{{0, 0}}
+					} else {
+						f.tool.verified = mergeTransferRange(f.tool.verified, request.transferByteRange)
+					}
+					if request.ip != "" && len(f.tool.downloadIPs) < 8 {
+						f.tool.downloadIPs[request.ip] = struct{}{}
+					}
+				}
 			}
 			if f.state == "active" {
 				h.toolProgressLocked(f, true)
+				h.completeToolRoundLocked(f)
 			}
 			h.sendLocked(f.room.members[f.sender], map[string]any{"type": "range-stop", "id": f.id, "request_id": request.id})
 			h.mu.Unlock()
@@ -278,6 +320,9 @@ func (a *App) transferToolDownload(w http.ResponseWriter, r *http.Request) error
 			if readErr != io.EOF || total != span.end-span.start {
 				panic(http.ErrAbortHandler)
 			}
+			h.mu.Lock()
+			request.succeeded = true
+			h.mu.Unlock()
 			return nil
 		}
 	}

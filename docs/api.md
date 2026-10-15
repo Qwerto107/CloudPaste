@@ -26,7 +26,7 @@ API Key 必须启用且未过期，并满足权限、路径范围与存储 ACL�
 
 模块：`auth`、`text`、`file`、`transfer`、`storage`、`keys`、`settings`；身份：`admin`、`apikey`、`guest`、`unknown`；结果：`success`、`failure`、`cancelled`。记录字段包含 `id`、`time`（Unix 毫秒）、`module`、`action`、`actor_type`、`actor_id`、`actor_name`、`ip`、`target`、`method`、`endpoint`（不含查询串的路由模板）、`status`（WebSocket 事件为 0）、`result`、`duration_ms`、`details`（JSON 字符串）。互传直连完成状态由接收端上报。
 
-通过 `PUT /api/admin/settings/group/5` 设置 `audit_enabled`（默认 `false`）和 `audit_retention_days`（1–3650，默认 30）。日志设置对应“系统设置 → 日志设置”选项卡，并可通过 `GET /api/admin/settings?group=5` 读取；公开设置不返回此分组。七个模块分别使用 `audit_auth_enabled`、`audit_text_enabled`、`audit_file_enabled`、`audit_transfer_enabled`、`audit_storage_enabled`、`audit_keys_enabled`、`audit_settings_enabled`（布尔值，默认 `true`）。仅当总开关与对应模块开关均开启时记录新操作；保存后立即生效并持久化。关闭开关后不再接收新日志，已有记录仍可查询或清理。日志写入为异步有界批处理，可能稍有延迟；不提供公开接口、修改接口或跨用户访问。互传文字会记录正文（单条最多 4096 字节），文件与图片仅记录名称、大小、时间等元数据，不保存文件或图片内容；密码、凭据和分享正文不进入日志。文件与图片被接受时记录开始，任务结束时记录最终结果。互传文件和图片日志包含两端服务端可见 IP；点对点完成事件还可包含接收端浏览器上报的直连 `IP:端口`，若浏览器隐藏地址或统计不可用则可能缺失。普通文件 Range、互传分段和进度请求不逐条记录。后台日志页面读取本身不产生日志。
+通过 `PUT /api/admin/settings/group/5` 设置 `audit_enabled`（默认 `false`）和 `audit_retention_days`（1–3650，默认 30）。日志设置对应“系统设置 → 日志设置”选项卡，并可通过 `GET /api/admin/settings?group=5` 读取；公开设置不返回此分组。七个模块分别使用 `audit_auth_enabled`、`audit_text_enabled`、`audit_file_enabled`、`audit_transfer_enabled`、`audit_storage_enabled`、`audit_keys_enabled`、`audit_settings_enabled`（布尔值，默认 `true`）。仅当总开关与对应模块开关均开启时记录新操作；保存后立即生效并持久化。关闭开关后不再接收新日志，已有记录仍可查询或清理。日志写入为异步有界批处理，可能稍有延迟；不提供公开接口、修改接口或跨用户访问。互传文字会记录正文（单条最多 4096 字节），文件与图片仅记录名称、大小、时间等元数据，不保存文件或图片内容；密码、凭据和分享正文不进入日志。文件与图片被接受时记录开始，任务结束时记录最终结果；下载工具中继每轮完整下载另记“下载完成”，重复下载分别记录，完成传输不自动撤销链接。互传文件和图片日志包含两端服务端可见 IP；点对点完成事件还可包含接收端浏览器上报的直连 `IP:端口`，若浏览器隐藏地址或统计不可用则可能缺失。普通文件 Range、互传分段和进度请求不逐条记录。后台日志页面读取本身不产生日志。
 
 同一 IP 的高频同类失败请求，以及重复读取同一分享的请求，在一分钟内合并。首条请求单独记录，其余请求写成带 `merged_requests` 数量的汇总；扫描不同无效路径不会逐条落库。来源过多时按模块汇总。此机制只限制日志增长，不改变请求响应。
 
@@ -341,9 +341,9 @@ WebSocket `error` 消息不包含 HTTP 状态或 `code`。HTTP 创建、加入�
 
 下载工具接收使用 `accept` 的 `mode:"tool"`，收到 `download-tool`（`url/expires_at/max_connections`）后由用户交给下载工具，不提前自动 GET。HEAD 仅返回元数据；GET 支持 200 全文件、206 单个区间（含开放结尾与后缀）、416 不可满足区间，并提供稳定 ETag、Last-Modified 和 If-Range 校验。多段 multipart 请求不支持；并行分段使用多个独立 GET。
 
-每个实际下载请求向发送页面发送 `range-start`（`id/request_id/token/start/end`，end 不包含），页面对原 File 做 slice 后 PUT 到分段上传入口。票据只用于该次分段上传，不能互换或重复消费；`range-stop` 取消相应上传，发送端也可用 `range-failed`（`id/request_id`）结束失败分段。单段中止不终止任务，可在票据期限内重试。仅接收端的 `finish-download` 结束任务并撤销下载链接；取消、配对断开或权限撤销也使链接失效。
+每个实际下载请求向发送页面发送 `range-start`（`id/request_id/token/start/end`，end 不包含），页面对原 File 做 slice 后 PUT 到分段上传入口。票据只用于该次分段上传，不能互换或重复消费；`range-stop` 取消相应上传，发送端也可用 `range-failed`（`id/request_id`）结束失败分段。单段中止不终止任务，可在票据期限内重试。整轮所有分段正常完成后，双方收到 `tool-complete`（`id/round/bytes`）；此时会写入一条“下载完成”日志，链接仍可再次下载。仅接收端的 `finish-download` 结束任务并撤销下载链接；取消、配对断开或权限撤销也使链接失效。
 
-下载工具链接最长 30 分钟有效，受房间有效期约束，闲置 10 分钟失效。每文件最多 4 个并发请求，并共享 `transfer_max_relays`，最多 256 次实际 GET，累计转发额度为 `max(1 MiB, 文件大小×4)`；HEAD 和非法 Range 不消耗 GET 额度。每请求停滞上限 1 分钟，上传、下载各使用 32 KiB 固定缓冲，服务器不缓存文件。进度按当前轮次合并已转发区间，单轮内重试不重复计数；完整下载后再次 GET 开启新一轮，`progress.round` 递增，双方清零显示进度和速率。HEAD 不开启新轮次，历史流量和请求额度不清零；上一轮 HTTP 请求的迟到退出不会影响新一轮进度。服务器无法确认下载工具最终落盘。
+下载工具链接最长 30 分钟有效，受房间有效期约束，闲置 10 分钟失效。每文件最多 4 个并发请求，并共享 `transfer_max_relays`，最多 256 次实际 GET，累计转发额度为 `max(1 MiB, 文件大小×4)`；HEAD 和非法 Range 不消耗 GET 额度。每请求停滞上限 1 分钟，上传、下载各使用 32 KiB 固定缓冲，服务器不缓存文件。进度按当前轮次合并已转发区间，单轮内重试不重复计数；完整下载后再次 GET 开启新一轮，`progress.round` 递增，双方清零显示进度和速率。HEAD 不开启新轮次，历史流量和请求额度不清零；上一轮 HTTP 请求的迟到退出不会影响新一轮进度。`tool-complete` 仅证明服务器完整转发，不能证明下载工具最终落盘。
 
 单帧最大 16 KiB，单条文字最大 4096 字节。配对码猜测、连接数、房间数、文件并发、带宽和传输停滞均有限制，详见 [部署指南](deployment.md#设备互传与实时中继)。HTTP 加入或文件传输入口的连接、票据失效返回 `404 / TRANSFER_UNAVAILABLE`，超额返回 `429 / TRANSFER_BUSY`；WebSocket 握手错误与连接后的业务错误分别按上文处理。
 

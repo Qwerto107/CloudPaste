@@ -280,7 +280,13 @@ function event(message) {
       if (message.retried) file.retried = true;
     }
   } else if (
-    ["state", "progress", "download", "download-tool"].includes(message.type)
+    [
+      "state",
+      "progress",
+      "download",
+      "download-tool",
+      "tool-complete",
+    ].includes(message.type)
   ) {
     const file = files.value.find((item) => item.id === message.id);
     if (!file) return;
@@ -289,6 +295,7 @@ function event(message) {
       if (message.round > (file.progressRound || 0)) {
         // 重新下载允许进度归零，旧一轮进度不得覆盖新一轮；速率也从本轮重新采样。
         file.progressRound = message.round;
+        file.completedRound = 0;
         file.bytes = 0;
         file.speed = 0;
         file.samples = [];
@@ -296,6 +303,10 @@ function event(message) {
         file.measured = performance.now();
       }
       file.requested = true;
+    }
+    if (message.type === "tool-complete") {
+      file.progressRound = message.round;
+      file.completedRound = message.round;
     }
     if (message.type === "download-tool") {
       // 手动中继接收先展示下载操作，浏览器和外部工具共用此链接，不提前发起 GET。
@@ -548,13 +559,13 @@ function fileStatus(file) {
   }
   if (file.state === "active") {
     if (file.mode === "tool") {
-      if (file.bytes === file.size && (file.size > 0 || file.requested))
+      if (file.completedRound > 0 && file.completedRound === file.progressRound)
         return {
-          label: deliveredLabel,
+          label: "下载完成",
           kind: "complete",
           detail: sentByMe
-            ? "请等待接收方确认保存结果并完成接收。"
-            : "请在浏览器或下载工具中确认保存结果，再点击完成接收。",
+            ? "本次下载已完整送达，接收方仍可再次下载。"
+            : "本次数据已完整送达，可重新下载或结束传输。",
         };
       if (!file.bytes) return { label: "等待下载", kind: "neutral" };
     } else if (file.url && !file.urlUsed)
@@ -1047,7 +1058,8 @@ onBeforeUnmount(() => {
                   referrerpolicy="no-referrer"
                   @click="file.requested = true"
                   >{{
-                    file.bytes === file.size && file.requested
+                    file.completedRound > 0 &&
+                    file.completedRound === file.progressRound
                       ? "重新下载"
                       : "下载文件"
                   }}</UiButton
@@ -1064,10 +1076,13 @@ onBeforeUnmount(() => {
                 <UiButton
                   class="transfer-action"
                   size="small"
-                  :disabled="file.bytes !== file.size || !file.requested"
-                  title="请先在浏览器或下载工具中确认保存成功；完成接收后下载链接失效"
+                  :disabled="
+                    !file.completedRound ||
+                    file.completedRound !== file.progressRound
+                  "
+                  title="结束传输后下载链接失效"
                   @click="send({ type: 'finish-download', id: file.id })"
-                  >完成接收</UiButton
+                  >结束传输</UiButton
                 >
               </template>
               <span v-else-if="file.url" class="muted"
@@ -1102,7 +1117,7 @@ onBeforeUnmount(() => {
                 扩展接管）。最多
                 {{ file.maxConnections }} 路连接，链接到
                 {{ file.expiresLabel }}
-                有效。确认保存后点击“完成接收”，链接即失效。
+                有效。每次完整下载都会记录日志；点击“结束传输”后链接失效。
               </p>
             </div>
           </article>

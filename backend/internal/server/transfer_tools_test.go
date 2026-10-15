@@ -25,8 +25,10 @@ func offerTool(t *testing.T, sender, receiver transferTestPeer, size int64) (str
 
 func TestTransferToolRangesAndProbes(t *testing.T) {
 	f, server, sender, receiver := transferPair(t)
+	f.app.audit.enabled.Store(true)
 	payload := bytes.Repeat([]byte("abcdefgh"), 16384)
 	id, link := offerTool(t, sender, receiver, int64(len(payload)))
+	waitAudit(t, f, "module='transfer' AND action='文件传输开始'", 1)
 	url := server.URL + link
 	// 完成接收不能绕过传输进度检查，提前点击不应撤销仍有效的链接。
 	receiver.send(map[string]any{"type": "finish-download", "id": id})
@@ -124,6 +126,7 @@ func TestTransferToolRangesAndProbes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	waitAudit(t, f, "module='transfer' AND action='下载完成'", 1)
 	// 所有数据转发后仍允许重试，直至接收方确认结束；服务器不擅自宣称落盘成功。
 	response, err := http.Head(url)
 	if err != nil {
@@ -183,6 +186,15 @@ func TestTransferToolRangesAndProbes(t *testing.T) {
 	if progressBytes != int64(len(payload)) || sentBytes != int64(2*len(payload)) || attempts != 3 {
 		t.Fatal("repeat progress or cumulative limits mismatch", progressBytes, sentBytes, attempts)
 	}
+	waitAudit(t, f, "module='transfer' AND action='下载完成'", 2)
+	var rounds int
+	if err := f.app.audit.db.QueryRow("SELECT count(DISTINCT json_extract(details,'$.round')) FROM operation_logs WHERE action='下载完成' AND target=?", id).Scan(&rounds); err != nil || rounds != 2 {
+		t.Fatalf("每次完整下载应分别记录: rounds=%d, error=%v", rounds, err)
+	}
+	var downloadIPs string
+	if err := f.app.audit.db.QueryRow("SELECT json_extract(details,'$.download_ips') FROM operation_logs WHERE action='下载完成' AND target=? ORDER BY id DESC LIMIT 1", id).Scan(&downloadIPs); err != nil || !strings.Contains(downloadIPs, "127.0.0.1") {
+		t.Fatalf("下载日志缺少实际请求 IP: %q, error=%v", downloadIPs, err)
+	}
 	receiver.send(map[string]any{"type": "finish-download", "id": id})
 	if receiver.next("state")["state"] != "complete" {
 		t.Fatal("manual completion failed")
@@ -200,7 +212,7 @@ func TestTransferToolRangesAndProbes(t *testing.T) {
 func TestTransferToolRoundIgnoresPreviousRequests(t *testing.T) {
 	h := &transferHub{}
 	f := &transferFile{size: 100, bytes: 100, state: "active", room: &transferRoom{}, tool: &transferTool{
-		round: 1, sent: 150, attempts: 3, completed: []transferByteRange{{0, 100}},
+		round: 1, loggedRound: 1, sent: 150, attempts: 3, completed: []transferByteRange{{0, 100}},
 		requests: map[string]*transferRangeRequest{"old": {round: 1, transferByteRange: transferByteRange{0, 100}, forwarded: 100}},
 	}}
 	h.startToolRoundLocked(f)

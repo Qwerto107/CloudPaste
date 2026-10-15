@@ -677,7 +677,7 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		if f == nil || f.mode != "tool" || f.state != "active" || f.sender == m.index {
 			return forbidden()
 		}
-		if f.bytes != f.size || f.tool.round == 0 {
+		if f.tool.round == 0 || f.tool.loggedRound != f.tool.round {
 			return badRequest("文件尚未传完，请下载完成后确认接收")
 		}
 		// 服务端无法得知外部软件的落盘结果，由接收方确认完成后撤销链接。
