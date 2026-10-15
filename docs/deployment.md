@@ -72,7 +72,7 @@ ENCRYPTION_SECRET=
 docker compose up -d --pull always
 ```
 
-此命令使用 [docker-compose.yml](../docker-compose.yml)，默认拉取 `ghcr.io/qwerto107/cloudpaste:0.8.2`。镜像已包含前后端，无需安装 Go、Node.js 或本地打包。
+此命令使用 [docker-compose.yml](../docker-compose.yml)，默认拉取 `ghcr.io/qwerto107/cloudpaste:0.8.3`。镜像已包含前后端，无需安装 Go、Node.js 或本地打包。
 
 单容器镜像支持 Linux amd64、arm64、arm/v6、arm/v5、loong64，Docker 按宿主机架构选择。Windows 和 macOS 的原生单文件程序见 [二进制部署](binary.md)；Apple Silicon 上的 Docker 使用 Linux arm64 镜像。
 
@@ -97,7 +97,7 @@ curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-comp
 docker compose up -d --pull always
 ```
 
-默认拉取 `cloudpaste-frontend:0.8.2`、`cloudpaste-backend:0.8.2` 两个 GHCR 镜像。前端 Nginx 提供页面并转发 API，浏览器入口仍为 `http://127.0.0.1:8081`。
+默认拉取 `cloudpaste-frontend:0.8.3`、`cloudpaste-backend:0.8.3` 两个 GHCR 镜像。前端 Nginx 提供页面并转发 API，浏览器入口仍为 `http://127.0.0.1:8081`。
 
 分离版的镜像和独立后端二进制仅提供 Linux amd64、arm64；ARMv5、ARMv6 和 Loong64 使用单容器或完整程序。
 
