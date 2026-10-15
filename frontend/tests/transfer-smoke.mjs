@@ -410,8 +410,8 @@ try {
       createHash("sha256").update(saved).digest("hex"),
       createHash("sha256").update(payload).digest("hex"),
     );
-    await row.getByText("已接收", { exact: true }).waitFor();
-    await row.getByRole("button", { name: "完成接收", exact: true }).click();
+    await row.getByText("下载完成", { exact: true }).waitFor();
+    await row.getByRole("button", { name: "结束传输", exact: true }).click();
     await row.getByText(/接收方已确认完成/).waitFor();
   }
   await relay(
@@ -467,7 +467,7 @@ try {
   const toolURL = await linkInput.inputValue();
   assert.equal(
     await toolRow
-      .getByRole("button", { name: "完成接收", exact: true })
+      .getByRole("button", { name: "结束传输", exact: true })
       .isDisabled(),
     true,
   );
@@ -514,15 +514,15 @@ try {
       );
     }),
   );
-  await toolRow.getByText("已接收", { exact: true }).waitFor();
-  await toolSenderRow.getByText("已发送", { exact: true }).waitFor();
+  await toolRow.getByText("下载完成", { exact: true }).waitFor();
+  await toolSenderRow.getByText("下载完成", { exact: true }).waitFor();
   assert.equal(
     await toolRow.getByRole("link", { name: "重新下载", exact: true }).count(),
     1,
   );
   assert.equal(
     await toolRow
-      .getByRole("button", { name: "完成接收", exact: true })
+      .getByRole("button", { name: "结束传输", exact: true })
       .isDisabled(),
     false,
   );
@@ -544,7 +544,7 @@ try {
   }
   assert.equal(
     await toolRow
-      .getByRole("button", { name: "完成接收", exact: true })
+      .getByRole("button", { name: "结束传输", exact: true })
       .isDisabled(),
     true,
   );
@@ -640,10 +640,10 @@ try {
   for (const row of [toolRow, toolSenderRow]) {
     await row.getByText(/(?:KiB|MiB)\/s/).waitFor();
   }
-  await toolRow.getByText("已接收", { exact: true }).waitFor();
-  await toolSenderRow.getByText("已发送", { exact: true }).waitFor();
+  await toolRow.getByText("下载完成", { exact: true }).waitFor();
+  await toolSenderRow.getByText("下载完成", { exact: true }).waitFor();
   await setToolRate(64);
-  await toolRow.getByRole("button", { name: "完成接收", exact: true }).click();
+  await toolRow.getByRole("button", { name: "结束传输", exact: true }).click();
   await toolRow.getByText(/接收方已确认完成/).waitFor();
   assert.equal((await fetch(toolURL, { method: "HEAD" })).status, 404);
 
@@ -761,10 +761,10 @@ try {
   const receivedRetry = await retriedDownload;
   assert.equal(await receivedRetry.failure(), null);
   assert.deepEqual(await readFile(await receivedRetry.path()), retryPayload);
-  await retrySender.nth(1).getByText("已发送", { exact: true }).waitFor();
+  await retrySender.nth(1).getByText("下载完成", { exact: true }).waitFor();
   await retryReceiver
     .nth(1)
-    .getByRole("button", { name: "完成接收", exact: true })
+    .getByRole("button", { name: "结束传输", exact: true })
     .click();
   await retryReceiver
     .nth(1)
