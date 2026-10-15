@@ -384,7 +384,10 @@ jobs:
   release:
     name: 发布版本二进制附件
     needs: [binaries, images]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # 可选容器检查跳过时仍允许发布，但二进制和镜像必须全部成功。
+    if: >-
+      always() && needs.binaries.result == 'success' && needs.images.result == 'success' &&
+      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
