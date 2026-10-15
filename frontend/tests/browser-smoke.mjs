@@ -178,11 +178,12 @@ try {
     if (!request.url().startsWith(origin)) external.push(request.url());
   });
   page.on("pageerror", (error) => errors.push(error.message));
-  // 样式被 CSP 拦截通常只报告控制台错误，不能只检查页面异常。
+  // 样式被 CSP 拦截通常只报告控制台错误；故意注入的 XSS 样例另由 DOM 和执行结果断言校验。
   page.on("console", (message) => {
     if (
       message.type() === "error" &&
-      /Content Security Policy/.test(message.text())
+      /Content Security Policy/.test(message.text()) &&
+      /style-src/.test(message.text())
     )
       errors.push(message.text());
   });
