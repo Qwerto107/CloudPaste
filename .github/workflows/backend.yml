@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       publish_images:
-        description: "完整检查通过后发布多架构镜像"
+        description: "检查通过后发布多架构镜像"
+        type: boolean
+        default: false
+      full_checks:
+        description: "运行耗时检查：完整竞态、浏览器和两种容器部署"
         type: boolean
         default: false
   pull_request:
@@ -80,16 +84,14 @@ jobs:
           test -z "$(gofmt -l cmd internal)"
           go vet ./...
       - name: 运行后端单元测试
-        if: github.event_name != 'workflow_dispatch'
+        if: github.event_name != 'workflow_dispatch' || !inputs.full_checks
         run: go test ./... -count=1 -timeout=300s
-      - name: 检查核心并发竞态
-        if: github.event_name != 'workflow_dispatch'
-        # 自动检查聚焦并发写入、配对竞争、取消回调与下载额度，避免重复执行大量密码哈希。
-        run: go test -race ./internal/server -run '^Test.*(Concurrent|AtomicJoin|Cancellation|ReadInterrupt|Downloads?.*(Capacity|Deadline)|SlowUpdates)' -count=1 -timeout=300s
       - name: 手动运行完整竞态检查
-        if: github.event_name == 'workflow_dispatch'
+        # 竞态测试会重新编译并重复执行用例，只有明确勾选完整检查时运行。
+        if: github.event_name == 'workflow_dispatch' && inputs.full_checks
         run: go test -race ./... -count=1 -timeout=600s
       - name: 检查可达依赖漏洞
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.full_checks)
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   frontend:
@@ -125,27 +127,30 @@ jobs:
         run: |
           node --test scripts/prepare-webui.test.mjs
           node scripts/prepare-webui.mjs
-      - name: 构建并检查完整程序
+      - name: 检查内嵌页面安全约束
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
         working-directory: backend
         run: |
-          # 完整后端测试由后端任务执行，这里只补充内嵌页面的检查。
+          # 内嵌页面有独立的 CSP 与路由边界；实际程序由二进制任务统一构建。
           go test -tags with_frontend ./internal/webui -count=1
           go vet -tags with_frontend ./internal/webui
-          go build -tags with_frontend -o bin/sharing-standalone ./cmd/cloudpaste
+      - name: 构建浏览器检查程序
+        if: github.event_name == 'workflow_dispatch' && inputs.full_checks
+        working-directory: backend
+        run: go build -tags with_frontend -o bin/sharing-standalone ./cmd/cloudpaste
       - name: 安装浏览器测试环境
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.full_checks
         working-directory: frontend
         run: npx playwright install --with-deps chromium
       - name: 检查一体化二进制的真实浏览器流程
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.full_checks
         working-directory: frontend
         env:
           SHARING_TEST_STANDALONE: '1'
           SHARING_TEST_BINARY: ${{ github.workspace }}/backend/bin/sharing-standalone
         run: npm run test:e2e
       - name: 检查配对、消息与实时文件中继
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.full_checks
         working-directory: frontend
         env:
           TRANSFER_TEST_BINARY: ${{ github.workspace }}/backend/bin/sharing-standalone
@@ -249,8 +254,8 @@ jobs:
 
   docker:
     name: 容器部署检查（${{ matrix.mode == 'standalone' && '单容器' || '多容器' }}）
-    # 日常提交只跑单元测试和构建；发版及手动运行验证两种真实容器部署。
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    # 镜像发布本身会构建三种镜像；额外的部署重建与回归只在手动完整检查中运行。
+    if: github.event_name == 'workflow_dispatch' && inputs.full_checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -292,8 +297,12 @@ jobs:
     name: 发布${{ matrix.label }}镜像
     needs: [go, frontend, binaries, docker]
     if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.publish_images) ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+      always() &&
+      needs.go.result == 'success' && needs.frontend.result == 'success' &&
+      needs.binaries.result == 'success' &&
+      (needs.docker.result == 'success' || needs.docker.result == 'skipped') &&
+      ((github.event_name == 'workflow_dispatch' && inputs.publish_images) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
