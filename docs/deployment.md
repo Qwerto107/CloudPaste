@@ -33,8 +33,8 @@ LOCAL_FILES_READ_ONLY=false
 
 # 资源与普通文件上传，大小单位 MiB。
 GOMEMLIMIT=80MiB
-MAX_DOWNLOADS=8
-MAX_UPLOADS=2
+MAX_DOWNLOADS=48
+MAX_UPLOADS=16
 MAX_UPLOAD_SIZE_MB=10240
 MAX_STAGED_SIZE_MB=20480
 
@@ -149,8 +149,8 @@ docker compose up -d --pull always
 | `LOCAL_FILES_DIR`                 | `./files` | 宿主机文件目录；启动前创建，Linux 上授权 UID/GID `65532` 读写                                       |
 | `LOCAL_FILES_READ_ONLY`           | `false`   | 设为 `true` 只读挂载文件目录；后台相应存储也应设置只读，不影响 `./data`                             |
 | `GOMEMLIMIT`                      | `80MiB`   | Go GC 软目标；容器内存上限仍由 Compose 的 `mem_limit` 控制                                          |
-| `MAX_DOWNLOADS`                   | `8`       | 普通文件下载总并发，范围 1–128；设备互传的中继并发独立设置                                          |
-| `MAX_UPLOADS`                     | `2`       | 普通文件上传并发，范围 1–8                                                                          |
+| `MAX_DOWNLOADS`                   | `48`      | 普通文件下载总并发，范围 1–65535；设备互传的中继并发独立设置                                        |
+| `MAX_UPLOADS`                     | `16`      | 普通文件上传并发，范围 1–65535                                                                      |
 | `MAX_UPLOAD_SIZE_MB`              | `10240`   | 单文件上传硬上限，默认 10 GiB，范围 1–10240 MiB；后台上传大小不能高于此值                           |
 | `MAX_STAGED_SIZE_MB`              | `20480`   | 上传暂存总额度，默认 20 GiB，范围 1–102400 MiB，不能小于单文件上传上限                              |
 | `TRANSFER_ENABLED`                | `true`    | 设为 `false` 关闭设备互传                                                                           |
@@ -207,8 +207,8 @@ docker compose up -d --pull always
 | -------------------- | ------- | ----------------------------------------------- |
 | `MAX_UPLOAD_SIZE_MB` | `10240` | 单文件硬上限，单位 MiB，默认 10 GiB             |
 | `MAX_STAGED_SIZE_MB` | `20480` | 上传暂存总额度，默认 20 GiB，不能小于单文件上限 |
-| `MAX_UPLOADS`        | `2`     | 同时上传数量，范围 1–8                          |
-| `MAX_DOWNLOADS`      | `8`     | 同时下载数量，范围 1–128                        |
+| `MAX_UPLOADS`        | `16`    | 同时上传数量，范围 1–65535                      |
+| `MAX_DOWNLOADS`      | `48`    | 同时下载数量，范围 1–65535                      |
 | `GOMEMLIMIT`         | `80MiB` | Go GC 软目标，不是进程内存硬限制                |
 
 分离版 Compose 另设后端 `128m`、前端 `64m` 容器内存限制，合并版为单容器 `128m`。系统设置的上传大小只能降低环境硬上限。按实际负载使用 `docker stats` 观察内存、CPU 和 I/O。

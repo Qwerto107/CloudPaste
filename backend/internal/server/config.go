@@ -23,7 +23,7 @@ type Config struct {
 }
 
 func ConfigFromEnv() (Config, error) {
-	c := Config{ListenAddr: ":8787", DataDir: "./data", AdminUsername: "admin", MaxDownloads: 8}
+	c := Config{ListenAddr: ":8787", DataDir: "./data", AdminUsername: "admin", MaxDownloads: 48}
 	if err := c.configureRateLimits(true); err != nil {
 		return c, err
 	}
@@ -62,9 +62,9 @@ func ConfigFromEnv() (Config, error) {
 		c.AdminUsername = v
 	}
 	c.AdminPassword, c.EncryptionSecret = os.Getenv("ADMIN_PASSWORD"), os.Getenv("ENCRYPTION_SECRET")
-	c.MaxUploads = 2
+	c.MaxUploads = 16
 	c.MaxUploadBytes = 10 << 30
-	// 默认暂存额度支持两个最大文件并发，仍由固定大小缓冲区传输。
+	// 暂存总额度独立于上传并发，默认可容纳两个最大文件，仍由固定大小缓冲区传输。
 	c.MaxStagedBytes = 20 << 30
 	if value := os.Getenv("MAX_UPLOAD_SIZE_MB"); value != "" {
 		n, err := strconv.ParseInt(value, 10, 64)
@@ -80,10 +80,11 @@ func ConfigFromEnv() (Config, error) {
 		}
 		c.MaxStagedBytes = n << 20
 	}
+	// 并发配置允许较高上限，部署时按服务器资源调整。
 	if value := os.Getenv("MAX_UPLOADS"); value != "" {
 		n, err := strconv.Atoi(value)
-		if err != nil || n < 1 || n > 8 {
-			return c, errors.New("MAX_UPLOADS 必须为 1-8")
+		if err != nil || n < 1 || n > 65535 {
+			return c, errors.New("MAX_UPLOADS 必须为 1-65535")
 		}
 		c.MaxUploads = n
 	}
@@ -92,8 +93,8 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if v := os.Getenv("MAX_DOWNLOADS"); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > 128 {
-			return c, errors.New("MAX_DOWNLOADS 必须为 1-128")
+		if err != nil || n < 1 || n > 65535 {
+			return c, errors.New("MAX_DOWNLOADS 必须为 1-65535")
 		}
 		c.MaxDownloads = n
 	}

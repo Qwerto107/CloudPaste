@@ -74,10 +74,10 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		logger = slog.Default()
 	}
 	if cfg.MaxDownloads <= 0 {
-		cfg.MaxDownloads = 8
+		cfg.MaxDownloads = 48
 	}
 	if cfg.MaxUploads <= 0 {
-		cfg.MaxUploads = 2
+		cfg.MaxUploads = 16
 	}
 	if cfg.MaxUploadBytes <= 0 {
 		cfg.MaxUploadBytes = 10 << 30
