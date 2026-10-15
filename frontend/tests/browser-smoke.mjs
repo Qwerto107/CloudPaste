@@ -552,7 +552,12 @@ try {
       request.url().endsWith("/api/admin/settings/group/1"),
   );
   await page.getByRole("button", { name: "保存设置" }).click();
+  // 常规设置新增四个访客开关；固定安全项仍不能进入提交体。
   assert.deepEqual(Object.keys((await settingsPut).postDataJSON()).sort(), [
+    "guest_file_upload_enabled",
+    "guest_text_share_enabled",
+    "guest_transfer_create_enabled",
+    "guest_transfer_join_enabled",
     "max_upload_size",
     "share_default_expiry_hours",
   ]);

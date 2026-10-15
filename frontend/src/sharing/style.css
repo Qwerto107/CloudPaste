@@ -1038,12 +1038,15 @@ fieldset {
 }
 .settings-tabs {
   display: flex;
+  /* 中等宽度仍显示侧栏时，新增页签只在导航内滚动，不撑宽整个页面。 */
+  overflow-x: auto;
   gap: 0.5rem;
   border-bottom: 1px solid var(--line);
   margin-bottom: 1.5rem;
 }
 .settings-tabs a {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 0.5rem;
   padding: 0.85rem 1rem;
