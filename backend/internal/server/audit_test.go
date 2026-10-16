@@ -31,7 +31,7 @@ func waitAudit(t *testing.T, f *fixture, predicate string, count int) {
 func TestAuditTransferJoinAfterConfirmation(t *testing.T) {
 	f := newFixture(t)
 	f.app.audit.enabled.Store(true)
-	created := dataMap(t, f.request(t, "POST", "/api/transfer/create", f.admin, map[string]any{"name": "创建者"}, nil, 201))
+	created := dataMap(t, f.request(t, "POST", "/api/transfer/create", f.admin, map[string]any{"name": "创建者", "relay_only": true}, nil, 201))
 	h := f.app.transfers
 	h.mu.Lock()
 	var room *transferRoom
@@ -46,23 +46,76 @@ func TestAuditTransferJoinAfterConfirmation(t *testing.T) {
 	if room == nil {
 		t.Fatal("创建的连接不存在")
 	}
-	f.request(t, "POST", "/api/transfer/join", "", map[string]any{"code": created["code"], "name": "加入者"}, nil, 200)
+	joined := dataMap(t, f.request(t, "POST", "/api/transfer/join", "", map[string]any{"code": created["code"], "name": "加入者"}, map[string]string{"X-Forwarded-For": "203.0.113.99"}, 200))
 	waitAudit(t, f, "action='申请加入互传'", 1)
+	readDetails := func(action string) map[string]any {
+		t.Helper()
+		var raw string
+		if err := f.app.audit.db.QueryRow("SELECT details FROM operation_logs WHERE action=?", action).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		// 房间编号可用于关联事件，配对码与成员凭证绝不进入详情。
+		if strings.Contains(raw, created["code"].(string)) || strings.Contains(raw, joined["token"].(string)) || strings.Contains(raw, created["token"].(string)) {
+			t.Fatal("加入日志泄露配对凭证")
+		}
+		var details map[string]any
+		if err := json.Unmarshal([]byte(raw), &details); err != nil {
+			t.Fatal(err)
+		}
+		return details
+	}
+	pending := readDetails("申请加入互传")
+	for key, want := range map[string]any{
+		"room": room.id, "creator_name": "创建者", "creator_type": "admin", "creator_account": "admin",
+		"joiner_name": "加入者", "joiner_type": "guest", "joiner_account": "访客",
+		"creator_ip": "127.0.0.1", "joiner_ip": "127.0.0.1", "relay_only": true, "join_state": "pending",
+	} {
+		if pending[key] != want {
+			t.Fatalf("申请日志 %s = %v, 期望 %v", key, pending[key], want)
+		}
+	}
+	requestedAt, err := time.Parse(time.RFC3339Nano, pending["requested_at"].(string))
+	if err != nil || !requestedAt.Equal(room.members[1].created) || pending["approved_at"] != nil {
+		t.Fatal("申请时间错误或确认前记录了同意时间", pending)
+	}
 	var count int
 	if err := f.app.audit.db.QueryRow("SELECT count(*) FROM operation_logs WHERE action='加入互传'").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("确认前已记录加入成功: %d, %v", count, err)
 	}
 	h.mu.Lock()
 	room.members[1].connected = true
-	err := h.messageLocked(room.members[0], transferMessage{Type: "confirm"})
+	// 确认日志采用 WebSocket 鉴权后保存的来源，不能拼接申请中的旧地址。
+	room.members[1].audit.IP = "198.51.100.20"
+	err = h.messageLocked(room.members[0], transferMessage{Type: "confirm"})
+	duplicate := h.messageLocked(room.members[0], transferMessage{Type: "confirm"})
 	h.mu.Unlock()
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || duplicate == nil {
+		t.Fatal("首次确认失败或重复确认未被拒绝", err, duplicate)
 	}
 	waitAudit(t, f, "action='加入互传'", 1)
 	var actorType, method, endpoint string
 	if err := f.app.audit.db.QueryRow("SELECT actor_type,method,endpoint FROM operation_logs WHERE action='加入互传'").Scan(&actorType, &method, &endpoint); err != nil || actorType != "guest" || method != "WS" || endpoint != "/api/transfer/socket" {
 		t.Fatalf("配对日志身份或来源错误: %q %q %q, %v", actorType, method, endpoint, err)
+	}
+	approved := readDetails("加入互传")
+	approvedAt, err := time.Parse(time.RFC3339Nano, approved["approved_at"].(string))
+	if err != nil || approvedAt.Before(requestedAt) || approvedAt.After(time.Now()) || approved["requested_at"] != pending["requested_at"] || approved["join_state"] != "approved" || approved["joiner_ip"] != "198.51.100.20" {
+		t.Fatal("同意加入日志缺少正确的时间、状态或最新来源", approved)
+	}
+	for _, key := range []string{"creator_name", "creator_type", "creator_account", "creator_ip", "joiner_name", "joiner_type", "joiner_account", "room", "relay_only"} {
+		if approved[key] != pending[key] {
+			t.Fatal("同意加入日志丢失申请信息", key, approved)
+		}
+	}
+	// 总开关和模块开关关闭时不构建快照，不为加入事件增加后台任务。
+	f.app.audit.disabledModules.Store(auditModuleBits["transfer"])
+	if h.joinAuditDetailsLocked(room, time.Now()) != nil {
+		t.Fatal("模块关闭时仍构建加入详情")
+	}
+	f.app.audit.disabledModules.Store(0)
+	f.app.audit.enabled.Store(false)
+	if h.joinAuditDetailsLocked(room, time.Now()) != nil {
+		t.Fatal("总开关关闭时仍构建加入详情")
 	}
 }
 
@@ -235,6 +288,10 @@ func TestAuditTransferTextAndImageMetadata(t *testing.T) {
 	defer cancel()
 	sender := &transferMember{index: 0, out: make(chan any, 4), audit: auditEvent{Module: "transfer", ActorType: "guest", ActorName: "访客", IP: "192.0.2.10"}}
 	receiver := &transferMember{index: 1, out: make(chan any, 4), audit: auditEvent{IP: "198.51.100.20"}}
+	sender.device = &transferDevice{Type: "desktop", Browser: "Chrome", OS: "Windows"}
+	receiver.device = &transferDevice{Type: "mobile", Browser: "Firefox", OS: "Android"}
+	sender.location = &ipLocation{Summary: "中国 · 广东", Source: "ip2location"}
+	receiver.location = &ipLocation{Summary: "局域网"}
 	room := &transferRoom{id: "room-id", paired: true, members: [2]*transferMember{sender, receiver}, files: map[string]*transferFile{}, maxFile: 10 << 20, ctx: ctx}
 	sender.room, receiver.room = room, room
 	message := "第一行\n<script>alert(1)</script>"
@@ -267,6 +324,18 @@ func TestAuditTransferTextAndImageMetadata(t *testing.T) {
 	}
 	if strings.Contains(imageDetails, "data:") {
 		t.Fatal("图片日志不应保存原始内容")
+	}
+	for _, details := range []map[string]any{textData, imageData} {
+		device, ownOK := details["device"].(map[string]any)
+		peer, peerOK := details["peer_device"].(map[string]any)
+		if !ownOK || !peerOK || device["browser"] != "Chrome" || peer["os"] != "Android" {
+			t.Fatal("互传日志缺少双方设备摘要", details)
+		}
+		location, ownOK := details["location"].(map[string]any)
+		peerLocation, peerOK := details["peer_location"].(map[string]any)
+		if !ownOK || !peerOK || location["summary"] != "中国 · 广东" || peerLocation["summary"] != "局域网" {
+			t.Fatal("互传日志未复用双方归属地", details)
+		}
 	}
 }
 
@@ -365,7 +434,7 @@ func TestAuditModuleSwitches(t *testing.T) {
 			}
 			f.app.recordAudit(auditEvent{Module: module, Action: marker, Target: marker})
 		}
-		member := &transferMember{audit: auditEvent{Module: "transfer"}}
+		member := &transferMember{audit: auditEvent{Module: "transfer"}, device: parseTransferDevice("(Windows NT 10.0) Chrome/140.0", nil)}
 		f.app.transfers.auditTransfer(member, marker, marker, "success", time.Now(), nil)
 	}
 	emit("disabled-module-marker")

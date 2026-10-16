@@ -41,18 +41,78 @@ func (a *App) transferAuditIdentity(r *http.Request) auditEvent {
 	kind, id, name := auditActor(principal(r))
 	return auditEvent{Module: "transfer", ActorType: kind, ActorID: id, ActorName: name, IP: a.auditClientIP(r), Method: "WS", Endpoint: "/api/transfer/socket"}
 }
-func (h *transferHub) auditTransfer(member *transferMember, action, target, result string, started time.Time, details any) {
+
+func (a *App) setTransferAuditDetails(r *http.Request, device *transferDevice, ip string, details map[string]any) {
+	if !a.audit.allows("transfer") {
+		return
+	}
+	if details == nil {
+		details = map[string]any{}
+	}
+	if device != nil {
+		details["device"] = device
+	}
+	if location := a.locateIP(ip); location != nil {
+		details["location"] = location
+	}
+	if len(details) != 0 {
+		setAuditDetails(r, details)
+	}
+}
+
+// 在房间锁内截取加入信息，后续 HTTP 日志使用快照，不持锁查询位置或写数据库。
+func (h *transferHub) joinAuditDetailsLocked(room *transferRoom, approvedAt time.Time) map[string]any {
+	if !h.app.audit.allows("transfer") {
+		return nil
+	}
+	creator, joiner := room.members[0], room.members[1]
+	details := map[string]any{
+		"room": room.id, "relay_only": room.relayOnly,
+		"creator_name": creator.name, "creator_type": creator.audit.ActorType,
+		"creator_account": creator.audit.ActorName, "creator_ip": creator.audit.IP,
+		"joiner_name": joiner.name, "joiner_type": joiner.audit.ActorType,
+		"joiner_account": joiner.audit.ActorName, "joiner_ip": joiner.audit.IP,
+		"requested_at": joiner.created.UTC().Format(time.RFC3339Nano),
+		"join_state":   "pending",
+	}
+	if !approvedAt.IsZero() {
+		details["approved_at"] = approvedAt.UTC().Format(time.RFC3339Nano)
+		details["join_state"] = "approved"
+	}
+	return details
+}
+
+func (h *transferHub) auditTransfer(member *transferMember, action, target, result string, started time.Time, details map[string]any) {
 	// 日志默认关闭，先判断开关，避免为每条互传文字做无用的序列化。
 	if member == nil || !h.app.audit.allows("transfer") {
 		return
 	}
+	if details == nil {
+		details = map[string]any{}
+	}
+	// 复用建立连接时的归属地快照，不在高频文字或进度事件中读取 IP 数据库。
+	if member.location != nil {
+		details["location"] = member.location
+	}
+	// 通过日志开关后才添加摘要，不增加后台采集、数据库查询或独立日志事件。
+	if member.device != nil {
+		details["device"] = member.device
+	}
+	if member.room != nil && member.room.paired {
+		if peer := member.room.members[1-member.index]; peer != nil {
+			if peer.device != nil {
+				details["peer_device"] = peer.device
+			}
+			if peer.location != nil {
+				details["peer_location"] = peer.location
+			}
+		}
+	}
 	event := member.audit
 	event.Action, event.Target, event.Result = action, target, result
 	event.DurationMS = time.Since(started).Milliseconds()
-	if details != nil {
-		data, _ := json.Marshal(details)
-		event.Details = string(data)
-	}
+	data, _ := json.Marshal(details)
+	event.Details = string(data)
 	h.app.recordAudit(event)
 }
 
@@ -457,6 +517,14 @@ func auditRoute(r *http.Request) (auditEvent, bool) {
 		e.Module, e.Action, route, e.Target = "settings", "修改配置", "settings/group/{group}", r.PathValue("group")
 		if len(parts) == 3 {
 			e.Target = auditText(parts[2], 10)
+		}
+	case "ip-location":
+		if len(parts) != 1 || (method != "PUT" && method != "DELETE") {
+			return e, false
+		}
+		e.Module, e.Action, route = "settings", "加载 IP 数据库", "ip-location"
+		if method == "DELETE" {
+			e.Action = "卸载 IP 数据库"
 		}
 	case "transfer":
 		e.Module = "transfer"

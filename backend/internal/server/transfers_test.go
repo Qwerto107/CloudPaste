@@ -61,7 +61,7 @@ func transferPair(t *testing.T) (*fixture, *httptest.Server, transferTestPeer, t
 	dial := func(token string) transferTestPeer {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(s.URL, "http")+"/api/transfer/socket", &websocket.DialOptions{HTTPHeader: http.Header{"Origin": []string{s.URL}}})
+		conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(s.URL, "http")+"/api/transfer/socket", &websocket.DialOptions{HTTPHeader: http.Header{"Origin": []string{s.URL}, "X-Forwarded-For": []string{"203.0.113.199"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -71,18 +71,41 @@ func transferPair(t *testing.T) (*fixture, *httptest.Server, transferTestPeer, t
 		p.next("ready")
 		return p
 	}
-	created := dataMap(t, f.request(t, "POST", "/api/transfer/create", f.admin, map[string]any{"name": "设备 A", "relay_only": true}, nil, 201))
+	created := dataMap(t, f.request(t, "POST", "/api/transfer/create", f.admin, map[string]any{"name": "设备 A", "relay_only": true, "device": map[string]any{"platform": "Windows", "full_version_list": []map[string]string{{"brand": "Google Chrome", "version": "140.0"}}, "form_factors": []string{"Desktop"}}}, nil, 201))
 	a := dial(created["token"].(string))
-	joined := dataMap(t, f.request(t, "POST", "/api/transfer/join", "", map[string]any{"code": created["code"], "name": "设备 B"}, nil, 200))
+	joined := dataMap(t, f.request(t, "POST", "/api/transfer/join", "", map[string]any{"code": created["code"], "name": "设备 B", "device": map[string]any{"platform": "Android", "mobile": true}}, map[string]string{"User-Agent": "Mozilla/5.0 (Android 14; Mobile) Firefox/140.0"}, 200))
 	b := dial(joined["token"].(string))
-	a.next("joining")
+	joining := a.next("joining")
+	// 未信任的转发头不能伪造授权界面的来源 IP；只向创建者披露加入者信息。
+	if joining["name"] != "设备 B" || joining["ip"] != "127.0.0.1" {
+		t.Fatal("授权信息未使用 WebSocket 的真实来源", joining)
+	}
+	if device, ok := joining["device"].(map[string]any); !ok || device["browser"] != "Firefox" {
+		t.Fatal("授权消息未提供申请设备摘要", joining)
+	}
+	if joining["location"] != nil {
+		t.Fatal("未加载数据库时不应披露归属地", joining)
+	}
 	// 配对前不能发消息，第三人也不能占据已经预留的位置。
 	b.send(map[string]any{"type": "text", "text": "before-confirm"})
 	b.next("error")
 	f.request(t, "POST", "/api/transfer/join", "", map[string]any{"code": created["code"], "name": "设备 C"}, nil, 404)
 	a.send(map[string]any{"type": "confirm"})
-	a.next("paired")
-	b.next("paired")
+	for _, peer := range []transferTestPeer{a, b} {
+		paired := peer.next("paired")
+		ips, ok := paired["ips"].([]any)
+		if !ok || len(ips) != 2 || ips[0] != "127.0.0.1" || ips[1] != "127.0.0.1" {
+			t.Fatal("配对信息缺少双方的可信来源", paired)
+		}
+		devices, ok := paired["devices"].([]any)
+		if !ok || len(devices) != 2 || devices[0].(map[string]any)["browser"] != "Chrome" || devices[1].(map[string]any)["browser"] != "Firefox" {
+			t.Fatal("配对消息缺少按成员排序的设备摘要", paired)
+		}
+		locations, ok := paired["locations"].([]any)
+		if !ok || len(locations) != 2 || locations[0] != nil || locations[1] != nil {
+			t.Fatal("未加载数据库时配对位置应为空", paired)
+		}
+	}
 	f.request(t, "POST", "/api/transfer/join", "", map[string]any{"code": created["code"], "name": "设备 C"}, nil, 404)
 	return f, s, a, b
 }

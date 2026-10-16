@@ -57,7 +57,11 @@ export async function request(
     shareToken,
   } = {},
 ) {
-  const headers = { "Content-Type": "application/json" };
+  // 数据库等本地文件直接发送原始内容，JSON 请求仍沿用原有编码方式。
+  const binary = body instanceof Blob;
+  const headers = {
+    "Content-Type": binary ? "application/octet-stream" : "application/json",
+  };
   if (!publicRequest && authorization())
     headers.Authorization = authorization();
   if (
@@ -71,7 +75,7 @@ export async function request(
   const response = await fetch(apiURL(endpoint, publicRequest), {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : binary ? body : JSON.stringify(body),
     signal: signal || AbortSignal.timeout(30000),
     cache: "no-store",
   });

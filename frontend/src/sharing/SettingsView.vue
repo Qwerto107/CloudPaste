@@ -21,6 +21,9 @@ import Icon from "./Icon.vue";
 const AuditCleanupView = defineAsyncComponent(
   () => import("./AuditCleanupView.vue"),
 );
+const IPLocationSettings = defineAsyncComponent(
+  () => import("./IPLocationSettings.vue"),
+);
 
 const route = useRoute();
 const panel = computed(() => route.meta.panel);
@@ -29,6 +32,7 @@ const tabs = [
   { key: "global", label: "常规", icon: "settings" },
   { key: "preview", label: "文件预览", icon: "file" },
   { key: "transfer", label: "设备互传", icon: "transfer" },
+  { key: "ip-location", label: "IP 归属地", icon: "globe" },
   { key: "site", label: "站点外观", icon: "cloud" },
   { key: "logs", label: "日志设置", icon: "file" },
 ];
@@ -116,6 +120,11 @@ async function load() {
   definitions.value = [];
   success.value = "";
   error.value = "";
+  // 归属地库由独立接口管理，不读取普通设置分组或显示无关的保存按钮。
+  if (panel.value === "ip-location") {
+    loading.value = false;
+    return;
+  }
   try {
     const data = await request(`/admin/settings?group=${groups[panel.value]}`, {
       signal: active.signal,
@@ -195,8 +204,16 @@ watch(panel, load, { immediate: true });
   </nav>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
   <div v-if="loading" class="panel empty" role="status">正在加载设置…</div>
-  <UiButton v-else-if="!definitions.length" @click="load">重新加载</UiButton>
-  <form v-else class="settings-form" @submit.prevent="save">
+  <UiButton
+    v-else-if="panel !== 'ip-location' && !definitions.length"
+    @click="load"
+    >重新加载</UiButton
+  >
+  <form
+    v-else-if="panel !== 'ip-location'"
+    class="settings-form"
+    @submit.prevent="save"
+  >
     <UiFieldset class="settings-fields" :disabled="saving || confirming">
       <component
         :is="card.advanced ? 'details' : 'section'"
@@ -334,6 +351,7 @@ watch(panel, load, { immediate: true });
       </div>
     </div>
   </form>
+  <IPLocationSettings v-if="panel === 'ip-location'" />
   <!-- 清理使用独立表单，避免误触设置保存或产生嵌套表单。 -->
   <AuditCleanupView v-if="panel === 'logs' && !loading && definitions.length" />
 </template>

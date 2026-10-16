@@ -17,6 +17,10 @@ pnpm-debug.log*
 lerna-debug.log*
 
 # Runtime data
+# IP 归属地数据库由部署者下载，不纳入源码或发布产物。
+**/ip2location.bin
+**/ip-location-*.bin
+**/IP2LOCATION*.BIN
 /files/
 /frontend/dist/
 # 合并版二进制与镜像使用的前端嵌入产物，由准备脚本生成。

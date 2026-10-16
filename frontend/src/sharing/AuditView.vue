@@ -1,4 +1,5 @@
 <script setup>
+import IPLocation from "./IPLocation.vue";
 import { computed, ref, reactive, watch, onBeforeUnmount } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { request } from "./api.js";
@@ -104,14 +105,34 @@ function detailName(key) {
       image_type: "图片类型",
       started_at: "发起时间",
       text: "发送内容",
-      sender_ip: "发送方 IP",
-      receiver_ip: "接收方 IP",
-      p2p_local: "接收端直连地址",
-      p2p_remote: "接收端看到的发送方地址",
+      // 来源 IP 与直连 IP 可能不同，端口只能与浏览器上报的直连地址配对。
+      sender_ip: "发送方来源 IP",
+      receiver_ip: "接收方来源 IP",
+      p2p_local: "接收方 IP:端口（点对点）",
+      p2p_remote: "发送方 IP:端口（点对点）",
       p2p_reporter: "直连地址来源",
       round: "下载次数",
       download_ips: "下载请求 IP",
       room: "连接编号",
+      creator_name: "创建方设备名称",
+      creator_type: "创建方身份",
+      creator_account: "创建方账号",
+      creator_ip: "创建方来源 IP",
+      joiner_name: "加入方设备名称",
+      joiner_type: "加入方身份",
+      joiner_account: "加入方账号",
+      joiner_ip: "加入方来源 IP",
+      requested_at: "申请时间",
+      approved_at: "同意时间",
+      join_state: "授权状态",
+      relay_only: "仅允许中继",
+      device: "操作设备",
+      peer_device: "对端设备",
+      location: "操作方 IP 归属地",
+      peer_location: "对端 IP 归属地",
+      loaded: "数据库已加载",
+      database_date: "数据日期",
+      database_size: "数据库大小",
       delete_files: "同时删除原文件",
       merged_requests: "已合并的同类请求",
     }[key] ||
@@ -119,6 +140,12 @@ function detailName(key) {
   );
 }
 function detailValue(key, value) {
+  if (key === "creator_type" || key === "joiner_type")
+    return identities[value] || value;
+  if (key === "join_state")
+    return { pending: "等待同意", approved: "已同意加入" }[value] || value;
+  if (key === "device" || key === "peer_device")
+    return value?.summary || "未提供";
   if (key === "mode")
     return (
       { p2p: "点对点", relay: "实时中继", tool: "下载工具中继" }[value] || value
@@ -135,13 +162,18 @@ function detailValue(key, value) {
     );
   if (key === "download_ips" && Array.isArray(value))
     return value.join("、") || "—";
-  if ((key === "size" || key === "bytes") && Number.isSafeInteger(value)) {
+  if (key === "loaded" || key === "relay_only") return value ? "是" : "否";
+  if (
+    ["size", "bytes", "database_size"].includes(key) &&
+    Number.isSafeInteger(value)
+  ) {
     const units = ["B", "KiB", "MiB", "GiB", "TiB"];
     const index =
       value > 0 ? Math.min(4, Math.floor(Math.log(value) / Math.log(1024))) : 0;
     return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]} (${value} 字节)`;
   }
-  if (key === "started_at") return new Date(value).toLocaleString();
+  if (["started_at", "requested_at", "approved_at"].includes(key))
+    return new Date(value).toLocaleString();
   return typeof value === "object" && value !== null
     ? JSON.stringify(value)
     : String(value);
@@ -338,6 +370,10 @@ onBeforeUnmount(() => controller?.abort());
                         'download_ips',
                         'p2p_local',
                         'p2p_remote',
+                        'device',
+                        'peer_device',
+                        'location',
+                        'peer_location',
                       ].includes(key),
                     }"
                   >
@@ -350,16 +386,19 @@ onBeforeUnmount(() => controller?.abort());
                       {{ value.before }} → {{ value.after }}
                     </dd>
                     <dd
-                      v-else
+                      v-else-if="!['location', 'peer_location'].includes(key)"
                       :class="{
                         'audit-message': key === 'text',
-                        'audit-detail-value-tag': ['state', 'mode'].includes(
-                          key,
-                        ),
+                        'audit-detail-value-tag': [
+                          'state',
+                          'mode',
+                          'join_state',
+                        ].includes(key),
                       }"
                     >
                       {{ detailValue(key, value) }}
                     </dd>
+                    <dd v-else><IPLocation :location="value" /></dd>
                   </div>
                 </dl>
               </td>

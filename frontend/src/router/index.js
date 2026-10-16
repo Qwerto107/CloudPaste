@@ -85,6 +85,7 @@ const routes = [
         ["settings/global", "global", "常规设置", 0],
         ["settings/preview", "preview", "文件预览设置", 0],
         ["settings/transfer", "transfer", "设备互传设置", 0],
+        ["settings/ip-location", "ip-location", "IP 归属地设置", 0],
         ["settings/site", "site", "站点外观设置", 0],
         ["settings/logs", "logs", "日志设置", 0],
       ].map(([path, panel, title, permission]) => ({

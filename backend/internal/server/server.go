@@ -65,6 +65,9 @@ type App struct {
 	rawReserved           int64
 	uploadDir             string
 	transfers             *transferHub
+	ipLocationDB          *ipLocationDatabase
+	ipLocationMu          sync.RWMutex
+	ipLocationEditMu      sync.Mutex
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
@@ -122,6 +125,10 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 			a.uploadLimit.Store(value << 20)
 		}
 	}
+	if err = a.restoreIPLocation(); err != nil {
+		_ = a.Close()
+		return nil, err
+	}
 	a.transfers = newTransferHub(a)
 	if err = a.restoreTransferSettings(); err != nil {
 		_ = a.Close()
@@ -140,6 +147,14 @@ func (a *App) Close() error {
 	if a.audit != nil {
 		a.audit.close()
 	}
+	a.ipLocationEditMu.Lock()
+	a.ipLocationMu.Lock()
+	if a.ipLocationDB != nil {
+		a.ipLocationDB.db.Close()
+		a.ipLocationDB = nil
+	}
+	a.ipLocationMu.Unlock()
+	a.ipLocationEditMu.Unlock()
 	a.clientsMu.Lock()
 	for _, entry := range a.storageClients {
 		_ = entry.Driver.Close()
@@ -240,6 +255,7 @@ func (a *App) Handler() http.Handler {
 	a.registerStorage(mux)
 	a.registerFiles(mux)
 	a.registerSystem(mux)
+	a.registerIPLocation(mux)
 	a.registerUploads(mux)
 	a.registerTransfers(mux)
 	mux.HandleFunc("GET /api/admin/operation-logs", a.protected(0, true, a.listAudit))

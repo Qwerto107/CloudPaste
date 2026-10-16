@@ -67,6 +67,9 @@ type transferMember struct {
 	room        *transferRoom
 	index       int
 	name, token string
+	ip          string // WebSocket 建立时由可信代理规则解析，不能由设备名称或客户端消息指定。
+	device      *transferDevice
+	location    *ipLocation
 	created     time.Time
 	connected   bool
 	out         chan any
@@ -238,7 +241,7 @@ func transferBusy() error {
 }
 
 func transferDecode(w http.ResponseWriter, r *http.Request, value any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	r.Body = http.MaxBytesReader(w, r.Body, 2048)
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if d.Decode(value) != nil || d.Decode(new(any)) != io.EOF {
@@ -298,13 +301,18 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 		return forbidden()
 	}
 	var body struct {
-		Name      string `json:"name"`
-		RelayOnly bool   `json:"relay_only"`
+		Name      string               `json:"name"`
+		RelayOnly bool                 `json:"relay_only"`
+		Device    *transferDeviceInput `json:"device"`
 	}
 	if err := transferDecode(w, r, &body); err != nil {
 		return err
 	}
 	name := transferName(body.Name)
+	if err := body.Device.validate(); err != nil {
+		return err
+	}
+	device := parseTransferDevice(r.UserAgent(), body.Device)
 	if name == "" {
 		return badRequest("请输入有效的设备名称")
 	}
@@ -345,7 +353,7 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 	}
 	ctx, cancel := context.WithDeadline(h.ctx, time.Now().Add(transferLifetime))
 	room := &transferRoom{id: randomID(), code: code, owner: *p, ip: ip, created: time.Now(), expires: time.Now().Add(transferLifetime), files: map[string]*transferFile{}, ctx: ctx, cancel: cancel, relayOnly: body.RelayOnly, maxFile: h.maxFile}
-	member := &transferMember{room: room, index: 0, name: name, created: time.Now(), out: make(chan any, transferQueue)}
+	member := &transferMember{room: room, index: 0, name: name, device: device, created: time.Now(), out: make(chan any, transferQueue)}
 	member.audit = a.transferAuditIdentity(r)
 	// 返回给浏览器的凭证只保留在页面内存，服务端只保存其摘要。
 	secret := transferSecret()
@@ -354,6 +362,7 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 	h.rooms[room.id] = room
 	h.mu.Unlock()
 	setAuditTarget(r, room.id)
+	a.setTransferAuditDetails(r, device, ip, nil)
 	a.write(w, 201, map[string]any{"token": secret, "code": code, "member": 0, "expires_at": room.expires, "max_file_size": room.maxFile}, "连接已创建")
 	return nil
 }
@@ -375,13 +384,18 @@ func (a *App) joinTransfer(w http.ResponseWriter, r *http.Request) error {
 		return forbidden()
 	}
 	var body struct {
-		Code      string `json:"code"`
-		Name      string `json:"name"`
-		RelayOnly bool   `json:"relay_only"`
+		Code      string               `json:"code"`
+		Name      string               `json:"name"`
+		RelayOnly bool                 `json:"relay_only"`
+		Device    *transferDeviceInput `json:"device"`
 	}
 	if err := transferDecode(w, r, &body); err != nil {
 		return err
 	}
+	if err := body.Device.validate(); err != nil {
+		return err
+	}
+	device := parseTransferDevice(r.UserAgent(), body.Device)
 	h := a.transfers
 	ip := a.clientIP(r)
 	h.mu.Lock()
@@ -406,11 +420,13 @@ func (a *App) joinTransfer(w http.ResponseWriter, r *http.Request) error {
 			return badRequest("请输入有效的设备名称")
 		}
 		secret := transferSecret()
-		room.members[1] = &transferMember{room: room, index: 1, name: name, token: secretHash(secret), created: time.Now(), out: make(chan any, transferQueue)}
+		room.members[1] = &transferMember{room: room, index: 1, name: name, device: device, token: secretHash(secret), created: time.Now(), out: make(chan any, transferQueue)}
 		room.members[1].audit = a.transferAuditIdentity(r)
 		room.relayOnly = room.relayOnly || body.RelayOnly
+		details := h.joinAuditDetailsLocked(room, time.Time{})
 		h.mu.Unlock()
 		setAuditTarget(r, room.id)
+		a.setTransferAuditDetails(r, device, ip, details)
 		a.write(w, 200, map[string]any{"token": secret, "member": 1, "expires_at": room.expires, "max_file_size": room.maxFile}, "等待对方确认")
 		return nil
 	}
@@ -492,10 +508,27 @@ func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
 		h.mu.Unlock()
 		return
 	}
+	// 只查询已认证成员；文件读取放在房间锁外，避免阻塞其他设备的消息转发。
+	h.mu.Unlock()
+	location := a.locateIP(ip)
+	h.mu.Lock()
+	if member.connected || member.room.ctx.Err() != nil || h.rooms[member.room.id] != member.room {
+		h.mu.Unlock()
+		return
+	}
 	member.connected = true
+	member.ip = ip
+	// 数据库可能在锁外查询期间被卸载或更换，不能发布旧库返回的结果。
+	a.ipLocationMu.RLock()
+	if location != nil && location.database != a.ipLocationDB {
+		location = nil
+	}
+	member.location = location
+	a.ipLocationMu.RUnlock()
+	member.audit.IP = ip
 	h.sendLocked(member, map[string]any{"type": "ready", "member": member.index})
 	if member.index == 1 {
-		h.sendLocked(member.room.members[0], map[string]any{"type": "joining", "name": member.name})
+		h.sendLocked(member.room.members[0], map[string]any{"type": "joining", "name": member.name, "ip": member.ip, "device": member.device, "location": member.location})
 	}
 	h.mu.Unlock()
 	defer func() { h.mu.Lock(); h.removeLocked(member.room); h.mu.Unlock() }()
@@ -571,9 +604,15 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		r.paired = true
 		r.code = ""
 		// 仅在创建者确认、双方配对成功后记录加入；申请本身由 HTTP 日志单独记录。
-		h.auditTransfer(r.members[1], "加入互传", r.id, "success", r.members[1].created, nil)
-		// 前端只在日志开启或调试模式下读取一次直连统计。
-		h.broadcastLocked(r, map[string]any{"type": "paired", "names": []string{r.members[0].name, r.members[1].name}, "relay_only": r.relayOnly, "stun": h.app.cfg.TransferSTUN, "audit_enabled": h.app.audit.allows("transfer")})
+		h.auditTransfer(r.members[1], "加入互传", r.id, "success", r.members[1].created, h.joinAuditDetailsLocked(r, time.Now()))
+		// 来源地址只向本房间设备披露，创建者地址须在授权配对后才发送给加入者。
+		h.broadcastLocked(r, map[string]any{
+			"type": "paired", "names": []string{r.members[0].name, r.members[1].name},
+			"ips":        []string{r.members[0].ip, r.members[1].ip},
+			"devices":    []*transferDevice{r.members[0].device, r.members[1].device},
+			"locations":  []*ipLocation{r.members[0].location, r.members[1].location},
+			"relay_only": r.relayOnly, "stun": h.app.cfg.TransferSTUN, "audit_enabled": h.app.audit.allows("transfer"),
+		})
 		return nil
 	}
 	if !r.paired {
