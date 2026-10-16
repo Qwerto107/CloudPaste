@@ -268,7 +268,15 @@ test("操作日志开启时缓存直连两端地址，调试关闭也不输出�
     async getStats() {
       return new Map([
         ["transport", { type: "transport", selectedCandidatePairId: "pair" }],
-        ["pair", { type: "candidate-pair", state: "succeeded", localCandidateId: "local", remoteCandidateId: "remote" }],
+        [
+          "pair",
+          {
+            type: "candidate-pair",
+            state: "succeeded",
+            localCandidateId: "local",
+            remoteCandidateId: "remote",
+          },
+        ],
         ["local", { address: "192.0.2.1", port: 10001 }],
         ["remote", { address: "198.51.100.2", port: 10002 }],
       ]);
@@ -279,6 +287,61 @@ test("操作日志开启时缓存直连两端地址，调试关闭也不输出�
     local: { address: "192.0.2.1", port: 10001 },
     remote: { address: "198.51.100.2", port: 10002 },
   });
+});
+
+test("连接界面无需启用日志即可读取地址，降级后的迟到统计不再显示", async () => {
+  const events = [];
+  const client = new TransferClient((event) => events.push(event));
+  client.directReady = true;
+  const stats = new Map([
+    ["transport", { type: "transport", selectedCandidatePairId: "pair" }],
+    [
+      "pair",
+      {
+        type: "candidate-pair",
+        state: "succeeded",
+        remoteCandidateId: "remote",
+      },
+    ],
+    ["remote", { address: "2001:db8::2", port: 10002, protocol: "udp" }],
+  ]);
+  let reads = 0;
+  client.peer = {
+    async getStats() {
+      reads++;
+      return stats;
+    },
+  };
+  await client.logConnectionDetails(client.peer, true);
+  assert.equal(reads, 1);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, "connection-info");
+  assert.equal(events[0].remote.address, "2001:db8::2");
+  assert.equal(events[0].remote.port, 10002);
+
+  let resolveStats;
+  client.peer = {
+    getStats() {
+      return new Promise((resolve) => {
+        resolveStats = resolve;
+      });
+    },
+  };
+  const pending = client.logConnectionDetails(client.peer, true);
+  client.directReady = false;
+  resolveStats(stats);
+  await pending;
+  assert.equal(events.length, 1, "降级后不得再显示旧链路地址");
+
+  client.directReady = true;
+  client.peer = {
+    async getStats() {
+      throw new Error("stats unavailable");
+    },
+  };
+  await client.logConnectionDetails(client.peer, true);
+  assert.deepEqual(events.at(-1), { type: "connection-info", remote: {} });
+  assert.equal(client.directReady, true, "统计异常不影响数据通道");
 });
 
 test("下载工具按需切片，分段取消相互独立，断开后全部释放", async () => {

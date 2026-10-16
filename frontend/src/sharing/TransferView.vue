@@ -6,6 +6,7 @@ import { session, canTransfer } from "./session.js";
 import { settings, loadSettings } from "./settings.js";
 import Icon from "./Icon.vue";
 import PairCodeInput from "./PairCodeInput.vue";
+import IPLocation from "./IPLocation.vue";
 import { chatImageHistory, validateChatImage } from "./transfer-images.js";
 import {
   normalizePairingCode,
@@ -30,7 +31,16 @@ const autoReceive = ref(false);
 const error = ref("");
 const status = ref("idle");
 const joining = ref("");
+const joiningIP = ref("");
+const joiningDevice = ref(null);
+const joiningLocation = ref(null);
 const names = ref([]);
+const peerIPs = ref([]);
+const peerDevices = ref([]);
+const peerLocations = ref([]);
+const peerEndpoint = ref(null);
+const peerDetailsOpen = ref(true);
+const peerRelayOnly = ref(false);
 const messages = ref([]);
 const messageList = ref(null);
 let followMessages = true;
@@ -65,6 +75,20 @@ const active = computed(() =>
 );
 const connected = computed(() => status.value === "paired");
 const canDirect = computed(() => direct.value && canSaveDirectly());
+const peerAddress = computed(() => {
+  if (!direct.value) return peerRelayOnly.value ? "已禁用" : "未建立";
+  const endpoint = peerEndpoint.value;
+  if (!endpoint) return "正在获取链路信息";
+  const port =
+    Number.isInteger(endpoint.port) && endpoint.port > 0 ? endpoint.port : null;
+  if (!endpoint.address)
+    return port ? `浏览器未提供 IP（端口 ${port}）` : "浏览器未提供";
+  // IPv6 地址加方括号，避免地址自身的冒号与端口混淆。
+  const address = endpoint.address.includes(":")
+    ? `[${endpoint.address}]`
+    : endpoint.address;
+  return port ? `${address}:${port}` : `${address}（端口未提供）`;
+});
 // 点对点入口使用蓝色，与绿色中继按钮区分，并复用浅色、深色主题的配色。
 const directButtonTheme = {
   color: "var(--transfer-blue-bg)",
@@ -86,6 +110,29 @@ const directButtonTheme = {
 const ordinaryFiles = computed(() =>
   files.value.filter((file) => !file.image_type),
 );
+// 当前任务与已结束记录共用一套操作模板，避免按钮行为在两个列表中分叉。
+const fileGroups = computed(() => {
+  const finished = (file) =>
+    ["cancelled", "failed", "complete"].includes(file.state);
+  return [
+    {
+      key: "current",
+      label: "当前任务",
+      ended: false,
+      files: ordinaryFiles.value
+        .filter((file) => !finished(file))
+        .sort(
+          (a, b) => Number(b.state === "active") - Number(a.state === "active"),
+        ),
+    },
+    {
+      key: "history",
+      label: "已结束的传输",
+      ended: true,
+      files: ordinaryFiles.value.filter(finished),
+    },
+  ].filter((group) => group.files.length);
+});
 let client;
 
 function resetPreview() {
@@ -225,6 +272,15 @@ function size(value) {
 }
 function event(message) {
   if (message.type === "created") {
+    joining.value = "";
+    joiningIP.value = "";
+    joiningDevice.value = null;
+    joiningLocation.value = null;
+    names.value = [];
+    peerIPs.value = [];
+    peerDevices.value = [];
+    peerLocations.value = [];
+    peerEndpoint.value = null;
     pairingCode.value = message.code || "";
     myMember.value = message.member;
     maxFile.value = message.max_file_size;
@@ -232,20 +288,48 @@ function event(message) {
   } else if (message.type === "ready") status.value = "waiting";
   else if (message.type === "joining") {
     joining.value = message.name;
+    joiningIP.value = message.ip || "";
+    joiningDevice.value = message.device || null;
+    joiningLocation.value = message.location || null;
     // 可选自动确认仍由创建者发送原有 confirm 消息，服务端继续复核双方状态。
     if (autoApproveDevice.value) send({ type: "confirm" });
   } else if (message.type === "paired") {
     status.value = "paired";
     names.value = message.names;
+    peerIPs.value = message.ips || [];
+    peerDevices.value = message.devices || [];
+    peerLocations.value = message.locations || [];
+    peerRelayOnly.value = message.relay_only === true;
     pairingCode.value = "";
     joining.value = "";
-  } else if (message.type === "direct") direct.value = message.ready;
-  else if (message.type === "text") {
+    joiningIP.value = "";
+    joiningDevice.value = null;
+    joiningLocation.value = null;
+  } else if (message.type === "direct") {
+    direct.value = message.ready;
+    // 重建、降级时立即清除旧地址，避免把上一次链路当作当前链路。
+    peerEndpoint.value = null;
+  } else if (message.type === "connection-info") {
+    if (direct.value) peerEndpoint.value = message.remote;
+  } else if (message.type === "locations") {
+    if (Array.isArray(message.locations))
+      peerLocations.value = message.locations;
+    if (Object.hasOwn(message, "joining_location"))
+      joiningLocation.value = message.joining_location;
+  } else if (message.type === "text") {
     appendMessage({ ...message, id: transferID() });
   } else if (message.type === "file") {
     offeredCount.value++;
+    // 双方使用服务端的发送时间；只在收到任务时格式化，进度更新不重复计算。
+    const sent = new Date(message.sent_at);
     files.value.push({
       ...message,
+      sentLabel: Number.isNaN(sent.getTime())
+        ? ""
+        : sent.toLocaleString("zh-CN", { hour12: false }),
+      sentTimeLabel: Number.isNaN(sent.getTime())
+        ? ""
+        : messageClock.format(sent),
       source: undefined,
       bytes: 0,
       speed: 0,
@@ -350,6 +434,13 @@ function event(message) {
     direct.value = false;
     pairingCode.value = "";
     joining.value = "";
+    joiningIP.value = "";
+    joiningDevice.value = null;
+    joiningLocation.value = null;
+    peerIPs.value = [];
+    peerDevices.value = [];
+    peerLocations.value = [];
+    peerEndpoint.value = null;
     for (const file of files.value) {
       file.url = "";
       if (["active", "offered"].includes(file.state)) file.state = "cancelled";
@@ -363,6 +454,7 @@ async function open(kind) {
   error.value = "";
   busy.value = true;
   autoReceive.value = false;
+  peerDetailsOpen.value = true;
   client?.close();
   clearImages();
   files.value = [];
@@ -486,6 +578,7 @@ async function copyDownloadLink(file) {
     await navigator.clipboard.writeText(file.url);
     file.linkCopied = true;
   } catch {
+    file.linkExpanded = true;
     error.value = "复制失败，请选择下方下载链接手动复制";
   }
 }
@@ -530,7 +623,7 @@ async function pasteCode() {
 function leave() {
   client?.close();
 }
-// 标签只放短状态，保存确认与重试说明另起一行；中继转发完成不等同于写盘成功。
+// 正常任务只显示简短状态，失败时保留处理提示；中继转发完成不等同于写盘成功。
 function fileStatus(file) {
   // 同一次中继完成按当前用户角色展示，保存结果仍由接收方确认。
   const sentByMe = file.from === myMember.value;
@@ -548,14 +641,10 @@ function fileStatus(file) {
       return {
         label: "已完成",
         kind: "complete",
-        detail: "接收方已确认完成，下载链接已失效。",
       };
     return {
       label: deliveredLabel,
       kind: "complete",
-      detail: sentByMe
-        ? "保存结果以接收方的下载记录为准。"
-        : "请在浏览器下载记录中确认保存结果。",
     };
   }
   if (file.state === "active") {
@@ -564,9 +653,6 @@ function fileStatus(file) {
         return {
           label: "下载完成",
           kind: "complete",
-          detail: sentByMe
-            ? "本次下载已完整送达，接收方仍可再次下载。"
-            : "本次数据已完整送达，可重新下载或结束传输。",
         };
       if (!file.bytes) return { label: "等待下载", kind: "neutral" };
     } else if (file.url && !file.urlUsed)
@@ -741,9 +827,25 @@ onBeforeUnmount(() => {
         <p class="muted">配对成功后失效。请通过可信渠道把配对码发送给对方。</p>
       </template>
       <div v-if="joining" class="transfer-joining" role="status">
-        <p>
-          <strong>{{ joining }}</strong> 请求加入。请确认这是你要连接的设备。
-        </p>
+        <div class="transfer-peer-info">
+          <strong>{{ joining }}</strong>
+          <span class="transfer-tag neutral">待授权</span>
+        </div>
+        <dl class="transfer-peer-details">
+          <div>
+            <dt>来源 IP</dt>
+            <dd>{{ joiningIP || "未提供" }}</dd>
+          </div>
+          <div v-if="joiningLocation">
+            <dt>IP 归属地</dt>
+            <dd><IPLocation :location="joiningLocation" /></dd>
+          </div>
+          <div>
+            <dt>设备信息</dt>
+            <dd>{{ joiningDevice?.summary || "未提供" }}</dd>
+          </div>
+        </dl>
+        <p class="muted">请求加入，请确认这是你要连接的设备。</p>
         <div class="actions">
           <UiButton class="primary" @click="send({ type: 'confirm' })"
             >确认连接</UiButton
@@ -756,18 +858,58 @@ onBeforeUnmount(() => {
     </section>
 
     <template v-else>
-      <div class="transfer-peer">
-        <div class="transfer-peer-info">
-          <span>已连接：{{ names[1 - myMember] }}</span>
-          <span class="transfer-badge">{{
-            direct ? "直连可用 · 支持实时中继" : "实时中继可用"
-          }}</span>
+      <div class="panel transfer-peer">
+        <div class="transfer-peer-bar">
+          <div class="transfer-peer-info">
+            <strong>已连接：{{ names[1 - myMember] }}</strong>
+            <span class="transfer-peer-state">{{
+              direct ? "已授权 · 点对点可用 · 中继可用" : "已授权 · 中继可用"
+            }}</span>
+          </div>
+          <div class="transfer-peer-actions">
+            <UiButton
+              type="button"
+              class="quiet"
+              size="small"
+              :aria-expanded="peerDetailsOpen"
+              aria-controls="transfer-peer-details"
+              @click="peerDetailsOpen = !peerDetailsOpen"
+              >连接详情</UiButton
+            >
+            <UiButton type="button" class="quiet" size="small" @click="leave"
+              >断开连接</UiButton
+            >
+          </div>
         </div>
-        <UiButton class="quiet" @click="leave">断开连接</UiButton>
+        <dl
+          v-show="peerDetailsOpen"
+          id="transfer-peer-details"
+          class="transfer-peer-details"
+        >
+          <div>
+            <dt>来源 IP</dt>
+            <dd>{{ peerIPs[1 - myMember] || "未提供" }}</dd>
+          </div>
+          <div v-if="peerLocations[1 - myMember]">
+            <dt>IP 归属地</dt>
+            <dd><IPLocation :location="peerLocations[1 - myMember]" /></dd>
+          </div>
+          <div>
+            <dt>设备信息</dt>
+            <dd>{{ peerDevices[1 - myMember]?.summary || "未提供" }}</dd>
+          </div>
+          <div>
+            <dt>点对点地址</dt>
+            <dd>{{ peerAddress }}</dd>
+          </div>
+        </dl>
       </div>
       <div class="transfer-workspace">
         <section class="panel transfer-chat">
-          <h2>消息</h2>
+          <div class="transfer-section-heading">
+            <h2>消息</h2>
+            <span class="muted">文字 / 图片</span>
+          </div>
           <div
             class="transfer-messages"
             ref="messageList"
@@ -776,9 +918,10 @@ onBeforeUnmount(() => {
             aria-label="对话消息"
             aria-live="polite"
           >
-            <p v-if="!messages.length" class="muted">
-              还没有消息，发送文字或粘贴图片开始对话。
-            </p>
+            <div v-if="!messages.length" class="transfer-chat-empty muted">
+              <Icon name="message" />
+              <p>还没有消息<br />发送文字或粘贴图片开始对话</p>
+            </div>
             <div
               v-for="message in messages"
               :key="message.id"
@@ -899,12 +1042,16 @@ onBeforeUnmount(() => {
         </section>
 
         <section class="panel transfer-file-panel">
-          <h2>文件互传</h2>
-          <div class="transfer-auto-receive">
-            <label class="check"
-              ><UiCheckbox v-model="autoReceive" />自动接收对方文件</label
+          <div class="transfer-section-heading">
+            <h2>文件互传</h2>
+            <label
+              class="check transfer-auto-receive"
+              title="仅本次连接有效，按顺序中继下载"
+              ><UiCheckbox
+                v-model="autoReceive"
+                aria-label="自动接收对方文件"
+              />自动接收</label
             >
-            <p class="muted transfer-hint">仅本次连接有效，按顺序中继下载。</p>
           </div>
           <div
             class="transfer-drop"
@@ -916,8 +1063,12 @@ onBeforeUnmount(() => {
           >
             <span class="transfer-drop-icon"><Icon name="upload" /></span>
             <div class="transfer-drop-copy">
-              <strong>{{ dragDepth ? "松开即可添加文件" : "拖入文件" }}</strong
-              ><span class="muted">可多选，再次选择会追加</span>
+              <strong>{{
+                dragDepth ? "松开即可添加文件" : "拖入文件，或点击选择"
+              }}</strong
+              ><span class="muted"
+                >单文件最多 {{ size(maxFile) }} · 本次最多 32 个</span
+              >
             </div>
             <UiButton
               type="button"
@@ -934,194 +1085,256 @@ onBeforeUnmount(() => {
               @change="choose"
             />
           </div>
-          <p class="muted transfer-hint">
-            单文件最多 {{ size(maxFile) }} · 本次最多 32 个
-          </p>
-          <ul v-if="selected.length" class="transfer-selected">
-            <li v-for="(file, index) in selected" :key="index">
-              <span>{{ file.name }} · {{ size(file.size) }}</span
-              ><UiButton
-                type="button"
-                class="quiet"
-                size="small"
-                icon="close"
-                title="移除待发送文件"
-                :aria-label="`移除 ${file.name}`"
-                @click="selected.splice(index, 1)"
-              />
-            </li>
-          </ul>
-          <UiButton v-if="selected.length" class="primary" @click="offer"
-            >发送所选文件（{{ selected.length }}）</UiButton
+          <section
+            v-if="selected.length"
+            class="transfer-queue"
+            aria-label="待发送文件"
           >
+            <h3 class="transfer-list-heading">
+              待发送 <span class="transfer-count">{{ selected.length }}</span>
+            </h3>
+            <ul class="transfer-selected">
+              <li v-for="(file, index) in selected" :key="index">
+                <Icon name="file" />
+                <span class="transfer-selected-name">{{ file.name }}</span>
+                <span class="transfer-selected-size">{{
+                  size(file.size)
+                }}</span>
+                <UiButton
+                  type="button"
+                  class="quiet"
+                  size="small"
+                  icon="close"
+                  title="移除待发送文件"
+                  :aria-label="`移除 ${file.name}`"
+                  @click="selected.splice(index, 1)"
+                />
+              </li>
+            </ul>
+            <UiButton class="primary" size="small" icon="upload" @click="offer"
+              >发送所选文件（{{ selected.length }}）</UiButton
+            >
+          </section>
           <p v-if="!ordinaryFiles.length" class="muted transfer-empty">
             暂无文件，发送或接收后将在这里显示。
           </p>
-          <article
-            v-for="file in ordinaryFiles"
-            :key="file.id"
-            class="transfer-file"
+          <!-- 历史默认展开，原生 details 保留手动收起状态；有效的中继仍属于当前任务。 -->
+          <component
+            v-for="group in fileGroups"
+            :key="group.key"
+            :is="group.ended ? 'details' : 'section'"
+            :open="group.ended"
+            :class="group.ended ? 'transfer-history' : 'transfer-current'"
+            :aria-label="group.label"
           >
-            <div class="transfer-file-title">
-              <strong>{{ file.name }}</strong
-              ><span>{{ size(file.size) }}</span>
-              <UiButton
-                v-if="['cancelled', 'failed', 'complete'].includes(file.state)"
-                type="button"
-                class="quiet transfer-remove"
-                size="small"
-                icon="close"
-                title="移除记录"
-                :aria-label="`移除任务 ${file.name}`"
-                @click="removeTask(file)"
-              />
-            </div>
-            <div class="transfer-file-meta">
-              <span class="muted transfer-direction">{{
-                file.from === myMember ? "我发送的" : "对方发送的"
-              }}</span>
-              <span class="transfer-tag" :class="fileStatus(file).kind">{{
-                fileStatus(file).label
-              }}</span>
-              <!-- 中继下载共用同一入口，标签仅区分中继和点对点传输方式。 -->
-              <span
-                v-if="file.mode"
-                class="transfer-tag"
-                :class="file.mode === 'p2p' ? 'p2p' : 'relay'"
+            <summary v-if="group.ended">
+              已结束的传输（{{ group.files.length }}）
+            </summary>
+            <h3 v-else class="transfer-list-heading">
+              当前任务
+              <span class="transfer-count">{{ group.files.length }}</span>
+            </h3>
+            <div class="transfer-file-list">
+              <article
+                v-for="file in group.files"
+                :key="file.id"
+                class="transfer-file"
+                :data-transfer-id="file.id"
               >
-                {{ file.mode === "p2p" ? "点对点" : "实时中继" }}</span
-              >
-            </div>
-            <p
-              v-if="fileStatus(file).detail"
-              class="muted transfer-state-detail"
-            >
-              {{ fileStatus(file).detail }}
-            </p>
-            <progress
-              v-if="file.state === 'active'"
-              :value="file.bytes"
-              :max="file.size || 1"
-              :aria-label="`${file.name} 传输进度`"
-            ></progress>
-            <p
-              v-if="
-                file.state === 'active' &&
-                (!file.url || file.urlUsed || file.mode === 'tool')
-              "
-              class="muted"
-            >
-              {{ size(file.bytes) }} / {{ size(file.size) }} ·
-              {{ size(file.speed) }}/s
-            </p>
-            <div class="transfer-file-actions">
-              <UiButton
-                v-if="
-                  connected &&
-                  file.from === myMember &&
-                  ['failed', 'cancelled'].includes(file.state) &&
-                  !file.retried
-                "
-                class="transfer-action"
-                size="small"
-                icon="retry"
-                :disabled="active || file.retrying"
-                @click="retry(file)"
-                >{{ file.retrying ? "等待重发" : "重新发送" }}</UiButton
-              >
-              <template
-                v-if="file.state === 'offered' && file.from !== myMember"
-              >
-                <UiButton
-                  class="primary transfer-action"
-                  size="small"
-                  :disabled="active || file.accepting"
-                  @click="accept(file, false)"
-                  >中继下载</UiButton
+                <div class="transfer-file-head">
+                  <Icon name="file" class="transfer-file-icon" />
+                  <div class="transfer-file-copy">
+                    <div class="transfer-file-title">
+                      <strong>{{ file.name }}</strong
+                      ><span>{{ size(file.size) }}</span>
+                      <UiButton
+                        v-if="
+                          ['cancelled', 'failed', 'complete'].includes(
+                            file.state,
+                          )
+                        "
+                        type="button"
+                        class="quiet transfer-remove"
+                        size="small"
+                        icon="close"
+                        title="移除记录"
+                        :aria-label="`移除任务 ${file.name}`"
+                        @click="removeTask(file)"
+                      />
+                    </div>
+                    <div class="transfer-file-meta">
+                      <span class="muted transfer-direction"
+                        ><span aria-hidden="true">{{
+                          file.from === myMember ? "↑" : "↓"
+                        }}</span>
+                        {{
+                          file.from === myMember ? "我发送的" : "对方发送的"
+                        }}</span
+                      >
+                      <span
+                        class="transfer-tag"
+                        :class="fileStatus(file).kind"
+                        >{{ fileStatus(file).label }}</span
+                      >
+                      <!-- 只给任务状态着色，传输方式使用文字，减少重复色块。 -->
+                      <span v-if="file.mode" class="muted transfer-mode">
+                        {{ file.mode === "p2p" ? "点对点" : "实时中继" }}</span
+                      >
+                      <time
+                        v-if="file.sentLabel"
+                        class="muted transfer-file-time"
+                        :datetime="file.sent_at"
+                        :title="file.sentLabel"
+                        :aria-label="`发送时间 ${file.sentLabel}`"
+                        >发送于 {{ file.sentTimeLabel }}</time
+                      >
+                    </div>
+                  </div>
+                </div>
+                <p
+                  v-if="file.state === 'failed' && fileStatus(file).detail"
+                  class="muted transfer-state-detail"
                 >
-                <UiButton
-                  v-if="canDirect"
-                  class="transfer-action"
-                  size="small"
-                  :theme-overrides="directButtonTheme"
-                  :disabled="active || file.accepting"
-                  @click="accept(file, true)"
-                  >点对点下载</UiButton
-                >
-              </template>
-              <template v-if="file.url && file.mode === 'tool'">
-                <UiButton
-                  tag="a"
-                  class="primary transfer-action"
-                  size="small"
-                  :href="file.url"
-                  :download="file.name"
-                  referrerpolicy="no-referrer"
-                  @click="file.requested = true"
-                  >{{
-                    file.completedRound > 0 &&
-                    file.completedRound === file.progressRound
-                      ? "重新下载"
-                      : "下载文件"
-                  }}</UiButton
-                >
-                <UiButton
-                  class="transfer-action"
-                  size="small"
-                  @click="copyDownloadLink(file)"
-                >
-                  {{
-                    file.linkCopied ? "已复制链接" : "复制下载链接"
-                  }}</UiButton
-                >
-                <UiButton
-                  class="transfer-action"
-                  size="small"
-                  :disabled="
-                    !file.completedRound ||
-                    file.completedRound !== file.progressRound
+                  {{ fileStatus(file).detail }}
+                </p>
+                <progress
+                  v-if="file.state === 'active'"
+                  :value="file.bytes"
+                  :max="file.size || 1"
+                  :aria-label="`${file.name} 传输进度`"
+                ></progress>
+                <p
+                  v-if="
+                    file.state === 'active' &&
+                    (!file.url || file.urlUsed || file.mode === 'tool')
                   "
-                  title="结束传输后下载链接失效"
-                  @click="send({ type: 'finish-download', id: file.id })"
-                  >结束传输</UiButton
+                  class="muted transfer-progress-text"
                 >
-              </template>
-              <span v-else-if="file.url" class="muted"
-                >已请求下载，请查看下载记录</span
-              >
-              <UiButton
-                v-if="['offered', 'active'].includes(file.state)"
-                class="transfer-action"
-                size="small"
-                @click="send({ type: 'cancel', id: file.id })"
-                >{{
-                  file.state === "offered" && file.from !== myMember
-                    ? "拒绝接收"
-                    : file.mode === "tool"
-                      ? "取消传输"
-                      : "取消"
-                }}</UiButton
-              >
+                  <span>{{ size(file.bytes) }} / {{ size(file.size) }}</span>
+                  <span
+                    >{{
+                      file.size
+                        ? Math.min(
+                            100,
+                            Math.round((file.bytes / file.size) * 100),
+                          )
+                        : 0
+                    }}% · {{ size(file.speed) }}/s</span
+                  >
+                </p>
+                <div class="transfer-file-actions">
+                  <UiButton
+                    v-if="
+                      connected &&
+                      file.from === myMember &&
+                      ['failed', 'cancelled'].includes(file.state) &&
+                      !file.retried
+                    "
+                    class="transfer-action"
+                    size="small"
+                    icon="retry"
+                    :disabled="active || file.retrying"
+                    @click="retry(file)"
+                    >{{ file.retrying ? "等待重发" : "重新发送" }}</UiButton
+                  >
+                  <template
+                    v-if="file.state === 'offered' && file.from !== myMember"
+                  >
+                    <UiButton
+                      class="primary transfer-action"
+                      size="small"
+                      :disabled="active || file.accepting"
+                      @click="accept(file, false)"
+                      >中继下载</UiButton
+                    >
+                    <UiButton
+                      v-if="canDirect"
+                      class="transfer-action"
+                      size="small"
+                      :theme-overrides="directButtonTheme"
+                      :disabled="active || file.accepting"
+                      @click="accept(file, true)"
+                      >点对点下载</UiButton
+                    >
+                  </template>
+                  <template v-if="file.url && file.mode === 'tool'">
+                    <UiButton
+                      tag="a"
+                      class="primary transfer-action"
+                      size="small"
+                      :href="file.url"
+                      :download="file.name"
+                      referrerpolicy="no-referrer"
+                      @click="file.requested = true"
+                      >{{
+                        file.completedRound > 0 &&
+                        file.completedRound === file.progressRound
+                          ? "重新下载"
+                          : "下载文件"
+                      }}</UiButton
+                    >
+                    <UiButton
+                      class="transfer-action"
+                      size="small"
+                      @click="copyDownloadLink(file)"
+                    >
+                      {{
+                        file.linkCopied ? "已复制链接" : "复制下载链接"
+                      }}</UiButton
+                    >
+                    <UiButton
+                      class="transfer-action"
+                      size="small"
+                      :disabled="
+                        !file.completedRound ||
+                        file.completedRound !== file.progressRound
+                      "
+                      title="结束传输后下载链接失效"
+                      @click="send({ type: 'finish-download', id: file.id })"
+                      >结束传输</UiButton
+                    >
+                  </template>
+                  <span v-else-if="file.url" class="muted"
+                    >已请求下载，请查看下载记录</span
+                  >
+                  <UiButton
+                    v-if="['offered', 'active'].includes(file.state)"
+                    class="transfer-action"
+                    size="small"
+                    @click="send({ type: 'cancel', id: file.id })"
+                    >{{
+                      file.state === "offered" && file.from !== myMember
+                        ? "拒绝接收"
+                        : file.mode === "tool"
+                          ? "取消传输"
+                          : "取消"
+                    }}</UiButton
+                  >
+                </div>
+                <details
+                  v-if="file.url && file.mode === 'tool'"
+                  class="transfer-tool-link"
+                  :open="file.linkExpanded"
+                  @toggle="file.linkExpanded = $event.target.open"
+                >
+                  <summary>下载链接与说明</summary>
+                  <UiInput
+                    :model-value="file.url"
+                    readonly
+                    :aria-label="`${file.name} 下载链接`"
+                    @focus="$event.target.select()"
+                  />
+                  <p class="transfer-hint muted">
+                    已自动发起下载，也可复制链接到下载工具（支持 AB
+                    扩展接管）。最多
+                    {{ file.maxConnections }} 路连接，链接到
+                    {{ file.expiresLabel }}
+                    有效。每次完整下载都会记录日志；点击“结束传输”后链接失效。
+                  </p>
+                </details>
+              </article>
             </div>
-            <div
-              v-if="file.url && file.mode === 'tool'"
-              class="transfer-tool-link"
-            >
-              <UiInput
-                :model-value="file.url"
-                readonly
-                :aria-label="`${file.name} 下载链接`"
-                @focus="$event.target.select()"
-              />
-              <p class="transfer-hint muted">
-                已自动发起下载，也可复制链接到下载工具（支持 AB
-                扩展接管）。最多
-                {{ file.maxConnections }} 路连接，链接到
-                {{ file.expiresLabel }}
-                有效。每次完整下载都会记录日志；点击“结束传输”后链接失效。
-              </p>
-            </div>
-          </article>
+          </component>
         </section>
       </div>
     </template>
@@ -1145,8 +1358,7 @@ onBeforeUnmount(() => {
         </dd>
         <dt>下载工具</dt>
         <dd>
-          点击“中继下载”后自动开始下载，也可将链接交给 AB Download
-          Manager
+          点击“中继下载”后自动开始下载，也可将链接交给 AB Download Manager
           等软件下载。支持文件探测、分段和本次连接内重试，使用实时中继，双方页面必须在线。链接最长
           30 分钟有效，停用 10
           分钟会失效；点击“结束传输”后链接失效。取消传输也会撤销链接。链接包含临时下载权限，请勿转发。自动接收仍使用一次性链接。
@@ -1286,10 +1498,6 @@ onBeforeUnmount(() => {
   line-height: 1.7;
   margin-top: 18px;
 }
-.transfer-badge {
-  font-size: 13px;
-  color: var(--accent);
-}
 .transfer-waiting {
   text-align: center;
 }
@@ -1305,7 +1513,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--line);
   border-radius: 12px;
 }
-.transfer-peer,
+.transfer-peer-bar,
 .transfer-file-title,
 .transfer-selected li {
   display: flex;
@@ -1315,6 +1523,64 @@ onBeforeUnmount(() => {
 }
 .transfer-peer {
   margin-bottom: 16px;
+  padding: 16px;
+}
+.transfer-peer-bar {
+  flex-wrap: wrap;
+}
+.transfer-peer-actions {
+  display: flex;
+  gap: 8px;
+}
+.transfer-peer-info {
+  flex: 1;
+  min-width: 0;
+}
+.transfer-peer-info strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+}
+.transfer-peer-info strong::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.transfer-peer-state {
+  color: var(--accent);
+  font-size: 12px;
+}
+.transfer-peer > .transfer-peer-details {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.transfer-peer-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 12px 0 0;
+  text-align: left;
+}
+.transfer-peer-details > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.transfer-peer-details dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.transfer-peer-details dd {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 .transfer-peer-info {
   display: flex;
@@ -1330,8 +1596,11 @@ onBeforeUnmount(() => {
   line-height: 1.7;
 }
 .transfer-tool-link {
-  margin-top: 12px;
+  margin-top: 10px;
   min-width: 0;
+}
+.transfer-tool-link .ui-input {
+  margin-top: 10px;
 }
 .transfer-empty {
   margin: 20px 0 0;
@@ -1372,20 +1641,54 @@ onBeforeUnmount(() => {
 }
 .transfer-workspace {
   align-items: start;
-  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr);
 }
 .transfer-workspace .panel {
   min-width: 0;
   width: 100%;
   margin: 0;
+  padding: 20px;
+}
+.transfer-section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.transfer-section-heading h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.transfer-section-heading > .muted {
+  font-size: 12px;
 }
 .transfer-messages {
-  height: 320px;
+  height: 230px;
   overflow: auto;
   padding: 8px 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.transfer-chat-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  font-size: 12px;
+}
+.transfer-chat-empty .icon {
+  width: 24px;
+  height: 24px;
+  opacity: 0.65;
+}
+.transfer-chat-empty p {
+  margin: 0;
+  line-height: 1.8;
 }
 .transfer-message {
   /* 每条消息保持自身高度，消息区滚动时不会压缩或遮住图片的操作栏。 */
@@ -1527,20 +1830,21 @@ onBeforeUnmount(() => {
 .transfer-drop {
   display: flex;
   align-items: center;
-  gap: 14px;
-  border: 1px dashed var(--accent);
-  border-radius: 12px;
-  padding: 22px 18px;
+  gap: 12px;
+  margin: 16px 0 18px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  padding: 14px;
   background: var(--surface-subtle);
   transition:
     background 0.15s,
     border-color 0.15s;
 }
-.transfer-auto-receive {
-  margin-bottom: 16px;
-}
-.transfer-auto-receive .transfer-hint {
-  margin-top: 6px;
+.panel .transfer-auto-receive {
+  margin: 0;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
 }
 .transfer-drop.dragging,
 .transfer-drop:focus-within {
@@ -1551,25 +1855,23 @@ onBeforeUnmount(() => {
 .transfer-drop-icon {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
+  width: 24px;
+  height: 28px;
   flex-shrink: 0;
-  border-radius: 12px;
   color: var(--accent);
-  background: var(--surface);
 }
 .transfer-drop-icon .icon {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
 }
 .transfer-drop-copy {
   display: grid;
-  gap: 5px;
+  gap: 3px;
   flex: 1;
   min-width: 0;
 }
 .transfer-drop-copy strong {
-  font-size: 14px;
+  font-size: 13px;
 }
 .transfer-drop-copy span {
   font-size: 12px;
@@ -1580,8 +1882,53 @@ onBeforeUnmount(() => {
 .transfer-remove {
   flex-shrink: 0;
 }
-.transfer-file-title strong {
-  flex: 1;
+.transfer-queue {
+  padding-bottom: 16px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.transfer-list-heading {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.transfer-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 5px;
+  font-size: 11px;
+  background: var(--surface-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.transfer-history {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  margin-top: 20px;
+}
+.transfer-history[open] > summary {
+  margin-bottom: 16px;
+}
+.transfer-history > summary,
+.transfer-tool-link > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+}
+.transfer-history > summary:focus-visible,
+.transfer-tool-link > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.transfer-state-detail {
+  margin-top: 8px;
 }
 @media (max-width: 600px) {
   .transfer-help-content {
@@ -1591,33 +1938,85 @@ onBeforeUnmount(() => {
   .transfer-help-content dd + dt {
     margin-top: 8px;
   }
-  .transfer-drop {
-    flex-wrap: wrap;
+  .transfer-workspace .panel {
+    padding: 16px;
   }
-  .transfer-choose {
-    width: 100%;
+  .transfer-file-meta .transfer-file-time {
+    margin-left: 0;
   }
 }
 .transfer-selected {
   list-style: none;
   padding: 0;
+  margin: 0 0 12px;
 }
 .transfer-selected li {
-  border-bottom: 1px solid var(--line);
-  padding: 6px 0;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
 }
-.transfer-selected span,
+.transfer-selected .icon {
+  flex-shrink: 0;
+  color: var(--muted);
+  width: 16px;
+  height: 18px;
+}
+.transfer-selected-name,
 .transfer-file-title strong {
   overflow-wrap: anywhere;
   min-width: 0;
+  flex: 1;
 }
+.transfer-selected-size,
 .transfer-file-title span {
   flex-shrink: 0;
   font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.transfer-file-title {
+  align-items: flex-start;
+  gap: 10px;
+}
+.transfer-file-title strong {
+  font-size: 13px;
+  font-weight: 600;
 }
 .transfer-file {
-  border-top: 1px solid var(--line);
-  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+  padding: 18px 0;
+}
+.transfer-file:first-child {
+  padding-top: 0;
+}
+.transfer-file:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.transfer-history .transfer-file {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+.transfer-history .transfer-file:first-child {
+  padding-top: 0;
+}
+.transfer-history .transfer-file:last-child {
+  padding-bottom: 0;
+}
+.transfer-file-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.transfer-file-icon {
+  color: var(--muted);
+  flex-shrink: 0;
+  width: 16px;
+  height: 20px;
+}
+.transfer-file-copy {
+  flex: 1;
+  min-width: 0;
 }
 .transfer-file p {
   margin: 6px 0;
@@ -1627,12 +2026,24 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: 8px 0;
+  gap: 6px 8px;
+  margin-top: 6px;
+  font-size: 11px;
 }
 .transfer-direction {
-  margin-right: 2px;
-  font-size: 12px;
+  font-size: 11px;
+}
+.transfer-file-time {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.transfer-file .transfer-tag {
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 500;
 }
 .transfer-tag {
   display: inline-flex;
@@ -1666,15 +2077,44 @@ onBeforeUnmount(() => {
   background: var(--transfer-teal-bg);
 }
 .transfer-file progress {
+  display: block;
   width: 100%;
-  height: 8px;
+  height: 5px;
+  margin: 12px 0 6px;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
   accent-color: var(--accent);
+  appearance: none;
+  background: var(--line);
+}
+.transfer-file progress::-webkit-progress-bar {
+  background: var(--line);
+}
+.transfer-file progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 8px;
+}
+.transfer-file progress::-moz-progress-bar {
+  background: var(--accent);
+}
+.transfer-file .transfer-progress-text {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 .transfer-file-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  margin-top: 12px;
+}
+.transfer-file-actions:empty {
+  display: none;
 }
 /* 文件操作保持相同高度，宽度随文案变化，避免短按钮留白过多。 */
 .transfer-file-actions .transfer-action {
@@ -1690,7 +2130,7 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
   .transfer-messages {
-    height: 300px;
+    height: 180px;
   }
 }
 </style>

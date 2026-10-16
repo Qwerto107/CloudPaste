@@ -1,5 +1,6 @@
 import { apiURL, backendBase, request } from "./api.js";
 import { chatImageLimit, validateChatImage } from "./transfer-images.js";
+import { collectTransferDevice } from "./transfer-device.js";
 
 const maxChunkSize = 256 * 1024;
 const legacyChunkSize = 64 * 1024;
@@ -94,8 +95,8 @@ export class TransferClient {
     };
   }
 
-  async logConnectionDetails(peer = this.peer) {
-    if (!this.debugEnabled() && !this.auditEnabled) return;
+  async logConnectionDetails(peer = this.peer, display = false) {
+    if (!display && !this.debugEnabled() && !this.auditEnabled) return;
     try {
       const details = await this.connectionDetails(peer);
       if (details && this.peer === peer) {
@@ -106,12 +107,21 @@ export class TransferClient {
             port: details.remote.port,
           },
         };
+        // 连接建立时只取一次界面快照，不要求开启日志，也不新增统计轮询。
+        if (display && this.directReady)
+          this.onEvent({ type: "connection-info", remote: details.remote });
         if (this.debugEnabled()) this.debug("直连链路详情", details);
-      } else if (this.debugEnabled() && !this.closed && this.peer === peer)
-        this.debug("直连链路统计暂不可用");
+      } else if (!this.closed && this.peer === peer) {
+        if (display && this.directReady)
+          this.onEvent({ type: "connection-info", remote: {} });
+        if (this.debugEnabled()) this.debug("直连链路统计暂不可用");
+      }
     } catch (error) {
-      if (!this.closed && this.peer === peer)
+      if (!this.closed && this.peer === peer) {
+        if (display && this.directReady)
+          this.onEvent({ type: "connection-info", remote: {} });
         this.debug("读取直连统计失败", { error: error.name }, true);
+      }
     }
   }
 
@@ -144,9 +154,11 @@ export class TransferClient {
   async open(kind, fields) {
     if (this.closed) return;
     this.debug("申请连接", { action: kind });
+    const device = await collectTransferDevice();
+    if (this.closed) return;
     const data = await request(`/transfer/${kind}`, {
       method: "POST",
-      body: fields,
+      body: { ...fields, device },
     });
     if (this.closed) return;
     this.member = data.member;
@@ -804,7 +816,7 @@ export class TransferClient {
         sctpMaxMessageBytes: this.peer?.sctp?.maxMessageSize ?? null,
       });
       // 只在通道建立和文件终态取统计快照，不定时轮询或逐块打印。
-      void this.logConnectionDetails();
+      void this.logConnectionDetails(this.peer, true);
       this.onEvent({ type: "direct", ready: true });
     };
     channel.onclose = () => {

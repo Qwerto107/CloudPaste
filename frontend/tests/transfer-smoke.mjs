@@ -29,6 +29,15 @@ const benchmarkBytes =
 let service, browser, a, b;
 let logs = "";
 const errors = [];
+// 历史可手动收起；先等待任务进入终态，需要时再按真实入口展开查看或操作。
+async function showFinished(row, status) {
+  await row.getByText(status).waitFor({ state: "attached" });
+  const history = row.locator(
+    "xpath=ancestor::details[contains(@class,'transfer-history')]",
+  );
+  if (!(await history.evaluate((element) => element.open)))
+    await history.locator(":scope > summary").click();
+}
 try {
   service = spawn(binary, [], {
     env: {
@@ -411,7 +420,7 @@ try {
     );
     await row.getByText("下载完成", { exact: true }).waitFor();
     await row.getByRole("button", { name: "结束传输", exact: true }).click();
-    await row.getByText(/接收方已确认完成/).waitFor();
+    await showFinished(row, "已完成");
   }
   await relay(
     a,
@@ -458,6 +467,7 @@ try {
   assert.equal(await toolDownload.failure(), null);
   assert.deepEqual(await readFile(await toolDownload.path()), toolPayload);
   await toolRow.getByText("下载完成", { exact: true }).waitFor();
+  await toolRow.locator(".transfer-tool-link > summary").click();
   const linkInput = toolRow.getByRole("textbox", {
     name: "download-tool.bin 下载链接",
     exact: true,
@@ -641,7 +651,7 @@ try {
   await toolSenderRow.getByText("下载完成", { exact: true }).waitFor();
   await setToolRate(64);
   await toolRow.getByRole("button", { name: "结束传输", exact: true }).click();
-  await toolRow.getByText(/接收方已确认完成/).waitFor();
+  await showFinished(toolRow, "已完成");
   assert.equal((await fetch(toolURL, { method: "HEAD" })).status, 404);
 
   // 自动接收是本端显式同意；两份文件应依次下载，关闭后恢复原有手动接收。
@@ -724,7 +734,7 @@ try {
     .locator(".transfer-file")
     .filter({ has: b.getByText("retry.txt", { exact: true }) });
   assert.ok(await (await failedDownload).failure());
-  await retrySender.getByText(/传输失败/).waitFor();
+  await showFinished(retrySender, /传输失败/);
   await autoReceive.uncheck();
   assert.equal(
     await retryReceiver
@@ -735,34 +745,33 @@ try {
   await retrySender
     .getByRole("button", { name: "重新发送", exact: true })
     .click();
-  await retryReceiver
-    .nth(1)
-    .getByText(/等待接收/)
-    .waitFor();
+  const currentRetry = b
+    .locator(".transfer-current .transfer-file")
+    .filter({ has: b.getByText("retry.txt", { exact: true }) });
+  await currentRetry.getByText(/等待接收/).waitFor();
+  const retryID = await currentRetry.getAttribute("data-transfer-id");
+  const retriedReceiver = b.locator(`[data-transfer-id="${retryID}"]`);
+  const retriedSender = a.locator(`[data-transfer-id="${retryID}"]`);
   assert.equal(
-    await retrySender
-      .first()
+    await a
+      .locator(".transfer-history .transfer-file")
+      .filter({ has: a.getByText("retry.txt", { exact: true }) })
       .getByRole("button", { name: "重新发送", exact: true })
       .count(),
     0,
   );
   const retriedDownload = b.waitForEvent("download");
-  await retryReceiver
-    .nth(1)
+  await retriedReceiver
     .getByRole("button", { name: "中继下载", exact: true })
     .click();
   const receivedRetry = await retriedDownload;
   assert.equal(await receivedRetry.failure(), null);
   assert.deepEqual(await readFile(await receivedRetry.path()), retryPayload);
-  await retrySender.nth(1).getByText("下载完成", { exact: true }).waitFor();
-  await retryReceiver
-    .nth(1)
+  await retriedSender.getByText("下载完成", { exact: true }).waitFor();
+  await retriedReceiver
     .getByRole("button", { name: "结束传输", exact: true })
     .click();
-  await retryReceiver
-    .nth(1)
-    .getByText(/接收方已确认完成/)
-    .waitFor();
+  await showFinished(retriedReceiver, "已完成");
   await a.unroute("**/api/transfer/upload/*", failOnce);
 
   // 重复选择追加，移除只影响待发送列表。
@@ -795,7 +804,7 @@ try {
     .locator(".transfer-file")
     .filter({ has: a.getByText("cancel-me.txt", { exact: true }) });
   await cancelledRow.getByRole("button", { name: "取消", exact: true }).click();
-  await cancelledRow.getByText(/已取消/).waitFor();
+  await showFinished(cancelledRow, /已取消/);
   await cancelledRow
     .getByRole("button", { name: "移除任务 cancel-me.txt", exact: true })
     .click();
@@ -917,7 +926,7 @@ try {
   );
   for (const page of [a, b])
     await page
-      .getByText("直连可用 · 支持实时中继", { exact: true })
+      .getByText("已授权 · 点对点可用 · 中继可用", { exact: true })
       .waitFor({ timeout: 15000 });
   assert.equal(
     await b
@@ -941,7 +950,7 @@ try {
       .filter({ has: receiver.getByText(name, { exact: true }) });
     const started = performance.now();
     await row.getByRole("button", { name: "点对点下载", exact: true }).click();
-    await row.getByText(/已保存/).waitFor();
+    await showFinished(row, /已保存/);
     if (benchmarkBytes && payload.length >= benchmarkBytes)
       console.log(
         `BENCH p2p: ${(payload.length / 1048576).toFixed(1)} MiB, ${((performance.now() - started) / 1000).toFixed(2)} s, ${(payload.length / 1048576 / ((performance.now() - started) / 1000)).toFixed(1)} MiB/s`,
@@ -1008,13 +1017,14 @@ try {
       .getByRole("button", { name: "取消", exact: true })
       .click();
     for (const page of [sender, receiver]) {
+      await showFinished(
+        page
+          .locator(".transfer-file")
+          .filter({ has: page.getByText(name, { exact: true }) }),
+        /已取消/,
+      );
       await page
-        .locator(".transfer-file")
-        .filter({ has: page.getByText(name, { exact: true }) })
-        .getByText(/已取消/)
-        .waitFor();
-      await page
-        .getByText("直连可用 · 支持实时中继", { exact: true })
+        .getByText("已授权 · 点对点可用 · 中继可用", { exact: true })
         .waitFor({ timeout: 15000 });
     }
     // 验证重建后确实能完成下一份文件，且不会混入取消文件的旧分块。

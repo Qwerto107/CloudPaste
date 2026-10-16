@@ -121,7 +121,7 @@ jobs:
           npm ci --no-audit --no-fund
           npm run test:go-upload
           npm run test:security
-          node --test tests/transfer-flow.test.mjs tests/transfer-code.test.mjs tests/audit-date.test.mjs
+          node --test tests/transfer-flow.test.mjs tests/transfer-code.test.mjs tests/transfer-device.test.mjs tests/audit-date.test.mjs
           npm run build
       - name: 准备内嵌前端资源
         run: |
