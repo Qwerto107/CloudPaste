@@ -3,12 +3,50 @@
 package webui
 
 import (
+	"bytes"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+// 对照磁盘上的真实产物，防止嵌入规则悄悄遗漏以下划线开头的懒加载依赖。
+func TestEmbeddedFrontendContainsEveryBuildFile(t *testing.T) {
+	source := os.DirFS("dist")
+	handler := Handler(http.NotFoundHandler())
+	count := 0
+	err := fs.WalkDir(source, ".", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		count++
+		want, err := fs.ReadFile(source, name)
+		if err != nil {
+			return err
+		}
+		got, err := frontend.ReadFile("dist/" + name)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Errorf("构建资源未完整嵌入: %s, error=%v", name, err)
+		}
+		if strings.HasPrefix(name, "assets/") {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/"+name, nil))
+			if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), want) {
+				t.Errorf("构建资源无法完整访问: %s, status=%d", name, response.Code)
+			}
+		}
+		return nil
+	})
+	if err != nil || count == 0 {
+		t.Fatalf("无法核对真实构建资源: count=%d error=%v", count, err)
+	}
+}
 
 // 用真实构建产物验证内嵌根目录和首页引用，避免只验证内存中的测试资源。
 func TestEmbeddedFrontendEntryAndAssets(t *testing.T) {
