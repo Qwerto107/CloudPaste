@@ -30,6 +30,8 @@ API Key 必须启用且未过期，并满足权限、路径范围与存储 ACL�
 
 同一 IP 的高频同类失败请求，以及重复读取同一分享的请求，在一分钟内合并。首条请求单独记录，其余请求写成带 `merged_requests` 数量的汇总；扫描不同无效路径不会逐条落库。来源过多时按模块汇总。此机制只限制日志增长，不改变请求响应。
 
+互传申请成功的“申请加入互传”日志包含 `room`、`creator_name/type/account/ip`、`joiner_name/type/account/ip`（分别为四个独立字段）、`requested_at`、`relay_only` 和 `join_state:"pending"`。创建者同意后另记“加入互传”，保留相同申请时间，并补充 `approved_at` 和 `join_state:"approved"`；来源 IP 使用该阶段服务端保存的地址。时间为 UTC RFC3339，身份值沿用 `admin/apikey/guest`。不记录配对码或成员凭证，不提前记录尚未建立的点对点地址。
+
 ## 限频策略
 
 不再设置跨 IP 的每分钟总次数。下表使用一分钟固定窗口，环境变量为空或未配置时使用默认值，配置范围为 1–1000000 的整数；`0` 不表示关闭限频，非法配置会阻止启动。
@@ -165,6 +167,28 @@ PUT /api/files/{id} 支持 filename、remark、password、clearPassword、expire
 
 创建请求为 `{"name":"设备 A","relay_only":false}`，返回 `token`、`code`、`member`、`expires_at`、`max_file_size`。加入请求多一个 `code` 字段，返回第二席的临时票据。WebSocket 要求有效的 `Origin`，首条消息为 `{"type":"auth","token":"…"}`；长期 API Key 和管理员凭据不得放在 WebSocket URL 中。
 
+创建和加入均可附带 `device` 原始浏览器提示，整个请求体最多 2 KiB。前端只读取并上传原始字段，由后端结合 HTTP `User-Agent` 统一识别设备类型、浏览器、系统和型号，并生成 `summary` 展示文案；前端不判断系统版本或设备类型。原始 UA、品牌列表和触控点数不保存在房间或日志中，只保留后端生成的摘要。字段均可省略，旧客户端仍可使用；这些信息仅供参考，不参与鉴权或覆盖服务端 IP。
+
+原始字段为 `platform`、`platform_version`（各最多 32 字节）、`mobile`（布尔值）、`brands`、`full_version_list`（各最多 8 项，每项为 `brand/version`，分别最多 48/32 字节）、`model`（最多 96 字节）、`form_factors`（最多 4 项，每项 24 字节）和 `touch_points`（0–100，仅辅助识别桌面模式平板）。字符串按 UTF-8 字节限制，拒绝控制字符、双向覆盖符及未知字段。浏览器在配对时读取一次，详细提示最多等待 250 ms，失败或受限时由后端使用基础信息识别。
+
+识别结果包含 `type`、`browser`、`browser_version`、`os`、`os_version`、`model` 及 `summary`，通过 `joining.device`、`paired.devices` 返回，缺失结果为 `null`。结果只在当前房间的内存中保留。开启操作日志总开关及设备互传模块后，创建、申请加入和后续互传事件会包含 `device`；配对后的互传事件还会包含 `peer_device`。日志沿用现有保留时间及清理设置，关闭日志不会额外保存设备摘要。
+
+管理员手动加载 IP2Location LITE DB3 IPv4 BIN 后，后端根据可信来源 IP 查询国家、省级归属地，通过 `joining.location` 和 `paired.locations` 返回。`locations` 按创建者、加入者顺序排列；字段为 `country_code`、`country`、`region`、`summary`、`source`，空字段省略，LITE 数据来源为 `source: "ip2location"`。国内示例：`{"country_code":"CN","country":"中国","region":"广东","summary":"中国 · 广东","source":"ip2location"}`。未加载数据库或来源为 IPv6 时对应位置为 `null`，客户端应隐藏该位置字段；已加载的 IPv4 未命中或读取失败时返回 `{"summary":"未知"}`，内网、回环分别返回“局域网”“本机”。创建者只在授权配对后向加入者披露来源信息。客户端展示 LITE 查询结果时须保留 IP2Location 来源署名和链接。
+
+日志开启且对应归属地非空时，成功创建、申请加入的 HTTP 日志包含 `location`；后续互传事件复用连接建立时的归属地快照，配对后另含 `peer_location`。未加载及 IPv6 不写入位置字段。归属地仅描述来源 IP，不采用浏览器上报的点对点地址，不保存城市或坐标。
+
+管理员数据库管理入口（均需管理员登录）：
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/api/admin/ip-location` | 状态：`loaded`，加载后另含 `date`、`size`（字节） |
+| `PUT` | `/api/admin/ip-location` | 原始 BIN 请求体，`Content-Type: application/octet-stream`，最大 512 MiB；仅接收 DB3 IPv4 |
+| `DELETE` | `/api/admin/ip-location` | 卸载并删除数据库，停止显示位置，保留旧日志 |
+
+文件由管理员自行下载选择，服务端不接受远程 URL 或文件路径。上传采用固定缓冲，最多同时更新一个数据库，冲突返回 `409 IP_LOCATION_BUSY`；无效文件返回 `400` 并保留原库，超限返回 `413`。成功加载的选择在重启后保留。更换或卸载时，已配对双方收到 `{"type":"locations","locations":[位置或null,位置或null]}`；未配对时仅创建者收到 `{"type":"locations","joining_location":位置或null}`，不会因此自动授权或改变连接状态。
+
+CloudPaste uses the IP2Location LITE database for [IP geolocation](https://www.ip2location.com).
+
 `code` 为一个大写字母加四位数字（包含前导零），例如 `A1234`。页面显示 `A-1234`，复制得到 `A1234`；加入接口也接受 `a-1234` 与包含空白的形式，统一解析后再匹配。配对仍需创建者确认，且保留有效期、猜测限流和两人席位限制。
 
 页面「自动同意设备加入」默认为关闭；开启后由创建者客户端在收到 `joining` 时自动发送原有 `confirm` 消息，不增加新的接口字段或绕过服务端配对检查。
@@ -237,8 +261,9 @@ socket.addEventListener("open", () => {
 | `type`          | 字段                                                                        | 接收者与含义                                                           |
 | --------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `ready`         | `member`                                                                    | 当前成员，首帧认证成功                                                 |
-| `joining`       | `name`                                                                      | 仅创建者，加入者已经连接，等待确认                                     |
-| `paired`        | `names`、`relay_only`、`stun`                                               | 双方；`names[0]`、`names[1]` 分别为两端名称，空 `stun` 表示未配置 STUN |
+| `joining`       | `name`、`ip`、`device`、`location`                                          | 仅创建者，加入者已经连接，等待确认；`ip` 为服务端识别的 WebSocket 来源 IP |
+| `paired`        | `names`、`ips`、`devices`、`locations`、`relay_only`、`stun`                  | 双方；名称、IP、设备摘要、归属地均按创建者、加入者顺序排列；缺失设备摘要为 `null`，空 `stun` 表示未配置 STUN |
+| `locations`     | `locations` 或 `joining_location` | 管理员手动加载、更新或卸载数据库时刷新位置；不改变授权状态，不向未授权加入者披露创建者信息 |
 | `text`          | `text`、`from`、`sent_at`                                                   | 双方，包括发送者；`from` 为发送成员编号                                |
 | `signal`        | `data`                                                                      | 仅对端，原样转发协商数据                                               |
 | `file`          | `id`、`client_id`、`name`、`size`、`from`、`state`、`image_type`、`sent_at` | 双方，新任务初始 `state:"offered"`，非图片的 `image_type` 为空字符串   |

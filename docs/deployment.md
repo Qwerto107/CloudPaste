@@ -86,7 +86,7 @@ docker compose up -d --pull always
 ssh -L 8081:127.0.0.1:8081 用户名@服务器地址
 ```
 
-保持 SSH 连接，再从自己电脑打开上述地址。正式对外服务请配置 [HTTPS 反向代理](#https-与管理员入口)。
+保持 SSH 连接，再从自己电脑打开上述地址。正式对外服务请参考 [Nginx HTTPS 反向代理示例](#nginx-https-反向代理示例)。
 
 ## 多容器部署（前后端分离）
 
@@ -219,6 +219,20 @@ Windows 的 LOCAL 存储只接受与磁盘实际名称一致的路径，拒绝�
 
 ## 设备互传与实时中继
 
+### 可选 IP 归属地数据库
+
+管理员自行下载免费的 [IP2Location LITE DB3](https://lite.ip2location.com/database/db3-ip-country-region-city)，选择 **IPv4 BIN 格式**并解压。在“系统设置 → IP 归属地”独立选项卡选择文件，点击“加载数据库”后立即生效；已加载时按钮为“更新数据库”。这是全站共享的定位库，当前互传页面和互传日志共用这份数据。站点不自动下载或更新数据库，也不自动扫描加载本地文件。仅接受 DB3 IPv4 BIN，不接受 ZIP、CSV 或 IPv6 库；最大 512 MiB。
+
+手动加载的文件保存在 `DATA_DIR`，使用随机文件名和私有权限，重启后恢复该选择。更新时再次选择新文件加载；验证失败保留当前有效数据库。点击“卸载数据库”会关闭定位、移除数据库文件并隐藏当前连接的归属地，已有日志不删除。容器继续使用现有数据卷，不需要额外挂载或设置数据库文件权限。
+
+未加载数据库时，授权区、连接信息和新日志不显示归属地；IPv6 始终不显示位置。加载后，IPv4 可查询国家、省份，省份缺失时仅显示国家，未命中或读取失败时显示“未知”；内网、回环地址分别显示“局域网”“本机”。归属地描述网络出口，不代表设备实际位置，也不采用浏览器上报的点对点地址。
+
+查询使用可信代理规则识别的来源 IP，完全在本地完成，不向外部服务发送地址。数据库按需读取，不整体载入应用内存；连接建立时查询，消息和文件事件复用结果，仅在管理员更换数据库时刷新当前连接。上传使用固定缓冲并限制同时更新数量，不阻塞互传消息转发。互传日志遵循总开关、模块开关及保留时间，LITE 结果界面保留来源署名。数据库不随源码、二进制或镜像分发。
+
+CloudPaste uses the IP2Location LITE database for [IP geolocation](https://www.ip2location.com).
+
+### 互传参数
+
 单文件程序和合并容器已包含配对、WebSocket 消息与 HTTP 实时中继，全部沿用网站端口，无需开放其他服务端口或部署 TURN。直连由两端浏览器尝试建立；网络不允许直连时选择中继。自建防火墙或浏览器网络策略仍可能限制 WebRTC 的动态连接，中继可通过现有网站入口使用。
 
 | 环境变量               | 默认值  | 含义                                                            |
@@ -236,25 +250,7 @@ Windows 的 LOCAL 存储只接受与磁盘实际名称一致的路径，拒绝�
 
 **局域网或公网的点对点文件下载需要 HTTPS**，证书须被接收设备的浏览器信任，且浏览器支持 `showSaveFilePicker`。普通 HTTP 局域网 IP 地址即使已建立 WebRTC 连接，也无法直接保存文件，页面只提供中继下载。本机 `localhost`、`127.0.0.1` 是安全上下文例外；配置 STUN 不会解除浏览器的保存限制。
 
-HTTPS 反向代理需允许 WebSocket Upgrade，关闭 `/api/transfer/upload/` 的请求缓冲和 `/api/transfer/download/` 的响应缓冲，并允许所设单文件大小。仓库自带的前端 Nginx 已配置；外层 Nginx 可在现有 `/api/` location 中合并以下选项，保留原有 `proxy_pass`、Host 和可信来源设置：
-
-```nginx
-# http 层定义，用空值移除普通请求的 Connection 头。
-map $http_upgrade $transfer_connection {
-    default upgrade;
-    '' '';
-}
-
-# 放在现有 /api/ location 内。
-proxy_http_version 1.1;
-proxy_set_header Upgrade $http_upgrade;
-proxy_set_header Connection $transfer_connection;
-proxy_request_buffering off;
-proxy_buffering off;
-proxy_read_timeout 120s;
-proxy_send_timeout 120s;
-client_max_body_size 10g;
-```
+HTTPS 反向代理需允许 WebSocket Upgrade，关闭 `/api/transfer/upload/` 的请求缓冲和 `/api/transfer/download/` 的响应缓冲，并允许所设单文件大小。仓库自带的前端 Nginx 已配置，外层代理也必须关闭缓冲；完整配置见 [Nginx HTTPS 反向代理示例](#nginx-https-反向代理示例)。
 
 边收边转发依赖每一层代理都支持流式处理；CDN 的请求大小或持续时间限制仍然生效。服务自身在约 1 分钟无传输进展后清理文件，连接最长 2 小时。取消、断网或重启后没有服务端副本用于续传。
 
@@ -273,6 +269,79 @@ client_max_body_size 10g;
 ## HTTPS 与管理员入口
 
 前端、后端可独立部署。推荐浏览器统一访问站点域名，由反向代理将 `/api` 转发到后端；静态文件请求交给前端。默认 Compose 已配置同源转发。
+
+### Nginx HTTPS 反向代理示例
+
+以下适用于**宿主机 Nginx → 默认 Compose 入口 `127.0.0.1:8081`**，单容器和多容器均可使用。完整二进制默认监听 `8787`，需相应修改 `proxy_pass`；若 Nginx 运行在独立容器中，应使用其能够访问的服务地址。
+
+替换域名、证书路径和上游端口，将配置放入 `http {}` 内包含的站点文件，例如 `/etc/nginx/conf.d/cloudpaste.conf`。`map` 和 `log_format` 放在 `server` 外，不要额外套一层 `http {}`。
+
+```nginx
+# 普通请求不携带 Upgrade，WebSocket 保留升级头。
+map $http_upgrade $cloudpaste_connection {
+    default upgrade;
+    ''      '';
+}
+
+# 访问日志只记录路径，避免下载票据等查询参数落入日志。
+log_format cloudpaste '$remote_addr [$time_local] '
+                     '"$request_method $uri $server_protocol" $status $body_bytes_sent';
+
+server {
+    listen 80;
+    server_name share.example.com;
+    access_log /var/log/nginx/cloudpaste.access.log cloudpaste;
+    return 308 https://share.example.com$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name share.example.com;
+
+    ssl_certificate     /etc/nginx/ssl/share.example.com/fullchain.pem;
+    ssl_certificate_key /etc/nginx/ssl/share.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    client_max_body_size 10g;
+    client_body_timeout 120s;
+    access_log /var/log/nginx/cloudpaste.access.log cloudpaste;
+
+    location / {
+        # 默认 Compose 入口；完整二进制默认使用 127.0.0.1:8787。
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # 直接面向客户端的入口覆盖转发头，防止客户端伪造来源。
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $cloudpaste_connection;
+
+        # 边接收边转发，避免中继先等待整个文件上传完毕才开始下载。
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_cache off;
+
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+```
+
+保存后检查配置，通过后重载：
+
+```sh
+sudo nginx -t && sudo nginx -s reload
+```
+
+**中继下载长时间显示 `0 B / 文件大小 · 0 B/s`，随后突然开始传输时，优先检查外层 `proxy_request_buffering` 是否仍为 `on`。** 开启时 Nginx 会先接收完整请求体，再发送给后端；关闭后才会边收边转发。[Nginx 请求缓冲说明](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering)
+
+已有反代面板或多个 `location` 时，将关闭缓冲和 WebSocket 配置合并到实际匹配请求的配置中；新增的 `location /` 不会覆盖更具体的 `/api/` 规则。每一层代理都需支持流式转发。点对点文件数据不经过中继，因此点对点正常也不能排除中继代理配置问题。
+
+真实 IP 仍需按[可信代理设置](#真实客户端地址与可信代理)配置：二进制同机代理可信任 `127.0.0.1,::1`；单容器填写 Go 实际看到的代理地址，可能是 Docker 网关地址；多容器按下文配置内层 Nginx。若入口前还有 CDN 或其他代理，先通过明确的可信来源规则恢复真实 IP，再转发，不能直接信任客户端提交的头。
+
+### 管理员入口保护
 
 管理员 API 是 `/api/admin` 及全部子路径，包含登录、文件读取与上传。可在外部反向代理为这个完整前缀配置 IP 白名单或 mTLS，同时保持账号认证。确保内部服务端口不能绕过代理直接访问。
 
