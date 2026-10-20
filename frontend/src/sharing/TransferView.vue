@@ -303,6 +303,10 @@ function event(message) {
       concurrencyDraft: message.concurrency,
       bytes: 0,
       completed: 0,
+      speed: 0,
+      measured: performance.now(),
+      sampleBytes: 0,
+      samples: [],
       recent: [],
       sentLabel: new Date(message.sent_at).toLocaleString("zh-CN", {
         hour12: false,
@@ -310,7 +314,11 @@ function event(message) {
     });
   } else if (message.type === "folder-state") {
     const folder = folders.value.find((item) => item.id === message.id);
-    if (folder) Object.assign(folder, message);
+    if (folder) {
+      if (message.state === "active" && folder.state !== "active")
+        folder.measured = performance.now();
+      Object.assign(folder, message);
+    }
   } else if (message.type === "folder-concurrency") {
     const folder = folders.value.find((item) => item.id === message.id);
     if (folder) {
@@ -851,23 +859,27 @@ function beforeUnload(event) {
 }
 window.addEventListener("beforeunload", beforeUnload);
 // 速率每秒采样一次，取最近三个采样区间的平均值，不跟随分块消息跳动。
+function measureSpeed(transfer, bytes, now) {
+  if (transfer.state !== "active") return;
+  const elapsed = now - transfer.measured;
+  if (elapsed < 1000) return;
+  transfer.samples.push({
+    bytes: Math.max(0, bytes - transfer.sampleBytes),
+    elapsed,
+  });
+  if (transfer.samples.length > 3) transfer.samples.shift();
+  transfer.speed =
+    (transfer.samples.reduce((sum, item) => sum + item.bytes, 0) * 1000) /
+    transfer.samples.reduce((sum, item) => sum + item.elapsed, 0);
+  transfer.sampleBytes = bytes;
+  transfer.measured = now;
+}
 const speedTimer = setInterval(() => {
   const now = performance.now();
-  for (const file of files.value) {
-    if (file.state !== "active") continue;
-    const elapsed = now - file.measured;
-    if (elapsed < 1000) continue;
-    file.samples.push({
-      bytes: Math.max(0, file.bytes - file.sampleBytes),
-      elapsed,
-    });
-    if (file.samples.length > 3) file.samples.shift();
-    file.speed =
-      (file.samples.reduce((sum, item) => sum + item.bytes, 0) * 1000) /
-      file.samples.reduce((sum, item) => sum + item.elapsed, 0);
-    file.sampleBytes = file.bytes;
-    file.measured = now;
-  }
+  for (const file of files.value) measureSpeed(file, file.bytes, now);
+  // 累计已完成文件和在传文件的字节，短文件完成移出列表后仍计入文件夹速率。
+  for (const folder of folders.value)
+    measureSpeed(folder, folderBytes(folder), now);
 }, 1000);
 onBeforeRouteLeave(() => {
   if (
@@ -1463,7 +1475,7 @@ onBeforeUnmount(() => {
                   <p class="muted transfer-progress-text">
                     <span
                       >{{ size(folderBytes(folder)) }} /
-                      {{ size(folder.size) }}</span
+                      {{ size(folder.size) }} · {{ size(folder.speed) }}/s</span
                     ><span>并发上限 {{ folder.concurrency }} 个</span>
                   </p>
                   <details
