@@ -180,7 +180,7 @@ PUT /api/files/{id} 支持 filename、remark、password、clearPassword、expire
 
 识别结果包含 `type`、`browser`、`browser_version`、`os`、`os_version`、`model` 及 `summary`，通过 `joining.device`、`paired.devices` 返回，缺失结果为 `null`。结果只在当前房间的内存中保留。开启操作日志总开关及设备互传模块后，创建、申请加入和后续互传事件会包含 `device`；配对后的互传事件还会包含 `peer_device`。日志沿用现有保留时间及清理设置，关闭日志不会额外保存设备摘要。
 
-管理员手动加载 IP2Location LITE DB3 IPv4 BIN 后，后端根据可信来源 IP 查询国家、省级归属地，通过 `joining.location` 和 `paired.locations` 返回。`locations` 按创建者、加入者顺序排列；字段为 `country_code`、`country`、`region`、`summary`、`source`，空字段省略，LITE 数据来源为 `source: "ip2location"`。国内示例：`{"country_code":"CN","country":"中国","region":"广东","summary":"中国 · 广东","source":"ip2location"}`。未加载数据库或来源为 IPv6 时对应位置为 `null`，客户端应隐藏该位置字段；已加载的 IPv4 未命中或读取失败时返回 `{"summary":"未知"}`，内网、回环分别返回“局域网”“本机”。创建者只在授权配对后向加入者披露来源信息。客户端展示 LITE 查询结果时须保留 IP2Location 来源署名和链接。
+管理员手动加载 IP2Location LITE DB3 IPv4 BIN 后，后端根据可信来源 IP 查询国家、省级归属地，通过 `joining.location` 和 `paired.locations` 返回。`locations` 按创建者、加入者顺序排列；字段为 `country_code`、`country`、`region`、`summary`、`source`，空字段省略，LITE 数据来源为 `source: "ip2location"`。国内示例：`{"country_code":"CN","country":"中国","region":"广东","summary":"中国 · 广东","source":"ip2location"}`。未加载数据库或来源为 IPv6 时对应位置为 `null`，客户端应隐藏该位置字段；已加载的 IPv4 未命中或读取失败时返回 `{"summary":"未知"}`，内网、回环分别返回“局域网”“本机”。创建者只在授权配对后向加入者披露来源信息。页面仅展示归属地摘要，数据库来源说明保留在本文档中。
 
 日志开启且对应归属地非空时，成功创建、申请加入的 HTTP 日志包含 `location`；后续互传事件复用连接建立时的归属地快照，配对后另含 `peer_location`。未加载及 IPv6 不写入位置字段。归属地仅描述来源 IP，不采用浏览器上报的点对点地址，不保存城市或坐标。
 

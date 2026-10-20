@@ -170,15 +170,6 @@ onBeforeUnmount(() => controller.abort());
       </p>
       <footer class="ip-location-notes muted small">
         <p>手动更新 · 加载后立即生效 · 重启保留 · IPv6 不显示位置</p>
-        <p>
-          CloudPaste uses the IP2Location LITE database for
-          <a
-            href="https://www.ip2location.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            >IP geolocation</a
-          >.
-        </p>
       </footer>
     </div>
   </section>
