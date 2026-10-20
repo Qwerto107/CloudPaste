@@ -394,7 +394,7 @@ small {
   flex-direction: column;
   gap: 0.45rem;
   margin-bottom: 1rem;
-  font-size: 0.9rem;
+  font-size: 14px;
 }
 .panel input[type="file"] {
   width: 100%;
@@ -492,6 +492,55 @@ textarea::placeholder {
 }
 .share-options label {
   margin: 0;
+}
+/* 有效期使用快捷按钮，自定义时长单独输入数值和单位。 */
+.expiry-select {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  min-width: 0;
+  /* 与组件库输入框、相邻字段标题统一为 14px。 */
+  font-size: 14px;
+}
+.expiry-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.expiry-chip {
+  flex: 1 0 auto;
+  min-width: 3.2rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+}
+.expiry-chip:hover {
+  color: var(--text);
+}
+.expiry-chip.active {
+  border-color: var(--accent);
+  background: var(--soft);
+  color: var(--accent);
+}
+.expiry-chip:disabled {
+  cursor: not-allowed;
+}
+.expiry-custom {
+  display: grid;
+  /* 自定义时长使用紧凑宽度，小屏仍可随可用空间收缩。 */
+  grid-template-columns: minmax(0, 1fr) 80px;
+  width: 190px;
+  max-width: 100%;
+  gap: 0.5rem;
+}
+.expiry-error {
+  color: var(--error);
 }
 .login-alternative {
   margin: 1.25rem 0 0;

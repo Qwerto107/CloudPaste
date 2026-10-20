@@ -7,6 +7,8 @@ const props = defineProps({
   modelValue: [String, Number],
   value: [String, Number],
   type: { type: String, default: "text" },
+  // 由组件库统一控制输入框高度，默认尺寸保持不变。
+  size: { type: String, default: "medium" },
   disabled: Boolean,
   autosize: [Boolean, Object],
   modelModifiers: { type: Object, default: () => ({}) },
@@ -34,6 +36,7 @@ function update(value) {
     :class="attrs.class"
     :style="attrs.style"
     :value="text"
+    :size="size"
     :type="type === 'textarea' || type === 'password' ? type : 'text'"
     :disabled="disabled"
     :readonly="attrs.readonly !== undefined && attrs.readonly !== false"

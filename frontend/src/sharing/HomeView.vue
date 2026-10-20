@@ -24,8 +24,9 @@ const copied = ref(false);
 const sharedPassword = ref("");
 const copiedText = ref(false);
 const allowed = computed(() => hasPermission(1));
+const validHours = computed(() => Number.isFinite(hours.value));
 async function share() {
-  if (busy.value || !allowed.value) return;
+  if (busy.value || !allowed.value || !validHours.value) return;
   busy.value = true;
   error.value = "";
   link.value = "";
@@ -124,7 +125,7 @@ async function copyShareText() {
           <UiButton
             class="primary"
             icon="link"
-            :disabled="busy || !allowed || !content.trim()"
+            :disabled="busy || !allowed || !content.trim() || !validHours"
           >
             {{ busy ? "正在创建…" : "创建分享" }}
           </UiButton>

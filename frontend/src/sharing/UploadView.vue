@@ -28,6 +28,7 @@ const uploaded = ref([]);
 const error = ref("");
 let controller;
 const allowed = computed(() => hasPermission(2));
+const validHours = computed(() => Number.isFinite(hours.value));
 const uploadLimit = computed(() => {
   const size = Number(settings.max_upload_size);
   return size >= 1024 ? `${size / 1024} GiB` : `${size} MiB`;
@@ -87,6 +88,7 @@ async function upload() {
   if (
     busy.value ||
     !allowed.value ||
+    !validHours.value ||
     (!files.value.length && !uploaded.value.length)
   )
     return;
@@ -325,7 +327,11 @@ async function copyResult(item, kind) {
           class="primary"
           icon="link"
           :disabled="
-            busy || !allowed || !storage || (!files.length && !uploaded.length)
+            busy ||
+            !allowed ||
+            !storage ||
+            !validHours ||
+            (!files.length && !uploaded.length)
           "
         >
           {{
