@@ -57,6 +57,7 @@ type App struct {
 	passwordAttemptMu     sync.Mutex
 	guestPasswordAttempts passwordAttemptBudget
 	adminPasswordAttempts passwordAttemptBudget
+	apiKeyFailures        *rateLimitTable
 	mutationMu            sync.Mutex
 	clientsMu             sync.Mutex
 	storageClients        map[string]cachedDriver

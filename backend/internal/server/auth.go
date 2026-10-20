@@ -79,7 +79,28 @@ func (a *App) allowPasswordAttempt(r *http.Request) bool {
 	return true
 }
 
-func (a *App) authenticate(r *http.Request) (*Principal, error) {
+// API Key 的失败额度独立于管理登录和分享密码，成功请求不创建计数项。
+func (a *App) allowAPIKeyAttempt(r *http.Request, failed bool) bool {
+	ip := rateLimitIP(a.clientIP(r))
+	a.passwordAttemptMu.Lock()
+	defer a.passwordAttemptMu.Unlock()
+	if a.apiKeyFailures == nil {
+		if !failed {
+			return true
+		}
+		a.apiKeyFailures = newRateLimitTable(2048)
+	}
+	if failed {
+		return a.apiKeyFailures.allow(ip, a.cfg.RateLimits.PasswordPerIP, time.Now())
+	}
+	return !a.apiKeyFailures.blocked(ip, a.cfg.RateLimits.PasswordPerIP, time.Now())
+}
+
+func apiKeyRateLimited() error {
+	return &apiError{429, "RATE_LIMITED", "API Key 验证尝试过多，请稍后重试"}
+}
+
+func (a *App) authenticate(r *http.Request) (p *Principal, err error) {
 	header := r.Header.Get("Authorization")
 	if header == "" && r.Header.Get("X-Custom-Auth-Key") != "" {
 		header = "ApiKey " + r.Header.Get("X-Custom-Auth-Key")
@@ -88,6 +109,18 @@ func (a *App) authenticate(r *http.Request) (*Principal, error) {
 		return nil, nil
 	}
 	parts := strings.Fields(header)
+	if len(parts) > 0 && (strings.EqualFold(parts[0], "apikey") || strings.EqualFold(parts[0], "apikeybase64")) {
+		if !a.allowAPIKeyAttempt(r, false) {
+			return nil, apiKeyRateLimited()
+		}
+		// 三种传递方式共用额度；仅认证失败计数，不把后续权限不足或内部错误当作猜测。
+		defer func() {
+			var failure *apiError
+			if errors.As(err, &failure) && failure.Status == 401 && !a.allowAPIKeyAttempt(r, true) {
+				err = apiKeyRateLimited()
+			}
+		}()
+	}
 	if len(parts) != 2 {
 		return nil, &apiError{401, "UNAUTHORIZED", "认证信息无效"}
 	}

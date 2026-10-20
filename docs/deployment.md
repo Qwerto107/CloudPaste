@@ -46,6 +46,7 @@ TRANSFER_RATE_MB=64
 TRANSFER_STUN=
 
 # 每分钟限频：除 WebSocket 消息按成员外，其余按真实来源 IP。
+# 管理密码、访客密码和 API Key 失败验证分别计数，共用以下次数配置。
 PASSWORD_ATTEMPTS_PER_MINUTE=10
 TRANSFER_CREATE_PER_MINUTE=30
 TRANSFER_JOIN_PER_MINUTE=30
@@ -159,7 +160,7 @@ docker compose up -d --pull always
 | `TRANSFER_MAX_FILE_MB`            | `10240`   | 互传文件硬上限，范围 1–10240 MiB；后台只能设置不高于此值的上限                                      |
 | `TRANSFER_RATE_MB`                | `64`      | 初始中继总速率，范围 0–10240 MiB/s，0 表示不限速；后台保存的值优先                                  |
 | `TRANSFER_STUN`                   | 空        | 可选 `stun:主机:端口`，用于跨网络直连；留空不联系第三方 STUN                                        |
-| `PASSWORD_ATTEMPTS_PER_MINUTE`    | `10`      | 每 IP 的密码验证次数；管理入口和访客入口分别计数                                                    |
+| `PASSWORD_ATTEMPTS_PER_MINUTE`    | `10`      | 每 IP 的管理密码、访客密码和 API Key 失败验证次数，三者分别计数                                      |
 | `TRANSFER_CREATE_PER_MINUTE`      | `30`      | 每 IP 创建互传连接次数                                                                              |
 | `TRANSFER_JOIN_PER_MINUTE`        | `30`      | 每 IP 输入配对码加入连接次数                                                                        |
 | `TRANSFER_RELAY_PER_MINUTE`       | `180`     | 每 IP 普通中继上传、下载共享次数                                                                    |
@@ -266,9 +267,9 @@ HTTPS 反向代理需允许 WebSocket Upgrade，关闭 `/api/transfer/upload/` �
 
 以上九个 `*_PER_MINUTE` 变量均可自定义，留空或未配置时使用默认值。只接受 1–1000000 的整数，`0` 不表示关闭限频；非法配置会阻止服务启动。容器模式在 `.env` 设置后重建容器，二进制模式设置进程环境后重启服务；后台没有这些次数的设置项，也不会用数据库配置覆盖环境变量。
 
-除 WebSocket 应用消息按已认证成员计数外，其他限频按真实来源 IP 计数；互传的 IPv6 来源按 `/64` 聚合。普通中继的上传和下载共用每 IP 每分钟 180 次，下载工具的 HEAD、GET、分段 GET 共用另一份每 IP 每分钟 240 次。文件夹内部消息独立使用每成员每分钟 12000 条，有效文件夹票据的中继上传和下载共享每 IP 每分钟 12000 次；无效票据、重放和未知编号使用独立探测表，次数沿用 `TRANSFER_RELAY_PER_MINUTE`，不占正常传输额度。限频表满时淘汰最近最少使用的条目，继续接纳新来源。
+除 WebSocket 应用消息按已认证成员计数外，其他限频按真实来源 IP 计数；互传和 API Key 失败验证的 IPv6 来源按 `/64` 聚合。普通中继的上传和下载共用每 IP 每分钟 180 次，下载工具的 HEAD、GET、分段 GET 共用另一份每 IP 每分钟 240 次。文件夹内部消息独立使用每成员每分钟 12000 条，有效文件夹票据的中继上传和下载共享每 IP 每分钟 12000 次；无效票据、重放和未知编号使用独立探测表，次数沿用 `TRANSFER_RELAY_PER_MINUTE`，不占正常传输额度。限频表满时淘汰最近最少使用的条目，继续接纳新来源。
 
-密码验证成功和失败均计数，管理与访客入口分别计算。没有跨 IP 的每分钟总次数；同一 IPv6 `/64` 内的互传请求共享对应来源额度。
+密码验证成功和失败均计数，管理与访客入口分别计算。API Key 只记录认证失败次数，与密码额度独立；三种 API Key 传递方式共用来源额度，达到次数后该来源的 API Key 认证均返回 429，窗口结束后恢复。没有跨 IP 的每分钟总次数；同一 IPv6 `/64` 内的互传及 API Key 请求共享对应来源额度。
 
 计数为内存中的一分钟固定窗口，从各计数项首次请求起算；进程重启清空，多实例各自计数。HTTP 超限返回 429，WebSocket 应用消息超限断开连接。完整计数规则见 [API 限频策略](api.md#限频策略)。
 
