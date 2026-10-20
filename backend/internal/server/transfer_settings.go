@@ -11,7 +11,7 @@ func (a *App) transferSettingRange(key string) (int64, int64) {
 	case "transfer_rate_mb":
 		return 0, 10240
 	case "transfer_max_relays":
-		return 1, 64
+		return 0, 1<<(strconv.IntSize-1) - 1
 	case "transfer_folder_concurrency":
 		return 1, transferFolderMaxConcurrency
 	case "transfer_max_file_mb":

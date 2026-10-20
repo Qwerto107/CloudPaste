@@ -717,7 +717,7 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		if msg.Mode != "relay" && msg.Mode != "tool" && (msg.Mode != "p2p" || r.relayOnly) {
 			return badRequest("传输方式无效")
 		}
-		if msg.Mode == "relay" && !f.reservedRelay && h.relays+h.folderReservations >= h.maxRelays {
+		if msg.Mode == "relay" && !f.reservedRelay && h.maxRelays > 0 && h.relays+h.folderReservations >= h.maxRelays {
 			return transferBusy()
 		}
 		f.mode = msg.Mode
@@ -747,7 +747,11 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 			f.tool = &transferTool{expires: expires, requests: map[string]*transferRangeRequest{}}
 			secret := transferSecret()
 			f.downloadToken = secretHash(secret)
-			h.sendLocked(m, map[string]any{"type": "download-tool", "id": f.id, "url": "/api/transfer/download/" + f.id + "/tool?ticket=" + secret, "expires_at": expires, "max_connections": min(4, h.maxRelays)})
+			connections := 4
+			if h.maxRelays > 0 {
+				connections = min(connections, h.maxRelays)
+			}
+			h.sendLocked(m, map[string]any{"type": "download-tool", "id": f.id, "url": "/api/transfer/download/" + f.id + "/tool?ticket=" + secret, "expires_at": expires, "max_connections": connections})
 		} else {
 			h.sendLocked(r.members[f.sender], map[string]any{"type": "start", "id": f.id, "mode": "p2p"})
 		}

@@ -44,10 +44,9 @@ export const fields = {
   },
   transfer_max_relays: {
     label: "中继并发请求数",
-    help: "全站同时中继的请求数量，范围 1–64；下载工具的每个分段各占一路。降低后不会中断现有传输，仅限制新请求。",
+    help: "全站同时中继的请求数量，不设最大值，0 表示不限。下载工具的每个分段各占一路。降低后不会中断现有传输，仅限制新请求。",
     unit: "个",
-    min: 1,
-    max: 64,
+    min: 0,
   },
   transfer_max_file_mb: {
     label: "互传单文件上限",

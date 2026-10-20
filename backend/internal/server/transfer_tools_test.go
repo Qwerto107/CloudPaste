@@ -18,6 +18,9 @@ func offerTool(t *testing.T, sender, receiver transferTestPeer, size int64) (str
 	receiver.next("file")
 	receiver.send(map[string]any{"type": "accept", "id": id, "mode": "tool"})
 	link := receiver.next("download-tool")
+	if connections, ok := link["max_connections"].(float64); !ok || connections < 1 || connections > 4 {
+		t.Fatal("invalid tool connection limit", link)
+	}
 	sender.next("state")
 	receiver.next("state")
 	return id, link["url"].(string)
@@ -25,6 +28,7 @@ func offerTool(t *testing.T, sender, receiver transferTestPeer, size int64) (str
 
 func TestTransferToolRangesAndProbes(t *testing.T) {
 	f, server, sender, receiver := transferPair(t)
+	f.app.applyTransferSettings(map[string]string{"transfer_max_relays": "0"})
 	f.app.audit.enabled.Store(true)
 	payload := bytes.Repeat([]byte("abcdefgh"), 16384)
 	id, link := offerTool(t, sender, receiver, int64(len(payload)))

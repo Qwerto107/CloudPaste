@@ -140,11 +140,12 @@ func (h *transferHub) dispatchFolderQueuesLocked() {
 				continue
 			}
 			desired := folder.concurrency
-			if folder.mode == "relay" {
+			// 0 仅取消全站总并发限制，文件夹自身的并发窗口仍然生效。
+			if folder.mode == "relay" && h.maxRelays > 0 {
 				desired = min(desired, share)
 			}
 			credits := min(desired-len(folder.current)-folder.pending, folder.count-folder.offered-folder.pending)
-			if folder.mode == "relay" {
+			if folder.mode == "relay" && h.maxRelays > 0 {
 				credits = min(credits, h.maxRelays-h.relays-h.folderReservations)
 			}
 			if credits <= 0 {

@@ -130,6 +130,20 @@ func offerRelay(t *testing.T, sender, receiver transferTestPeer, size int64) (st
 	return id, download["url"].(string)
 }
 
+func TestTransferRelayUnlimitedAccept(t *testing.T) {
+	f, _, a, b := transferPair(t)
+	f.app.applyTransferSettings(map[string]string{"transfer_max_relays": "0"})
+	id, _ := offerRelay(t, a, b, 10)
+	b.send(map[string]any{"type": "cancel", "id": id})
+	a.next("state")
+	b.next("state")
+	f.app.transfers.mu.Lock()
+	defer f.app.transfers.mu.Unlock()
+	if f.app.transfers.relays != 0 {
+		t.Fatal("cancel leaked relay slot")
+	}
+}
+
 func TestTransferClientFailureReleasesRelay(t *testing.T) {
 	f, s, a, b := transferPair(t)
 	id, download := offerRelay(t, a, b, 10)
@@ -576,11 +590,17 @@ func TestTransferSettingsValidatePersistAndSnapshot(t *testing.T) {
 	f.request(t, "PUT", "/api/admin/settings/group/3", key, map[string]any{"transfer_debug_logs": true}, nil, 403)
 	for _, body := range []map[string]any{
 		{"transfer_rate_mb": -1}, {"transfer_rate_mb": "NaN"}, {"transfer_rate_mb": 10241},
-		{"transfer_max_relays": 0}, {"transfer_max_relays": 65}, {"transfer_max_file_mb": 10241},
-		{"transfer_rate_mb": 0, "transfer_max_relays": 99},
+		{"transfer_max_relays": -1}, {"transfer_max_relays": "1.5"}, {"transfer_max_file_mb": 10241},
+		{"transfer_rate_mb": 0, "transfer_max_relays": "9223372036854775808"},
 		{"transfer_debug_logs": "yes"}, {"transfer_debug_logs": 1},
 	} {
 		f.request(t, "PUT", "/api/admin/settings/group/3", f.admin, body, nil, 400)
+	}
+	for _, limit := range []int{128, 4096, 0} {
+		f.request(t, "PUT", "/api/admin/settings/group/3", f.admin, map[string]any{"transfer_max_relays": limit}, nil, 200)
+		if got := f.app.transferSettingValues()["transfer_max_relays"]; got != fmt.Sprint(limit) {
+			t.Fatalf("relay limit not applied: %s", got)
+		}
 	}
 	f.request(t, "PUT", "/api/admin/settings/group/3", f.admin, map[string]any{"transfer_rate_mb": 0, "transfer_max_relays": 3, "transfer_max_file_mb": 64, "transfer_debug_logs": true}, nil, 200)
 	publicSettings := f.request(t, "GET", "/api/public/settings?group=3", "", nil, nil, 200)
@@ -619,6 +639,7 @@ func TestTransferSettingsValidatePersistAndSnapshot(t *testing.T) {
 		t.Fatal("new room did not use saved size limit")
 	}
 	// 真正关闭并重建 App，验证不限速的 0 值不会被环境默认值覆盖。
+	f.request(t, "PUT", "/api/admin/settings/group/3", f.admin, map[string]any{"transfer_max_relays": 0}, nil, 200)
 	if err := f.app.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -628,7 +649,7 @@ func TestTransferSettingsValidatePersistAndSnapshot(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = restarted.Close() })
 	values := restarted.transferSettingValues()
-	if values["transfer_rate_mb"] != "0" || values["transfer_max_relays"] != "3" || values["transfer_max_file_mb"] != "64" {
+	if values["transfer_rate_mb"] != "0" || values["transfer_max_relays"] != "0" || values["transfer_max_file_mb"] != "64" {
 		t.Fatalf("settings not restored: %v", values)
 	}
 	if readDebugSetting(restarted) != "true" {

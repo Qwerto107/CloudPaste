@@ -175,6 +175,37 @@ func TestTransferFolderParallelReservations(t *testing.T) {
 	h.mu.Unlock()
 }
 
+func TestTransferFolderRelayLimitAbove64AndUnlimited(t *testing.T) {
+	for _, limit := range []int{64, 128, 4096, 0} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			f, _, a, b := transferPair(t)
+			f.app.applyTransferSettings(map[string]string{"transfer_max_relays": fmt.Sprint(limit)})
+			a.send(map[string]any{"type": "folder-offer", "client_id": randomID(), "name": "parallel", "count": 256, "size": 256})
+			folder := a.next("folder")
+			b.next("folder")
+			b.send(map[string]any{"type": "accept-folder", "id": folder["id"], "mode": "relay", "concurrency": 128})
+			a.next("folder-state")
+			b.next("folder-state")
+			want := 128
+			if limit > 0 {
+				want = min(want, limit)
+			}
+			if next := a.next("folder-next"); next["count"] != float64(want) {
+				t.Fatalf("relay limit %d: %v", limit, next)
+			}
+			b.send(map[string]any{"type": "cancel-folder", "id": folder["id"]})
+			a.next("folder-state")
+			b.next("folder-state")
+			f.app.transfers.mu.Lock()
+			reserved := f.app.transfers.folderReservations
+			f.app.transfers.mu.Unlock()
+			if reserved != 0 {
+				t.Fatal("cancel leaked relay reservations", reserved)
+			}
+		})
+	}
+}
+
 // 合并进度必须整批授权，不能用后一项的非法编号留下前一项的写入。
 func TestTransferFolderParallelProgressAtomic(t *testing.T) {
 	f, _, a, b := transferPair(t)
