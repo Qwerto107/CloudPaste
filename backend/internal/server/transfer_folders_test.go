@@ -159,11 +159,11 @@ func TestTransferFolderParallelReservations(t *testing.T) {
 	b.send(map[string]any{"type": "accept-folder", "id": folder["id"], "mode": "relay", "concurrency": 32})
 	a.next("folder-state")
 	b.next("folder-state")
-	if next := a.next("folder-next"); next["count"] != float64(4) {
+	if next := a.next("folder-next"); next["count"] != float64(2) {
 		t.Fatal("global limit", next)
 	}
 	h.mu.Lock()
-	if h.folderReservations != 4 {
+	if h.folderReservations != 2 {
 		t.Fatal("reservation count", h.folderReservations)
 	}
 	for _, room := range h.rooms {
@@ -188,7 +188,7 @@ func TestTransferFolderRelayLimitAbove64AndUnlimited(t *testing.T) {
 			b.next("folder-state")
 			want := 128
 			if limit > 0 {
-				want = min(want, limit)
+				want = min(want, max(1, limit/2))
 			}
 			if next := a.next("folder-next"); next["count"] != float64(want) {
 				t.Fatalf("relay limit %d: %v", limit, next)

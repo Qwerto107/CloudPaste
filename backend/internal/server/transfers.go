@@ -25,7 +25,7 @@ const (
 	transferConnections = 40
 	transferFiles       = 32
 	// 覆盖一批文件夹任务的通知与状态消息，并保留控制消息空间。
-	transferQueue    = 2*transferFolderMaxConcurrency + transferFiles
+	transferQueue    = 3*transferFolderMaxConcurrency + transferFiles
 	transferFrame    = 16 << 10
 	transferLifetime = 2 * time.Hour
 	transferIdle     = time.Minute
@@ -181,6 +181,7 @@ func (h *transferHub) sweep() {
 					h.removeLocked(room)
 					continue
 				}
+				h.expireFoldersLocked(room, now)
 				for _, file := range room.files {
 					if file.state == "offered" && now.Sub(file.lastActivity()) > 5*time.Minute {
 						h.finishLocked(file, "cancelled")
@@ -759,6 +760,9 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 				action = "图片传输开始"
 			}
 			h.auditTransfer(r.members[f.sender], action, f.id, "success", f.progress, transferAuditDetails(f))
+		}
+		if f.folder != nil && f.mode == "relay" {
+			h.dispatchFolderQueuesLocked()
 		}
 	case "cancel":
 		if f := r.files[msg.ID]; f != nil {

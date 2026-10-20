@@ -19,6 +19,7 @@ type transferFolder struct {
 	created                                                 time.Time
 	started                                                 time.Time
 	progress                                                time.Time
+	queuedAt, adjustingAt                                   time.Time
 	connection                                              *transferConnection
 	failedPath                                              string
 	current                                                 map[string]bool
@@ -97,6 +98,40 @@ func validTransferPath(path string, root bool) bool {
 	return true
 }
 
+func (h *transferHub) expireFoldersLocked(room *transferRoom, now time.Time) {
+	for _, folder := range room.folders {
+		if folder.state != "active" {
+			continue
+		}
+		if folder.adjusting && now.Sub(folder.adjustingAt) >= transferIdle {
+			h.finishFolderLocked(room, folder, "failed")
+			continue
+		}
+		// 没有拿到额度的排队任务不占资源，也不能因等待其他传输而被误取消。
+		if folder.pending == 0 && len(folder.current) == 0 {
+			continue
+		}
+		last, active := folder.progress, false
+		if folder.queuedAt.After(last) {
+			last = folder.queuedAt
+		}
+		for id := range folder.current {
+			if file := room.files[id]; file != nil {
+				if file.state == "active" {
+					active = true
+				}
+				if file.created.After(last) {
+					last = file.created
+				}
+			}
+		}
+		// 已开始的文件由自身的停滞检查保护；这里只回收未推进的预留及待接收条目。
+		if !active && now.Sub(last) >= transferIdle {
+			h.finishFolderLocked(room, folder, "failed")
+		}
+	}
+}
+
 func (h *transferHub) folderStateLocked(room *transferRoom, folder *transferFolder) {
 	h.broadcastLocked(room, map[string]any{"type": "folder-state", "id": folder.id, "state": folder.state, "mode": folder.mode, "bytes": folder.bytes, "completed": folder.completed, "concurrency": folder.concurrency})
 }
@@ -145,6 +180,7 @@ func (h *transferHub) finishFolderLocked(room *transferRoom, folder *transferFol
 		h.folderReservations -= folder.pending
 	}
 	folder.pending = 0
+	folder.adjusting = false
 	for id := range folder.current {
 		if file := room.files[id]; file != nil {
 			// 终态先固定，再累计尚未出队的部分进度，取消子任务不会重复计数或写日志。
@@ -194,9 +230,14 @@ func (h *transferHub) dispatchFolderQueuesLocked() {
 			credits := min(desired-len(folder.current)-folder.pending, folder.count-folder.offered-folder.pending)
 			if folder.mode == "relay" && h.maxRelays > 0 {
 				credits = min(credits, h.maxRelays-h.relays-h.folderReservations)
+				// 仅限制未开始的全站预留，保留普通中继余量；接受文件后继续补位。
+				credits = min(credits, max(1, h.maxRelays/2)-h.folderReservations)
 			}
 			if credits <= 0 {
 				continue
+			}
+			if folder.pending == 0 {
+				folder.queuedAt = time.Now()
 			}
 			folder.pending += credits
 			if folder.mode == "relay" {
@@ -256,6 +297,7 @@ func (h *transferHub) folderMessageLocked(member *transferMember, msg transferMe
 		}
 		// 暂停发放额度；等发送端确认停止旧队列后，再安全归还未使用的预留。
 		folder.adjusting, folder.nextConcurrency = true, msg.Concurrency
+		folder.adjustingAt = time.Now()
 		h.sendLocked(room.members[folder.sender], map[string]any{"type": "folder-reset", "id": folder.id})
 		return nil
 	}
@@ -276,6 +318,8 @@ func (h *transferHub) folderMessageLocked(member *transferMember, msg transferMe
 		}
 		folder.pending = 0
 		folder.concurrency, folder.adjusting = folder.nextConcurrency, false
+		folder.adjustingAt = time.Time{}
+		folder.progress = time.Now()
 		h.folderStateLocked(room, folder)
 		h.sendLocked(room.members[1-folder.sender], map[string]any{"type": "folder-concurrency", "id": folder.id, "concurrency": folder.concurrency})
 		h.dispatchFolderQueuesLocked()
