@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -278,6 +279,129 @@ func TestAuditTransferAndStreaming(t *testing.T) {
 		if _, record := auditRoute(httptest.NewRequest("GET", url, nil)); record {
 			t.Fatal("高频请求不应逐条记录")
 		}
+	}
+}
+
+func TestAuditTransferFolderSummary(t *testing.T) {
+	for _, scenario := range []string{"relay", "p2p", "failed", "cancelled", "disconnected", "disabled", "module-disabled"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newFixture(t)
+			f.app.audit.enabled.Store(scenario != "disabled")
+			if scenario == "module-disabled" {
+				f.app.audit.disabledModules.Store(auditModuleBits["transfer"])
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			sender := &transferMember{index: 0, out: make(chan any, 1024), audit: auditEvent{Module: "transfer", Method: "WS", IP: "192.0.2.10"}}
+			receiver := &transferMember{index: 1, out: make(chan any, 1024), audit: auditEvent{Module: "transfer", Method: "WS", IP: "198.51.100.20"}}
+			room := &transferRoom{id: randomID(), paired: true, members: [2]*transferMember{sender, receiver}, files: map[string]*transferFile{}, maxFile: 10 << 20, ctx: ctx, cancel: cancel, created: time.Now(), expires: time.Now().Add(time.Hour)}
+			sender.room, receiver.room = room, room
+			h := f.app.transfers
+			mode := "p2p"
+			if scenario == "relay" {
+				mode = "relay"
+			}
+			var folder *transferFolder
+			func() {
+				h.mu.Lock()
+				defer h.mu.Unlock()
+				h.rooms[room.id], h.maxRelays = room, 0
+				send := func(member *transferMember, msg transferMessage) {
+					t.Helper()
+					if err := h.messageLocked(member, msg); err != nil {
+						t.Fatal(err)
+					}
+				}
+				send(sender, transferMessage{Type: "folder-offer", ClientID: randomID(), Name: "资料", Count: 96, Size: 960})
+				for _, offered := range room.folders {
+					folder = offered
+				}
+				send(receiver, transferMessage{Type: "accept-folder", ID: folder.id, Mode: mode, Concurrency: 128})
+				offer := func(index int) *transferFile {
+					t.Helper()
+					clientID := randomID()
+					send(sender, transferMessage{Type: "offer", ClientID: clientID, Name: fmt.Sprintf("file-%d.txt", index), Size: 10, Folder: &transferFolderEntry{ID: folder.id, Path: fmt.Sprintf("子目录/file-%d.txt", index)}})
+					for _, file := range room.files {
+						if file.clientID == clientID {
+							send(receiver, transferMessage{Type: "accept", ID: file.id, Mode: mode})
+							return file
+						}
+					}
+					t.Fatal("missing offered file")
+					return nil
+				}
+				count := 96
+				if scenario == "failed" || scenario == "cancelled" || scenario == "disconnected" {
+					count = 1
+				}
+				for index := 0; index < count; index++ {
+					file := offer(index)
+					file.forwarded = true
+					var connection *transferConnection
+					if mode == "p2p" {
+						connection = &transferConnection{Local: transferEndpoint{Address: "192.168.1.20", Port: 62000}, Remote: transferEndpoint{Address: "203.0.113.10", Port: 54000}}
+					}
+					send(receiver, transferMessage{Type: "complete", ID: file.id, Bytes: 10, Connection: connection})
+				}
+				if count == 1 {
+					first, second := offer(1), offer(2)
+					first.bytes, second.bytes = 3, 4
+					switch scenario {
+					case "failed":
+						send(receiver, transferMessage{Type: "fail", ID: first.id})
+					case "cancelled":
+						send(receiver, transferMessage{Type: "cancel-folder", ID: folder.id})
+					case "disconnected":
+						h.removeLocked(room)
+					}
+				}
+				// 迟到的取消或完成不能再次生成结束日志，也不能重复累计部分进度。
+				h.finishFolderLocked(room, folder, "cancelled")
+				if len(room.files) != 0 || h.relays != 0 || h.folderReservations != 0 {
+					t.Fatal("terminal folder retained children or relay slots")
+				}
+			}()
+			if scenario == "disabled" || scenario == "module-disabled" {
+				if len(f.app.audit.queue) != 0 {
+					t.Fatal("disabled logging still enqueued folder events")
+				}
+				return
+			}
+			waitAudit(t, f, "action IN ('文件夹传输开始','文件夹传输结束')", 2)
+			var events int
+			if err := f.app.audit.db.QueryRow("SELECT count(*) FROM operation_logs WHERE action LIKE '%传输%'").Scan(&events); err != nil || events != 2 {
+				t.Fatal("folder still emitted per-file or duplicate events", events, err)
+			}
+			var result, raw string
+			if err := f.app.audit.db.QueryRow("SELECT result,details FROM operation_logs WHERE action='文件夹传输结束' AND target=?", folder.id).Scan(&result, &raw); err != nil {
+				t.Fatal(err)
+			}
+			var details map[string]any
+			if err := json.Unmarshal([]byte(raw), &details); err != nil {
+				t.Fatal(err)
+			}
+			wantResult, wantBytes, wantCompleted := "success", float64(960), float64(96)
+			if scenario == "failed" || scenario == "cancelled" || scenario == "disconnected" {
+				wantResult, wantBytes, wantCompleted = "cancelled", 17, 1
+				if scenario == "failed" {
+					wantResult = "failure"
+					if details["failed_path"] != "子目录/file-1.txt" {
+						t.Fatal("failure path missing", details)
+					}
+				}
+			}
+			if result != wantResult || details["bytes"] != wantBytes || details["completed"] != wantCompleted || details["count"] != float64(96) || details["total_size"] != float64(960) || details["folder_name"] != "资料" || details["sender_ip"] != "192.0.2.10" || details["receiver_ip"] != "198.51.100.20" {
+				t.Fatal("incorrect folder summary", result, details)
+			}
+			if mode == "p2p" && (details["p2p_local"] != "192.168.1.20:62000" || details["p2p_remote"] != "203.0.113.10:54000") {
+				t.Fatal("missing folder P2P endpoints", details)
+			}
+			for _, key := range []string{"started_at", "ended_at"} {
+				if _, err := time.Parse(time.RFC3339Nano, fmt.Sprint(details[key])); err != nil {
+					t.Fatal("missing folder timestamp", key, details)
+				}
+			}
+		})
 	}
 }
 

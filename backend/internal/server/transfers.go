@@ -756,12 +756,14 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 			h.sendLocked(r.members[f.sender], map[string]any{"type": "start", "id": f.id, "mode": "p2p"})
 		}
 		h.broadcastLocked(r, map[string]any{"type": "state", "id": f.id, "state": "active", "mode": f.mode})
-		// 接受后即记录开始事件，下载工具等待人工结束时也可追溯任务。
-		action := "文件传输开始"
-		if f.imageType != "" {
-			action = "图片传输开始"
+		// 文件夹由整体事件汇总，单独文件及图片保留各自的开始日志。
+		if f.folder == nil {
+			action := "文件传输开始"
+			if f.imageType != "" {
+				action = "图片传输开始"
+			}
+			h.auditTransfer(r.members[f.sender], action, f.id, "success", f.progress, transferAuditDetails(f))
 		}
-		h.auditTransfer(r.members[f.sender], action, f.id, "success", f.progress, transferAuditDetails(f))
 	case "cancel":
 		if f := r.files[msg.ID]; f != nil {
 			h.finishLocked(f, "cancelled")

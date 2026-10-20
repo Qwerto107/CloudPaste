@@ -81,9 +81,6 @@ func transferAuditDetails(f *transferFile) map[string]any {
 	if f.imageType != "" {
 		details["image_type"] = f.imageType
 	}
-	if f.folder != nil {
-		details["folder_name"], details["relative_path"], details["directory"] = f.folder.name, f.folderEntry.Path, f.folderEntry.Directory
-	}
 	return details
 }
 
@@ -92,19 +89,21 @@ func (h *transferHub) finishLocked(f *transferFile, state string) {
 		return
 	}
 	f.state = state
-	result := "failure"
-	if state == "complete" {
-		result = "success"
+	if f.folder == nil {
+		result := "failure"
+		if state == "complete" {
+			result = "success"
+		}
+		if state == "cancelled" || state == "rejected" {
+			result = "cancelled"
+		}
+		details := transferAuditDetails(f)
+		action := "文件传输结束"
+		if f.imageType != "" {
+			action = "图片传输结束"
+		}
+		h.auditTransfer(f.room.members[f.sender], action, f.id, result, f.created, details)
 	}
-	if state == "cancelled" || state == "rejected" {
-		result = "cancelled"
-	}
-	details := transferAuditDetails(f)
-	action := "文件传输结束"
-	if f.imageType != "" {
-		action = "图片传输结束"
-	}
-	h.auditTransfer(f.room.members[f.sender], action, f.id, result, f.created, details)
 	f.uploadToken = ""
 	f.downloadToken = ""
 	if f.cancel != nil {

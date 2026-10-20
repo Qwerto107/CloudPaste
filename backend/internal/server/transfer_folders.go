@@ -17,7 +17,10 @@ type transferFolder struct {
 	sender, count, offered, completed, concurrency, pending int
 	size, offeredBytes, bytes                               int64
 	created                                                 time.Time
+	started                                                 time.Time
 	progress                                                time.Time
+	connection                                              *transferConnection
+	failedPath                                              string
 	current                                                 map[string]bool
 	adjusting                                               bool
 	nextConcurrency                                         int
@@ -98,6 +101,41 @@ func (h *transferHub) folderStateLocked(room *transferRoom, folder *transferFold
 	h.broadcastLocked(room, map[string]any{"type": "folder-state", "id": folder.id, "state": folder.state, "mode": folder.mode, "bytes": folder.bytes, "completed": folder.completed, "concurrency": folder.concurrency})
 }
 
+// 文件夹只写整体事件，不累计文件清单；日志开关关闭时不构造详情。
+func (h *transferHub) auditFolderLocked(room *transferRoom, folder *transferFolder, action, result string) {
+	if !h.app.audit.allows("transfer") {
+		return
+	}
+	started := folder.started
+	if started.IsZero() {
+		started = folder.created
+	}
+	details := map[string]any{
+		"folder_name": folder.name, "state": folder.state, "mode": folder.mode,
+		"count": folder.count, "completed": folder.completed,
+		"total_size": folder.size, "bytes": folder.bytes, "room": room.id,
+		"started_at": started.UTC().Format(time.RFC3339Nano),
+	}
+	if folder.state != "active" {
+		details["ended_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	if folder.failedPath != "" {
+		details["failed_path"] = folder.failedPath
+	}
+	if sender := room.members[folder.sender]; sender != nil {
+		details["sender_ip"] = sender.audit.IP
+	}
+	if receiver := room.members[1-folder.sender]; receiver != nil {
+		details["receiver_ip"] = receiver.audit.IP
+	}
+	if folder.mode == "p2p" && folder.connection != nil {
+		details["p2p_local"] = transferEndpointLabel(folder.connection.Local)
+		details["p2p_remote"] = transferEndpointLabel(folder.connection.Remote)
+		details["p2p_reporter"] = "接收端浏览器"
+	}
+	h.auditTransfer(room.members[folder.sender], action, folder.id, result, started, details)
+}
+
 func (h *transferHub) finishFolderLocked(room *transferRoom, folder *transferFolder, state string) {
 	if folder.state != "offered" && folder.state != "active" {
 		return
@@ -109,9 +147,18 @@ func (h *transferHub) finishFolderLocked(room *transferRoom, folder *transferFol
 	folder.pending = 0
 	for id := range folder.current {
 		if file := room.files[id]; file != nil {
+			// 终态先固定，再累计尚未出队的部分进度，取消子任务不会重复计数或写日志。
+			folder.bytes += file.bytes
 			h.finishLocked(file, "cancelled")
 		}
 	}
+	result := "failure"
+	if state == "complete" {
+		result = "success"
+	} else if state == "cancelled" || state == "rejected" {
+		result = "cancelled"
+	}
+	h.auditFolderLocked(room, folder, "文件夹传输结束", result)
 	h.folderStateLocked(room, folder)
 }
 
@@ -260,7 +307,9 @@ func (h *transferHub) folderMessageLocked(member *transferMember, msg transferMe
 		}
 	}
 	folder.state, folder.mode, folder.concurrency = "active", msg.Mode, concurrency
-	folder.progress = time.Now()
+	folder.started = time.Now()
+	folder.progress = folder.started
+	h.auditFolderLocked(room, folder, "文件夹传输开始", "success")
 	h.folderStateLocked(room, folder)
 	h.dispatchFolderQueuesLocked()
 	return nil
@@ -286,7 +335,15 @@ func (h *transferHub) finishFolderEntryLocked(file *transferFile, state string) 
 	if folder.state != "active" {
 		return
 	}
+	if file.mode == "p2p" && file.connection != nil {
+		// 只保留最近一次完成文件的链路快照，避免随文件数量增长。
+		folder.connection = file.connection
+	}
 	if state != "complete" {
+		folder.bytes += file.bytes
+		if state == "failed" {
+			folder.failedPath = file.folderEntry.Path
+		}
 		h.finishFolderLocked(file.room, folder, state)
 		return
 	}

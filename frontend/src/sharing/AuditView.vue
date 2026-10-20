@@ -105,6 +105,11 @@ function detailName(key) {
       image_type: "图片类型",
       started_at: "发起时间",
       folder_name: "文件夹",
+      count: "总项数（含空目录）",
+      completed: "已完成项数",
+      total_size: "总大小",
+      ended_at: "结束时间",
+      failed_path: "失败文件路径",
       relative_path: "相对路径",
       directory: "空目录",
       text: "发送内容",
@@ -167,7 +172,7 @@ function detailValue(key, value) {
     return value.join("、") || "—";
   if (key === "loaded" || key === "relay_only") return value ? "是" : "否";
   if (
-    ["size", "bytes", "database_size"].includes(key) &&
+    ["size", "total_size", "bytes", "database_size"].includes(key) &&
     Number.isSafeInteger(value)
   ) {
     const units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -175,7 +180,7 @@ function detailValue(key, value) {
       value > 0 ? Math.min(4, Math.floor(Math.log(value) / Math.log(1024))) : 0;
     return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]} (${value} 字节)`;
   }
-  if (["started_at", "requested_at", "approved_at"].includes(key))
+  if (["started_at", "ended_at", "requested_at", "approved_at"].includes(key))
     return new Date(value).toLocaleString();
   return typeof value === "object" && value !== null
     ? JSON.stringify(value)
