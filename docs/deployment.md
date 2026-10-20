@@ -42,9 +42,6 @@ MAX_STAGED_SIZE_MB=20480
 TRANSFER_ENABLED=true
 TRANSFER_MAX_FILE_MB=10240
 TRANSFER_RATE_MB=64
-# 可选 STUN 地址，格式 stun:主机:端口。
-TRANSFER_STUN=
-
 # 每分钟限频：除 WebSocket 消息按成员外，其余按真实来源 IP。
 # 管理密码、访客密码和 API Key 失败验证分别计数，共用以下次数配置。
 PASSWORD_ATTEMPTS_PER_MINUTE=10
@@ -159,7 +156,6 @@ docker compose up -d --pull always
 | `TRANSFER_ENABLED`                | `true`    | 设为 `false` 关闭设备互传                                                                           |
 | `TRANSFER_MAX_FILE_MB`            | `10240`   | 互传文件硬上限，范围 1–10240 MiB；后台只能设置不高于此值的上限                                      |
 | `TRANSFER_RATE_MB`                | `64`      | 初始中继总速率，范围 0–10240 MiB/s，0 表示不限速；后台保存的值优先                                  |
-| `TRANSFER_STUN`                   | 空        | 可选 `stun:主机:端口`，用于跨网络直连；留空不联系第三方 STUN                                        |
 | `PASSWORD_ATTEMPTS_PER_MINUTE`    | `10`      | 每 IP 的管理密码、访客密码和 API Key 失败验证次数，三者分别计数                                      |
 | `TRANSFER_CREATE_PER_MINUTE`      | `30`      | 每 IP 创建互传连接次数                                                                              |
 | `TRANSFER_JOIN_PER_MINUTE`        | `30`      | 每 IP 输入配对码加入连接次数                                                                        |
@@ -240,6 +236,8 @@ CloudPaste uses the IP2Location LITE database for [IP geolocation](https://www.i
 
 ### 互传参数
 
+STUN 在“系统设置 → 设备互传 → 连接设置”中配置，格式为 `stun:主机:端口`，例如 `stun:stun.example.com:3478`，IPv6 地址使用方括号。默认留空，不联系 STUN 服务器；清空后停止向新配对下发 STUN。保存后无需重启，对新配对生效，已有连接不受影响；设置保存在数据库中，重启后恢复。浏览器会向所配置的服务器查询网络地址。原 `TRANSFER_STUN` 环境变量已移除，现有部署需在后台重新填写。
+
 单文件程序和合并容器已包含配对、WebSocket 消息与 HTTP 实时中继，全部沿用网站端口，无需开放其他服务端口或部署 TURN。直连由两端浏览器尝试建立；网络不允许直连时选择中继。自建防火墙或浏览器网络策略仍可能限制 WebRTC 的动态连接，中继可通过现有网站入口使用。
 
 | 环境变量               | 默认值  | 含义                                                            |
@@ -247,7 +245,6 @@ CloudPaste uses the IP2Location LITE database for [IP geolocation](https://www.i
 | `TRANSFER_ENABLED`     | `true`  | 设为 `false` 关闭设备互传                                       |
 | `TRANSFER_MAX_FILE_MB` | `10240` | 单个互传文件硬上限，1–10240 MiB；后台可设置更小的值             |
 | `TRANSFER_RATE_MB`     | `64`    | 初始中继合计发送速率，0–10240 MiB/s；0 为不限速，后台保存值优先 |
-| `TRANSFER_STUN`        | 空      | 可选 `stun:主机:端口`；默认不联系第三方 STUN                    |
 
 管理后台的「系统设置 → 设备互传」可保存中继总速率、并发请求数（默认 64，非负整数，无固定上限，0 表示不限制总并发）、文件夹默认并发（默认 16，范围 1–128）和单文件大小。每个分段下载请求各占一路并发。文件夹接收前和传输过程中均可在“接收选项”中单独调整并发数，传输中点击“应用”生效；调低不会中断已安排的文件，只影响后续调度，不修改系统默认值。实际中继并发还受总额度约束，额度不足时排队。已有部署保留已保存的设置。速率保存后立即生效；降低并发只阻止新的超额传输，不中断已有文件；大小限制用于新建配对连接。设置保存到数据库，重启后恢复。中继总并发设置为 0 时不再限制全站请求数量，文件夹自身仍按 1–128 的并发数调度，下载工具每文件仍最多 4 路。背压、固定缓冲和限频策略继续生效。
 

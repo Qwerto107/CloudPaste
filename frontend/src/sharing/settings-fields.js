@@ -62,6 +62,11 @@ export const fields = {
     min: 1,
     max: 128,
   },
+  transfer_stun: {
+    label: "STUN 服务器",
+    help: "用于跨网络点对点连接，留空停用。保存后新配对生效，已有连接不受影响；浏览器会向此服务器查询网络地址。",
+    placeholder: "stun:主机:3478",
+  },
   transfer_debug_logs: {
     label: "点对点调试日志",
     help: "默认关闭。开启后，浏览器控制台输出双方连接地址、端口、链路指标和传输异常；保存后重新连接生效。",
@@ -213,9 +218,9 @@ export const sections = {
       keys: ["transfer_rate_mb", "transfer_max_relays", "transfer_max_file_mb"],
     },
     {
-      title: "连接调试",
+      title: "连接设置",
       icon: "settings",
-      keys: ["transfer_debug_logs"],
+      keys: ["transfer_stun", "transfer_debug_logs"],
     },
   ],
   global: [

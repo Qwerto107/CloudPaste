@@ -48,6 +48,7 @@ var defaultSettings = []setting{
 	{"transfer_max_relays", "64", "number", 3, 0, "中继总并发请求数（0 表示不限，分段下载各占一路）"},
 	{"transfer_folder_concurrency", "16", "number", 3, 0, "文件夹默认并发数"},
 	{"transfer_max_file_mb", "10240", "number", 3, 0, "互传单文件上限（MiB，不超过环境配置）"},
+	{"transfer_stun", "", "text", 3, 0, "STUN 服务器（留空停用，仅用于新配对）"},
 	{"transfer_debug_logs", "false", "bool", 3, 0, "点对点调试日志（浏览器控制台，默认关闭）"},
 	{"site_title", "CloudPaste", "text", 4, 0, "站点标题"},
 	{"site_favicon_url", "", "text", 4, 0, "站点图标 URL"},
@@ -154,6 +155,9 @@ func (a *App) settings(w http.ResponseWriter, r *http.Request) error {
 		filtered := []setting{}
 		for _, s := range items {
 			if s.Group == id {
+				if s.Key == "transfer_stun" && !adminRequest(r) {
+					continue
+				}
 				filtered = append(filtered, s)
 			}
 		}
@@ -162,8 +166,8 @@ func (a *App) settings(w http.ResponseWriter, r *http.Request) error {
 	}
 	groups := map[int][]setting{2: {}}
 	for _, s := range items {
-		// 日志记录规则只提供给管理员，公开设置中不暴露这些开关。
-		if s.Group == 5 && !adminRequest(r) {
+		// 日志规则及 STUN 配置不在公开设置中披露；配对后通过信令下发 STUN。
+		if (s.Group == 5 || s.Key == "transfer_stun") && !adminRequest(r) {
 			continue
 		}
 		groups[s.Group] = append(groups[s.Group], s)
@@ -213,6 +217,12 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 		}
 		if len(value) > 65536 {
 			return badRequest("设置值过长")
+		}
+		if key == "transfer_stun" {
+			value = strings.TrimSpace(value)
+			if !validTransferSTUN(value) {
+				return badRequest("STUN 地址必须为 stun:主机:端口，端口范围 1–65535；留空停用")
+			}
 		}
 		if definition.Type == "bool" && value != "true" && value != "false" {
 			return badRequest("布尔值必须为 true 或 false")

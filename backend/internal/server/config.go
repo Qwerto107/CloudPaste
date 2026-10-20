@@ -18,7 +18,6 @@ type Config struct {
 	TrustedProxies                                                      *trustedProxySet
 	TransferDisabled                                                    bool
 	TransferMaxFileBytes, TransferBytesPerSecond                        int64
-	TransferSTUN                                                        string
 	RateLimits                                                          RateLimitConfig
 }
 
@@ -42,11 +41,6 @@ func ConfigFromEnv() (Config, error) {
 			}
 			*target = n << 20
 		}
-	}
-	// 不默认向第三方发送网络地址；跨网络直连可由部署者指定 STUN。
-	c.TransferSTUN = strings.TrimSpace(os.Getenv("TRANSFER_STUN"))
-	if c.TransferSTUN != "" && (!strings.HasPrefix(c.TransferSTUN, "stun:") || len(c.TransferSTUN) > 256 || strings.ContainsAny(c.TransferSTUN, "\r\n\t /")) {
-		return c, errors.New("TRANSFER_STUN 必须为 stun:主机:端口")
 	}
 	if v := os.Getenv("PORT"); v != "" {
 		port, err := strconv.Atoi(v)

@@ -47,6 +47,7 @@ type transferHub struct {
 	folderConcurrency, folderReservations int
 	nextByte                              time.Time
 	maxFile, bytesPerSecond               int64
+	stun                                  string
 }
 
 type transferRoom struct {
@@ -619,7 +620,7 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 			"ips":        []string{r.members[0].ip, r.members[1].ip},
 			"devices":    []*transferDevice{r.members[0].device, r.members[1].device},
 			"locations":  []*ipLocation{r.members[0].location, r.members[1].location},
-			"relay_only": r.relayOnly, "stun": h.app.cfg.TransferSTUN, "audit_enabled": h.app.audit.allows("transfer"),
+			"relay_only": r.relayOnly, "stun": h.stun, "audit_enabled": h.app.audit.allows("transfer"),
 		})
 		return nil
 	}
