@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -57,7 +58,7 @@ func rateLimitRequest(t *testing.T, f *fixture, method, target, ip, auth string,
 		t.Fatal(err)
 	}
 	r := httptest.NewRequest(method, target, bytes.NewReader(raw))
-	r.RemoteAddr = ip + ":1234"
+	r.RemoteAddr = net.JoinHostPort(ip, "1234")
 	r.Header.Set("Origin", "https://allowed.test")
 	if auth != "" {
 		r.Header.Set("Authorization", auth)
@@ -211,7 +212,7 @@ func TestTransferToolCustomRatePerIP(t *testing.T) {
 	requireRateStatus(t, rateLimitRequest(t, f, "HEAD", link, "198.51.100.2", "", nil), http.StatusOK)
 }
 
-// 文件夹有效票据使用独立额度；普通额度耗尽仍可接收，错误票据和重放不能借用该额度。
+// 文件夹有效票据使用独立额度；无效票据与重放只消耗探测额度。
 func TestTransferFolderRelaySeparateRate(t *testing.T) {
 	f := newFixture(t)
 	h := f.app.transfers
@@ -230,7 +231,7 @@ func TestTransferFolderRelaySeparateRate(t *testing.T) {
 	}
 	h.mu.Lock()
 	h.rooms[room.id] = room
-	h.limits["relay:198.51.100.1"] = attemptWindow{Started: time.Now(), Count: 1}
+	h.allowIPLocked("relay", "198.51.100.1", 1)
 	h.mu.Unlock()
 	claim := func(id, ticket string) (*transferFile, error) {
 		r := httptest.NewRequest("GET", "/api/transfer/download/"+id+"?ticket="+ticket, nil)
@@ -244,12 +245,16 @@ func TestTransferFolderRelaySeparateRate(t *testing.T) {
 			t.Fatalf("valid folder blocked: %v", err)
 		}
 	}
-	for _, item := range [][2]string{{"three", secret}, {"one", secret}, {"three", strings.Repeat("b", 43)}, {"missing", secret}} {
-		if _, err := claim(item[0], item[1]); err == nil || err.(*apiError).Status != 429 {
+	for i, item := range [][2]string{{"three", secret}, {"one", secret}, {"three", strings.Repeat("b", 43)}, {"missing", secret}} {
+		want := 429
+		if i == 1 {
+			want = 404 // 第一次重放占用探测额度，后续无效票据才超限。
+		}
+		if _, err := claim(item[0], item[1]); err == nil || err.(*apiError).Status != want {
 			t.Fatalf("limit bypass: %v", err)
 		}
 	}
-	if room.files["three"].downloading || h.limits["folder-relay:198.51.100.1"].Count != 2 {
+	if room.files["three"].downloading || h.limits.byKey["folder-relay:198.51.100.1"].Count != 2 || h.probes.byKey["198.51.100.1"].Count != 1 {
 		t.Fatal("failed request consumed a ticket or bypassed quota")
 	}
 }

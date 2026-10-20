@@ -142,20 +142,19 @@ func (a *App) claimTransfer(r *http.Request, download bool) (*transferFile, erro
 		if f == nil || f.mode != "relay" || f.state != "active" || room.ctx.Err() != nil || f.ctx.Err() != nil {
 			continue
 		}
-		key, limit := "relay:"+ip, a.cfg.RateLimits.TransferRelayPerIP
 		validTicket := download && !f.downloading && f.downloadToken == secretHash(secret) ||
 			!download && !f.uploading && f.downloading && f.uploadToken == secretHash(secret)
-		// 只把有效的一次性文件夹票据计入独立额度，扫描、伪造和重放仍走普通限频。
-		if f.folder != nil && validTicket {
-			key, limit = "folder-relay:"+ip, a.cfg.RateLimits.TransferFolderRelayPerIP
+		if !validTicket {
+			return nil, h.invalidRelayLocked(ip)
 		}
-		if !h.allowLocked(key, limit) {
+		scope, limit := "relay", a.cfg.RateLimits.TransferRelayPerIP
+		if f.folder != nil {
+			scope, limit = "folder-relay", a.cfg.RateLimits.TransferFolderRelayPerIP
+		}
+		if !h.allowIPLocked(scope, ip, limit) {
 			return nil, transferBusy()
 		}
 		if download {
-			if f.downloading || f.downloadToken != secretHash(secret) {
-				return nil, transferUnavailable()
-			}
 			// 第一版不支持重试或 Range，票据只允许一个实际 GET 消费者。
 			if r.Method != "GET" || r.Header.Get("Range") != "" {
 				return nil, badRequest("实时传输不支持分段下载，请重新发送")
@@ -163,9 +162,6 @@ func (a *App) claimTransfer(r *http.Request, download bool) (*transferFile, erro
 			f.downloading = true
 			f.downloadToken = ""
 		} else {
-			if f.uploading || !f.downloading || f.uploadToken != secretHash(secret) {
-				return nil, transferUnavailable()
-			}
 			if r.ContentLength >= 0 && r.ContentLength != f.size {
 				return nil, badRequest("文件长度不一致")
 			}
@@ -182,10 +178,15 @@ func (a *App) claimTransfer(r *http.Request, download bool) (*transferFile, erro
 		}
 		return f, nil
 	}
-	if !h.allowLocked("relay:"+ip, a.cfg.RateLimits.TransferRelayPerIP) {
-		return nil, transferBusy()
+	return nil, h.invalidRelayLocked(ip)
+}
+
+func (h *transferHub) invalidRelayLocked(ip string) error {
+	// 无效、未知或重放的票据共用独立小表，不能挤占正常传输的来源额度。
+	if !h.probes.allow(rateLimitIP(ip), h.app.cfg.RateLimits.TransferRelayPerIP, time.Now()) {
+		return transferBusy()
 	}
-	return nil, transferUnavailable()
+	return transferUnavailable()
 }
 
 func (a *App) transferUpload(w http.ResponseWriter, r *http.Request) error {

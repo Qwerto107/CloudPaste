@@ -39,7 +39,7 @@ type transferHub struct {
 	cancel                                context.CancelFunc
 	wg                                    sync.WaitGroup
 	rooms                                 map[string]*transferRoom
-	limits                                map[string]attemptWindow
+	limits, probes                        *rateLimitTable
 	connections                           map[string]int
 	connectionCount                       int
 	relays                                int
@@ -118,7 +118,7 @@ func transferSecret() string {
 
 func newTransferHub(a *App) *transferHub {
 	ctx, cancel := context.WithCancel(context.Background())
-	h := &transferHub{app: a, ctx: ctx, cancel: cancel, rooms: map[string]*transferRoom{}, limits: map[string]attemptWindow{}, connections: map[string]int{}, maxFile: a.cfg.TransferMaxFileBytes, bytesPerSecond: a.cfg.TransferBytesPerSecond}
+	h := &transferHub{app: a, ctx: ctx, cancel: cancel, rooms: map[string]*transferRoom{}, limits: newRateLimitTable(1024), probes: newRateLimitTable(256), connections: map[string]int{}, maxFile: a.cfg.TransferMaxFileBytes, bytesPerSecond: a.cfg.TransferBytesPerSecond}
 	if h.maxFile <= 0 {
 		h.maxFile = 10 << 30
 	}
@@ -194,11 +194,8 @@ func (h *transferHub) sweep() {
 					owners = append(owners, room)
 				}
 			}
-			for key, window := range h.limits {
-				if now.Sub(window.Started) > time.Minute {
-					delete(h.limits, key)
-				}
-			}
+			h.limits.prune(now)
+			h.probes.prune(now)
 			h.mu.Unlock()
 			// 创建者退出、密钥被禁用或权限撤销后，最迟下一轮撤销房间。
 			for _, room := range owners {
@@ -233,16 +230,11 @@ func (h *transferHub) ownerValid(p Principal) bool {
 }
 
 func (h *transferHub) allowLocked(key string, maxCount int) bool {
-	window := h.limits[key]
-	if time.Since(window.Started) > time.Minute {
-		window = attemptWindow{Started: time.Now()}
-	}
-	if window.Count >= maxCount || (window.Count == 0 && len(h.limits) >= 1024) {
-		return false
-	}
-	window.Count++
-	h.limits[key] = window
-	return true
+	return h.limits.allow(key, maxCount, time.Now())
+}
+
+func (h *transferHub) allowIPLocked(scope, ip string, maxCount int) bool {
+	return h.allowLocked(scope+":"+rateLimitIP(ip), maxCount)
 }
 
 func transferUnavailable() error {
@@ -331,7 +323,7 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 	h := a.transfers
 	ip := a.clientIP(r)
 	h.mu.Lock()
-	if h.ctx.Err() != nil || !h.allowLocked("create:"+ip, a.cfg.RateLimits.TransferCreatePerIP) || len(h.rooms) >= transferRooms {
+	if h.ctx.Err() != nil || !h.allowIPLocked("create", ip, a.cfg.RateLimits.TransferCreatePerIP) || len(h.rooms) >= transferRooms {
 		h.mu.Unlock()
 		return transferBusy()
 	}
@@ -411,7 +403,7 @@ func (a *App) joinTransfer(w http.ResponseWriter, r *http.Request) error {
 	h := a.transfers
 	ip := a.clientIP(r)
 	h.mu.Lock()
-	if !h.allowLocked("join:"+ip, a.cfg.RateLimits.TransferJoinPerIP) {
+	if !h.allowIPLocked("join", ip, a.cfg.RateLimits.TransferJoinPerIP) {
 		h.mu.Unlock()
 		return transferBusy()
 	}
@@ -470,7 +462,7 @@ func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
 	h := a.transfers
 	ip := a.clientIP(r)
 	h.mu.Lock()
-	if h.ctx.Err() != nil || h.connectionCount >= transferConnections || h.connections[ip] >= 8 || !h.allowLocked("socket:"+ip, a.cfg.RateLimits.TransferSocketPerIP) {
+	if h.ctx.Err() != nil || h.connectionCount >= transferConnections || h.connections[ip] >= 8 || !h.allowIPLocked("socket", ip, a.cfg.RateLimits.TransferSocketPerIP) {
 		h.mu.Unlock()
 		a.fail(w, transferBusy())
 		return

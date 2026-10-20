@@ -462,8 +462,11 @@ func TestTransferLimitsStayBounded(t *testing.T) {
 	for i := 0; i < 1024; i++ {
 		h.allowLocked(fmt.Sprintf("test:%d", i), 1)
 	}
-	if h.allowLocked("overflow", 1) || len(h.limits) > 1024 {
-		t.Fatal("unbounded rate-limit map")
+	if !h.allowLocked("overflow", 1) || len(h.limits.byKey) != 1024 {
+		t.Fatal("full rate-limit table rejected a new source or exceeded capacity")
+	}
+	if h.limits.byKey["test:0"] != nil || h.allowLocked("overflow", 1) {
+		t.Fatal("oldest source not evicted or active quota bypassed")
 	}
 }
 

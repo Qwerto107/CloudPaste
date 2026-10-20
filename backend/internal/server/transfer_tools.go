@@ -188,7 +188,7 @@ func (a *App) transferToolDownload(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	requestIP := a.clientIP(r)
-	if !h.allowLocked("tool:"+requestIP, a.cfg.RateLimits.TransferToolPerIP) {
+	if !h.allowIPLocked("tool", requestIP, a.cfg.RateLimits.TransferToolPerIP) {
 		h.mu.Unlock()
 		return transferBusy()
 	}
