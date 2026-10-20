@@ -56,6 +56,7 @@ async function prepareFolder(name, entries, maxFile, signal) {
   if (folderPath(name).length !== 1) throw new Error("文件夹名称无效");
   let count = 0,
     size = 0;
+  const paths = new Set();
   for await (const entry of entries()) {
     signal?.throwIfAborted();
     folderPath(entry.path, entry.directory);
@@ -65,6 +66,9 @@ async function prepareFolder(name, entries, maxFile, signal) {
     count++;
     if (count > folderMaxEntries)
       throw new Error(`文件夹最多包含 ${folderMaxEntries} 个文件和空目录`);
+    const key = entry.path.toLowerCase();
+    if (paths.has(key)) throw new Error("文件夹包含重复路径或同名文件与目录");
+    paths.add(key);
     if (!Number.isSafeInteger(size) || size > maxFile * 4)
       throw new Error("文件夹总大小超过本次连接额度");
   }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/sha256"
 	"strings"
 	"time"
 	"unicode"
@@ -12,7 +13,7 @@ const (
 	transferFolderMaxEntries         = 10000
 )
 
-// 文件夹只保存活动条目和待发额度，并发完成后立即释放子任务。
+// 子任务完成即释放；仅在当前文件夹存活期间保留有界的路径哈希用于去重。
 type transferFolder struct {
 	id, clientID, name, state, mode                         string
 	sender, count, offered, completed, concurrency, pending int
@@ -24,6 +25,7 @@ type transferFolder struct {
 	connection                                              *transferConnection
 	failedPath                                              string
 	current                                                 map[string]bool
+	paths                                                   map[[32]byte]struct{}
 	adjusting                                               bool
 	nextConcurrency                                         int
 }
@@ -97,6 +99,20 @@ func validTransferPath(path string, root bool) bool {
 		}
 	}
 	return true
+}
+
+func transferPathHash(path string) [32]byte {
+	// SimpleFold 的最小码点使 Unicode 大小写等价路径取得相同键，不改变实际文件名。
+	canonical := strings.Map(func(r rune) rune {
+		lowest := r
+		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+			if next < lowest {
+				lowest = next
+			}
+		}
+		return lowest
+	}, path)
+	return sha256.Sum256([]byte(canonical))
 }
 
 func (h *transferHub) expireFoldersLocked(room *transferRoom, now time.Time) {
@@ -181,6 +197,7 @@ func (h *transferHub) finishFolderLocked(room *transferRoom, folder *transferFol
 		h.folderReservations -= folder.pending
 	}
 	folder.pending = 0
+	folder.paths = nil
 	folder.adjusting = false
 	for id := range folder.current {
 		if file := room.files[id]; file != nil {

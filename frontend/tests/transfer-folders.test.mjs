@@ -159,3 +159,16 @@ test("文件夹最多一万项，扫描不读取正文", async () => {
   );
   await assert.rejects(folderFromFiles(files, 1), /10000/);
 });
+
+test("文件夹扫描提前拒绝忽略大小写的重复路径", async () => {
+  await assert.rejects(
+    folderFromFiles(
+      [
+        { name: "A.txt", size: 0, webkitRelativePath: "folder/A.txt" },
+        { name: "a.TXT", size: 0, webkitRelativePath: "folder/a.TXT" },
+      ],
+      1,
+    ),
+    /重复路径/,
+  );
+});

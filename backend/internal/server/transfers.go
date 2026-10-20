@@ -654,6 +654,7 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 			return badRequest("聊天图片仅支持不超过 4 MiB 的 PNG / JPEG")
 		}
 		var folder *transferFolder
+		var pathHash [32]byte
 		if msg.Folder != nil {
 			folder = r.folders[msg.Folder.ID]
 			if folder == nil || folder.sender != m.index || folder.state != "active" || folder.pending <= 0 || len(folder.current) >= transferFolderMaxConcurrency || folder.offered >= folder.count || msg.ImageType != "" || !validTransferPath(msg.Folder.Path, msg.Folder.Directory) || (msg.Folder.Directory && msg.Size != 0) || msg.Size > folder.size-folder.offeredBytes {
@@ -669,6 +670,10 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 			if msg.Name != base {
 				return badRequest("文件夹条目名称与路径不一致")
 			}
+			pathHash = transferPathHash(msg.Folder.Path)
+			if _, duplicate := folder.paths[pathHash]; duplicate || len(folder.paths) >= transferFolderMaxEntries {
+				return badRequest("文件夹包含重复路径或同名文件与目录")
+			}
 		}
 		if transferName(msg.Name) == "" || len(msg.ClientID) > 64 || msg.ClientID == "" || msg.Size < 0 || msg.Size > r.maxFile || len(r.files) >= transferFiles+transferFolderMaxConcurrency || (folder == nil && (ordinaryTransferTasks(r)+len(r.folders) >= transferFiles || r.offeredBytes+msg.Size > r.maxFile*4)) {
 			return badRequest("文件名称、大小或本次连接的文件额度不符合限制")
@@ -677,6 +682,10 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		f.folder, f.folderEntry = folder, msg.Folder
 		r.files[f.id] = f
 		if folder != nil {
+			if folder.paths == nil {
+				folder.paths = make(map[[32]byte]struct{})
+			}
+			folder.paths[pathHash] = struct{}{}
 			folder.current[f.id] = true
 			folder.pending--
 			f.reservedRelay = folder.mode == "relay"
