@@ -261,7 +261,7 @@ func transferDecode(w http.ResponseWriter, r *http.Request, value any) error {
 
 func transferName(s string) string {
 	s = strings.TrimSpace(s)
-	if len(s) == 0 || len(s) > 180 || strings.ContainsAny(s, "/\\") || strings.ContainsFunc(s, func(r rune) bool { return unicode.IsControl(r) || r == '\u202e' || r == '\u202d' }) {
+	if len(s) == 0 || len(s) > 180 || strings.ContainsAny(s, "/\\") || strings.ContainsFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
 		return ""
 	}
 	return s

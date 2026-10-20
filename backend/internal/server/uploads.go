@@ -39,8 +39,8 @@ func validateUploadName(name string) error {
 		return badRequest("文件名无效")
 	}
 	for _, r := range name {
-		if unicode.IsControl(r) {
-			return badRequest("文件名包含控制字符")
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return badRequest("文件名包含控制或格式字符")
 		}
 	}
 	// 同一文件名在 Docker 与 Windows 开发环境中具有一致的安全含义。

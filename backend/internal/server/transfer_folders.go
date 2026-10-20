@@ -87,7 +87,7 @@ func validTransferPath(path string, root bool) bool {
 		return false
 	}
 	for _, part := range parts {
-		if part == "" || part == "." || part == ".." || len(part) > 180 || strings.ContainsAny(part, "\\:<>\"|?*") || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") || strings.ContainsFunc(part, func(r rune) bool { return unicode.IsControl(r) || r == '\u202d' || r == '\u202e' }) {
+		if part == "" || part == "." || part == ".." || len(part) > 180 || strings.ContainsAny(part, "\\:<>\"|?*") || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") || strings.ContainsFunc(part, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
 			return false
 		}
 		base := strings.ToUpper(strings.SplitN(part, ".", 2)[0])

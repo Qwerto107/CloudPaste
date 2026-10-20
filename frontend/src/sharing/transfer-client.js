@@ -793,6 +793,8 @@ export class TransferClient {
     )
       throw new Error("每次连接最多发送 32 个文件");
     for (const file of files) {
+      if (/[\p{Cc}\p{Cf}]/u.test(file.name))
+        throw new Error("文件名包含不支持的控制或格式字符");
       if (file.size > this.maxFile)
         throw new Error(`${file.name} 超过单文件大小限制`);
       if (

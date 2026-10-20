@@ -123,3 +123,22 @@ test("目录扫描支持取消和单文件大小保护，兼容选择器保留�
     name: "AbortError",
   });
 });
+
+test("路径拒绝 Unicode 格式字符，正常非 ASCII 文件名保留", () => {
+  for (const char of [
+    "\u061c",
+    "\u200b",
+    "\u200d",
+    "\u200e",
+    "\u200f",
+    "\u202e",
+    "\u2066",
+    "\u2067",
+    "\u2068",
+    "\u2069",
+    "\ufeff",
+    "\u{e0001}",
+  ])
+    assert.throws(() => folderPath(`dir/report${char}.txt`));
+  assert.deepEqual(folderPath("资料/中文-é.txt"), ["资料", "中文-é.txt"]);
+});

@@ -23,7 +23,7 @@ export function folderPath(value, allowRoot = false) {
         part === "." ||
         part === ".." ||
         encoder.encode(part).length > 180 ||
-        /[\\:<>"|?*\p{Cc}\u202d\u202e]/u.test(part) ||
+        /[\\:<>"|?*\p{Cc}\p{Cf}]/u.test(part) ||
         /[. ]$/.test(part) ||
         /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part),
     )

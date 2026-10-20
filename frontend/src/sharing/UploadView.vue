@@ -60,6 +60,10 @@ function addFiles(selection) {
   if (busy.value || !allowed.value || uploaded.value.length) return;
   const selected = Array.from(selection || []);
   if (!selected.length) return;
+  if (selected.some((file) => /[\p{Cc}\p{Cf}]/u.test(file.name))) {
+    error.value = "文件名包含不支持的控制或格式字符";
+    return;
+  }
   const available = Math.max(0, 30 - files.value.length);
   results.value = [];
   // 多次选择或拖放都追加到当前队列，保留之前已选的文件。
