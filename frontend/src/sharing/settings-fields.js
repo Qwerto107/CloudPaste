@@ -44,10 +44,10 @@ export const fields = {
   },
   transfer_max_relays: {
     label: "中继并发请求数",
-    help: "全站同时中继的请求数量，范围 1–16；下载工具的每个分段各占一路。降低后不会中断现有传输，仅限制新请求。",
+    help: "全站同时中继的请求数量，范围 1–64；下载工具的每个分段各占一路。降低后不会中断现有传输，仅限制新请求。",
     unit: "个",
     min: 1,
-    max: 16,
+    max: 64,
   },
   transfer_max_file_mb: {
     label: "互传单文件上限",
@@ -55,6 +55,13 @@ export const fields = {
     unit: "MiB",
     min: 1,
     max: 10240,
+  },
+  transfer_folder_concurrency: {
+    label: "文件夹默认并发数",
+    help: "接收文件夹时的初始并发数，可在接收前或传输中调整，范围 1–128。中继传输还受全站中继并发设置限制。",
+    unit: "个",
+    min: 1,
+    max: 128,
   },
   transfer_debug_logs: {
     label: "点对点调试日志",

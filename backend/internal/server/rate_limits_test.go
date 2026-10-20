@@ -17,7 +17,8 @@ var rateLimitEnvNames = []string{
 	"PASSWORD_ATTEMPTS_PER_MINUTE", "TRANSFER_CREATE_PER_MINUTE",
 	"TRANSFER_JOIN_PER_MINUTE", "TRANSFER_RELAY_PER_MINUTE",
 	"TRANSFER_WS_CONNECT_PER_MINUTE", "TRANSFER_WS_MESSAGES_PER_MINUTE",
-	"TRANSFER_TOOL_PER_MINUTE",
+	"TRANSFER_TOOL_PER_MINUTE", "TRANSFER_FOLDER_WS_MESSAGES_PER_MINUTE",
+	"TRANSFER_FOLDER_RELAY_PER_MINUTE",
 }
 
 func TestRateLimitEnvironment(t *testing.T) {
@@ -25,7 +26,7 @@ func TestRateLimitEnvironment(t *testing.T) {
 		t.Setenv(name, "")
 	}
 	cfg, err := ConfigFromEnv()
-	want := RateLimitConfig{10, 30, 30, 180, 30, 240, 240}
+	want := RateLimitConfig{10, 30, 30, 180, 30, 240, 240, 12000, 12000}
 	if err != nil || !reflect.DeepEqual(cfg.RateLimits, want) {
 		t.Fatalf("defaults: got %+v, error %v", cfg.RateLimits, err)
 	}
@@ -33,7 +34,7 @@ func TestRateLimitEnvironment(t *testing.T) {
 		t.Setenv(name, fmt.Sprint(i+1))
 	}
 	cfg, err = ConfigFromEnv()
-	if err != nil || !reflect.DeepEqual(cfg.RateLimits, RateLimitConfig{1, 2, 3, 4, 5, 6, 7}) {
+	if err != nil || !reflect.DeepEqual(cfg.RateLimits, RateLimitConfig{1, 2, 3, 4, 5, 6, 7, 8, 9}) {
 		t.Fatalf("custom limits: got %+v, error %v", cfg.RateLimits, err)
 	}
 	for _, name := range rateLimitEnvNames {
@@ -208,4 +209,72 @@ func TestTransferToolCustomRatePerIP(t *testing.T) {
 	// GET 与 HEAD 共享次数；另一个 IP 可继续探测。
 	requireRateStatus(t, rateLimitRequest(t, f, "GET", link, "198.51.100.1", "", nil), 429)
 	requireRateStatus(t, rateLimitRequest(t, f, "HEAD", link, "198.51.100.2", "", nil), http.StatusOK)
+}
+
+// 文件夹有效票据使用独立额度；普通额度耗尽仍可接收，错误票据和重放不能借用该额度。
+func TestTransferFolderRelaySeparateRate(t *testing.T) {
+	f := newFixture(t)
+	h := f.app.transfers
+	f.app.cfg.RateLimits.TransferRelayPerIP = 1
+	f.app.cfg.RateLimits.TransferFolderRelayPerIP = 2
+	ctx, cancel := context.WithCancel(context.Background())
+	room := &transferRoom{id: randomID(), ctx: ctx, cancel: cancel, created: time.Now(), expires: time.Now().Add(time.Hour), files: map[string]*transferFile{}, folders: map[string]*transferFolder{}}
+	room.members[0] = &transferMember{room: room, index: 0}
+	room.members[1] = &transferMember{room: room, index: 1}
+	folder := &transferFolder{id: randomID(), state: "active", mode: "relay", count: 3, size: 3, current: map[string]bool{}}
+	room.folders[folder.id] = folder
+	secret := strings.Repeat("a", 43)
+	for _, id := range []string{"one", "two", "three"} {
+		room.files[id] = &transferFile{id: id, room: room, folder: folder, folderEntry: &transferFolderEntry{ID: folder.id, Path: id}, mode: "relay", state: "active", ctx: ctx, size: 1, downloadToken: secretHash(secret)}
+		folder.current[id] = true
+	}
+	h.mu.Lock()
+	h.rooms[room.id] = room
+	h.limits["relay:198.51.100.1"] = attemptWindow{Started: time.Now(), Count: 1}
+	h.mu.Unlock()
+	claim := func(id, ticket string) (*transferFile, error) {
+		r := httptest.NewRequest("GET", "/api/transfer/download/"+id+"?ticket="+ticket, nil)
+		r.SetPathValue("id", id)
+		r.RemoteAddr = "198.51.100.1:1234"
+		r.Header.Set("Origin", "https://allowed.test")
+		return f.app.claimTransfer(r, true)
+	}
+	for _, id := range []string{"one", "two"} {
+		if _, err := claim(id, secret); err != nil {
+			t.Fatalf("valid folder blocked: %v", err)
+		}
+	}
+	for _, item := range [][2]string{{"three", secret}, {"one", secret}, {"three", strings.Repeat("b", 43)}, {"missing", secret}} {
+		if _, err := claim(item[0], item[1]); err == nil || err.(*apiError).Status != 429 {
+			t.Fatalf("limit bypass: %v", err)
+		}
+	}
+	if room.files["three"].downloading || h.limits["folder-relay:198.51.100.1"].Count != 2 {
+		t.Fatal("failed request consumed a ticket or bypassed quota")
+	}
+}
+
+// 独立消息额度也必须执行，不能把文件夹授权当作不限频许可。
+func TestTransferFolderMessagesCustomRate(t *testing.T) {
+	f, _, a, b := transferPair(t)
+	f.app.cfg.RateLimits.TransferFolderMessagesPerMember = 2
+	id := startFolderTest(t, a, b, 3, 0)
+	for i := 0; i < 2; i++ {
+		name := fmt.Sprintf("empty-%d", i)
+		a.send(map[string]any{"type": "offer", "client_id": randomID(), "name": name, "size": 0, "folder": map[string]any{"id": id, "path": name, "directory": true}})
+		file := a.next("file")
+		b.next("file")
+		b.send(map[string]any{"type": "accept", "id": file["id"], "mode": "directory"})
+		a.next("state")
+		b.next("state")
+		a.next("folder-state")
+		b.next("folder-state")
+		a.next("folder-next")
+	}
+	a.send(map[string]any{"type": "offer", "client_id": randomID(), "name": "over", "size": 0, "folder": map[string]any{"id": id, "path": "over", "directory": true}})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, _, err := a.conn.Read(ctx); err == nil || ctx.Err() != nil {
+		t.Fatalf("folder quota did not disconnect: %v", err)
+	}
 }

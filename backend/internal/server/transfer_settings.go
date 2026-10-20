@@ -11,7 +11,9 @@ func (a *App) transferSettingRange(key string) (int64, int64) {
 	case "transfer_rate_mb":
 		return 0, 10240
 	case "transfer_max_relays":
-		return 1, 16
+		return 1, 64
+	case "transfer_folder_concurrency":
+		return 1, transferFolderMaxConcurrency
 	case "transfer_max_file_mb":
 		return 1, a.cfg.TransferMaxFileBytes >> 20
 	}
@@ -19,7 +21,7 @@ func (a *App) transferSettingRange(key string) (int64, int64) {
 }
 
 func (a *App) restoreTransferSettings() error {
-	rows, err := a.db.Query("SELECT key,value FROM settings WHERE key IN ('transfer_rate_mb','transfer_max_relays','transfer_max_file_mb')")
+	rows, err := a.db.Query("SELECT key,value FROM settings WHERE key IN ('transfer_rate_mb','transfer_max_relays','transfer_max_file_mb','transfer_folder_concurrency')")
 	if err != nil {
 		return err
 	}
@@ -55,10 +57,13 @@ func (a *App) applyTransferSettings(values map[string]string) {
 			h.nextByte = time.Time{}
 		case "transfer_max_relays":
 			h.maxRelays = int(n)
+		case "transfer_folder_concurrency":
+			h.folderConcurrency = int(n)
 		case "transfer_max_file_mb":
 			h.maxFile = n << 20
 		}
 	}
+	h.dispatchFolderQueuesLocked()
 }
 
 func (a *App) transferSettingValues() map[string]string {
@@ -66,8 +71,9 @@ func (a *App) transferSettingValues() map[string]string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return map[string]string{
-		"transfer_rate_mb":     strconv.FormatInt(h.bytesPerSecond>>20, 10),
-		"transfer_max_relays":  strconv.Itoa(h.maxRelays),
-		"transfer_max_file_mb": strconv.FormatInt(h.maxFile>>20, 10),
+		"transfer_rate_mb":            strconv.FormatInt(h.bytesPerSecond>>20, 10),
+		"transfer_max_relays":         strconv.Itoa(h.maxRelays),
+		"transfer_folder_concurrency": strconv.Itoa(h.folderConcurrency),
+		"transfer_max_file_mb":        strconv.FormatInt(h.maxFile>>20, 10),
 	}
 }

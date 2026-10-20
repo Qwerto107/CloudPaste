@@ -23,8 +23,8 @@ const (
 	transferRooms       = 16
 	transferConnections = 40
 	transferFiles       = 32
-	// 一批最多 32 个文件通知，再为控制消息留出空间，慢客户端仍会被断开。
-	transferQueue    = 64
+	// 覆盖一批文件夹任务的通知与状态消息，并保留控制消息空间。
+	transferQueue    = 2*transferFolderMaxConcurrency + transferFiles
 	transferFrame    = 16 << 10
 	transferLifetime = 2 * time.Hour
 	transferIdle     = time.Minute
@@ -33,19 +33,20 @@ const (
 // 房间、成员和文件状态只在 mu 下修改；网络读写从不持有这把锁。
 // 不保存消息历史或文件内容，固定队列满时主动断开慢客户端。
 type transferHub struct {
-	mu                      sync.Mutex
-	app                     *App
-	ctx                     context.Context
-	cancel                  context.CancelFunc
-	wg                      sync.WaitGroup
-	rooms                   map[string]*transferRoom
-	limits                  map[string]attemptWindow
-	connections             map[string]int
-	connectionCount         int
-	relays                  int
-	maxRelays               int
-	nextByte                time.Time
-	maxFile, bytesPerSecond int64
+	mu                                    sync.Mutex
+	app                                   *App
+	ctx                                   context.Context
+	cancel                                context.CancelFunc
+	wg                                    sync.WaitGroup
+	rooms                                 map[string]*transferRoom
+	limits                                map[string]attemptWindow
+	connections                           map[string]int
+	connectionCount                       int
+	relays                                int
+	maxRelays                             int
+	folderConcurrency, folderReservations int
+	nextByte                              time.Time
+	maxFile, bytesPerSecond               int64
 }
 
 type transferRoom struct {
@@ -56,6 +57,7 @@ type transferRoom struct {
 	members           [2]*transferMember
 	paired, relayOnly bool
 	files             map[string]*transferFile
+	folders           map[string]*transferFolder
 	offeredBytes      int64
 	maxFile           int64
 	ctx               context.Context
@@ -76,19 +78,23 @@ type transferMember struct {
 }
 
 type transferMessage struct {
-	Type       string              `json:"type"`
-	Token      string              `json:"token,omitempty"`
-	ID         string              `json:"id,omitempty"`
-	ClientID   string              `json:"client_id,omitempty"`
-	Name       string              `json:"name,omitempty"`
-	Text       string              `json:"text,omitempty"`
-	Mode       string              `json:"mode,omitempty"`
-	Size       int64               `json:"size,omitempty"`
-	Bytes      int64               `json:"bytes,omitempty"`
-	Data       json.RawMessage     `json:"data,omitempty"`
-	ImageType  string              `json:"image_type,omitempty"`
-	Connection *transferConnection `json:"connection,omitempty"`
-	RequestID  string              `json:"request_id,omitempty"`
+	Type        string               `json:"type"`
+	Token       string               `json:"token,omitempty"`
+	ID          string               `json:"id,omitempty"`
+	ClientID    string               `json:"client_id,omitempty"`
+	Name        string               `json:"name,omitempty"`
+	Text        string               `json:"text,omitempty"`
+	Mode        string               `json:"mode,omitempty"`
+	Size        int64                `json:"size,omitempty"`
+	Bytes       int64                `json:"bytes,omitempty"`
+	Data        json.RawMessage      `json:"data,omitempty"`
+	ImageType   string               `json:"image_type,omitempty"`
+	Connection  *transferConnection  `json:"connection,omitempty"`
+	RequestID   string               `json:"request_id,omitempty"`
+	Folder      *transferFolderEntry `json:"folder,omitempty"`
+	Count       int                  `json:"count,omitempty"`
+	Concurrency int                  `json:"concurrency,omitempty"`
+	Progress    []transferProgress   `json:"progress,omitempty"`
 }
 
 // 直连地址由接收端浏览器上报，仅作为诊断信息，不参与鉴权或传输判断。
@@ -116,7 +122,8 @@ func newTransferHub(a *App) *transferHub {
 	if h.maxFile <= 0 {
 		h.maxFile = 10 << 30
 	}
-	h.maxRelays = 4
+	h.maxRelays = 64
+	h.folderConcurrency = transferFolderDefaultConcurrency
 	h.wg.Add(1)
 	go h.sweep()
 	return h
@@ -139,9 +146,14 @@ func (h *transferHub) removeLocked(room *transferRoom) {
 	delete(h.rooms, room.id)
 	h.auditTransfer(room.members[0], "连接结束", room.id, "success", room.created, nil)
 	room.cancel()
+	// 断开时也释放尚未发出文件的预留额度。
+	for _, folder := range room.folders {
+		h.finishFolderLocked(room, folder, "cancelled")
+	}
 	for _, file := range room.files {
 		h.finishLocked(file, "cancelled")
 	}
+	h.dispatchFolderQueuesLocked()
 }
 
 func (h *transferHub) sweep() {
@@ -166,7 +178,7 @@ func (h *transferHub) sweep() {
 					continue
 				}
 				for _, file := range room.files {
-					if file.state == "offered" && now.Sub(file.created) > 5*time.Minute {
+					if file.state == "offered" && now.Sub(file.lastActivity()) > 5*time.Minute {
 						h.finishLocked(file, "cancelled")
 					}
 					idle := transferIdle
@@ -174,7 +186,7 @@ func (h *transferHub) sweep() {
 						// 下载工具可能等待用户确认或暂停；每个实际请求仍有一分钟停滞保护。
 						idle = 10 * time.Minute
 					}
-					if file.state == "active" && (now.Sub(file.progress) > idle || (file.tool != nil && !now.Before(file.tool.expires))) {
+					if file.state == "active" && (now.Sub(file.lastActivity()) > idle || (file.tool != nil && !now.Before(file.tool.expires))) {
 						h.finishLocked(file, "failed")
 					}
 				}
@@ -546,13 +558,17 @@ func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.mu.Lock()
-		if !h.allowLocked("message:"+member.token, a.cfg.RateLimits.TransferMessagesPerMember) {
+		key, limit := "message:"+member.token, a.cfg.RateLimits.TransferMessagesPerMember
+		if h.isFolderMessageLocked(member, message) {
+			key, limit = "folder-message:"+member.token, a.cfg.RateLimits.TransferFolderMessagesPerMember
+		}
+		if !h.allowLocked(key, limit) {
 			h.mu.Unlock()
 			return
 		}
 		err = h.messageLocked(member, message)
 		if err != nil {
-			h.sendLocked(member, map[string]any{"type": "error", "message": err.Error(), "id": message.ID, "client_id": message.ClientID})
+			h.sendLocked(member, map[string]any{"type": "error", "message": err.Error(), "id": message.ID, "client_id": message.ClientID, "action": message.Type})
 		}
 		h.mu.Unlock()
 	}
@@ -619,6 +635,8 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		return forbidden()
 	}
 	switch msg.Type {
+	case "folder-offer", "accept-folder", "cancel-folder", "folder-progress", "folder-concurrency", "folder-ready":
+		return h.folderMessageLocked(m, msg)
 	case "text":
 		if len(msg.Text) == 0 || len(msg.Text) > 4096 {
 			return badRequest("文字长度应为 1-4096 字节")
@@ -638,27 +656,68 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		if msg.ImageType != "" && ((msg.ImageType != "image/png" && msg.ImageType != "image/jpeg") || msg.Size <= 0 || msg.Size > 4<<20) {
 			return badRequest("聊天图片仅支持不超过 4 MiB 的 PNG / JPEG")
 		}
-		if transferName(msg.Name) == "" || len(msg.ClientID) > 64 || msg.ClientID == "" || msg.Size < 0 || msg.Size > r.maxFile || len(r.files) >= transferFiles || r.offeredBytes+msg.Size > r.maxFile*4 {
+		var folder *transferFolder
+		if msg.Folder != nil {
+			folder = r.folders[msg.Folder.ID]
+			if folder == nil || folder.sender != m.index || folder.state != "active" || folder.pending <= 0 || len(folder.current) >= transferFolderMaxConcurrency || folder.offered >= folder.count || msg.ImageType != "" || !validTransferPath(msg.Folder.Path, msg.Folder.Directory) || (msg.Folder.Directory && msg.Size != 0) || msg.Size > folder.size-folder.offeredBytes {
+				return badRequest("文件夹条目或队列状态无效")
+			}
+			base := msg.Folder.Path
+			if index := strings.LastIndex(base, "/"); index >= 0 {
+				base = base[index+1:]
+			}
+			if base == "" {
+				base = folder.name
+			}
+			if msg.Name != base {
+				return badRequest("文件夹条目名称与路径不一致")
+			}
+		}
+		if transferName(msg.Name) == "" || len(msg.ClientID) > 64 || msg.ClientID == "" || msg.Size < 0 || msg.Size > r.maxFile || len(r.files) >= transferFiles+transferFolderMaxConcurrency || (folder == nil && (ordinaryTransferTasks(r)+len(r.folders) >= transferFiles || r.offeredBytes+msg.Size > r.maxFile*4)) {
 			return badRequest("文件名称、大小或本次连接的文件额度不符合限制")
 		}
 		f := &transferFile{id: randomID(), clientID: msg.ClientID, name: transferName(msg.Name), imageType: msg.ImageType, size: msg.Size, sender: m.index, room: r, state: "offered", created: time.Now()}
+		f.folder, f.folderEntry = folder, msg.Folder
 		r.files[f.id] = f
-		r.offeredBytes += f.size
-		h.broadcastLocked(r, map[string]any{"type": "file", "id": f.id, "client_id": f.clientID, "name": f.name, "size": f.size, "from": f.sender, "state": "offered", "image_type": msg.ImageType, "sent_at": f.created.UTC().Format(time.RFC3339Nano)})
+		if folder != nil {
+			folder.current[f.id] = true
+			folder.pending--
+			f.reservedRelay = folder.mode == "relay"
+			folder.offered++
+			folder.offeredBytes += f.size
+		} else {
+			r.offeredBytes += f.size
+		}
+		h.broadcastLocked(r, map[string]any{"type": "file", "id": f.id, "client_id": f.clientID, "name": f.name, "size": f.size, "from": f.sender, "state": "offered", "image_type": msg.ImageType, "sent_at": f.created.UTC().Format(time.RFC3339Nano), "folder": msg.Folder})
 	case "accept":
 		f := r.files[msg.ID]
 		if f == nil || f.sender == m.index || f.state != "offered" {
 			return forbidden()
 		}
+		for _, folder := range r.folders {
+			if folder.state == "active" && f.folder != folder {
+				return badRequest("请先完成当前文件夹传输")
+			}
+		}
+		if f.folderEntry != nil && f.folderEntry.Directory {
+			if msg.Mode != "directory" {
+				return badRequest("目录条目不传输文件内容")
+			}
+			h.finishLocked(f, "complete")
+			return nil
+		}
+		if f.folder != nil && msg.Mode != f.folder.mode {
+			return badRequest("文件夹传输方式不一致")
+		}
 		for _, other := range r.files {
-			if other.state == "active" {
+			if other.state == "active" && (f.folder == nil || other.folder != f.folder) {
 				return badRequest("请先完成当前文件传输")
 			}
 		}
 		if msg.Mode != "relay" && msg.Mode != "tool" && (msg.Mode != "p2p" || r.relayOnly) {
 			return badRequest("传输方式无效")
 		}
-		if msg.Mode == "relay" && h.relays >= h.maxRelays {
+		if msg.Mode == "relay" && !f.reservedRelay && h.relays+h.folderReservations >= h.maxRelays {
 			return transferBusy()
 		}
 		f.mode = msg.Mode
@@ -666,6 +725,10 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		f.progress = time.Now()
 		f.ctx, f.cancel = context.WithCancel(r.ctx)
 		if f.mode == "relay" {
+			if f.reservedRelay {
+				h.folderReservations--
+				f.reservedRelay = false
+			}
 			h.relays++
 			f.relaySlot = true
 			f.reader, f.writer = io.Pipe()
@@ -723,7 +786,8 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		h.finishLocked(f, "complete")
 	case "progress", "complete":
 		f := r.files[msg.ID]
-		if f == nil || f.state != "active" || f.mode != "p2p" || f.sender == m.index || msg.Bytes < f.bytes || msg.Bytes > f.size {
+		folderRelay := f != nil && f.folder != nil && f.mode == "relay" && msg.Type == "complete"
+		if f == nil || f.state != "active" || (f.mode != "p2p" && !folderRelay) || f.sender == m.index || msg.Bytes < f.bytes || msg.Bytes > f.size {
 			return forbidden()
 		}
 		f.bytes = msg.Bytes
@@ -733,6 +797,12 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 				return badRequest("文件长度不一致")
 			}
 			f.connection = msg.Connection
+			if folderRelay {
+				f.folderSaved = true
+				if !f.forwarded {
+					return nil
+				}
+			}
 			h.finishLocked(f, "complete")
 		} else {
 			h.broadcastLocked(r, map[string]any{"type": "progress", "id": f.id, "bytes": f.bytes})

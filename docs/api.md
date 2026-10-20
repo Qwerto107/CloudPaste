@@ -45,8 +45,10 @@ API Key 必须启用且未过期，并满足权限、路径范围与存储 ACL�
 | WebSocket 连接尝试           | 每 IP                    | 30            | `TRANSFER_WS_CONNECT_PER_MINUTE`  |
 | 已认证 WebSocket 应用消息    | 每成员                   | 240           | `TRANSFER_WS_MESSAGES_PER_MINUTE` |
 | 下载工具 HEAD、GET、分段 GET | 共享每 IP 的额度         | 240           | `TRANSFER_TOOL_PER_MINUTE`        |
+| 已授权文件夹内部 WebSocket 消息 | 每成员 | 12000 | `TRANSFER_FOLDER_WS_MESSAGES_PER_MINUTE` |
+| 有效文件夹票据的中继上传、下载 | 两者共享每 IP 的额度 | 12000 | `TRANSFER_FOLDER_RELAY_PER_MINUTE` |
 
-密码验证成功或失败均计数，配对码未匹配也计数；格式或授权在计数前被拒绝的请求不计数。普通中继在票据长度合法后计数，下载工具在确认有效票据后计数，HEAD 和非法 Range 也计入每分钟限频。各操作的额度独立，普通中继与下载工具不共享次数。HTTP 超限返回 429；WebSocket 应用消息超限直接断开。
+密码验证成功或失败均计数，配对码未匹配也计数；格式或授权在计数前被拒绝的请求不计数。普通中继在票据长度合法后计数，下载工具在确认有效票据后计数，HEAD 和非法 Range 也计入每分钟限频。已配对且已接收文件夹的内部条目消息，以及持有效一次性文件夹票据的中继请求，使用独立额度；未知编号、无效票据和票据重放走原普通规则。创建文件夹、确认接收、修改并发及聊天、信令仍计入普通 WebSocket 消息额度。各操作的额度独立，普通中继、文件夹中继与下载工具不共享次数。HTTP 超限返回 429；WebSocket 应用消息超限直接断开。
 
 窗口从各计数项首次请求起算，一分钟后恢复额度。计数保存在单个服务进程内，重启清空，多实例之间不共享。环境变量在启动时读取，修改后需重启进程或重建容器，详情见 [部署指南的限频配置](deployment.md#每分钟限频配置)。
 
@@ -149,7 +151,7 @@ PUT /api/files/{id} 支持 filename、remark、password、clearPassword、expire
 
 ## 临时设备互传
 
-管理员通过 `PUT /api/admin/settings/group/3` 保存保护设置：`transfer_rate_mb`（0–10240 MiB/s，0 为不限速）、`transfer_max_relays`（1–16）和 `transfer_max_file_mb`（1 至环境硬上限，MiB）。速率立即应用，并发限制用于新传输，文件大小用于新房间。GET 同组返回当前有效值；保存后重启仍保留。
+管理员通过 `PUT /api/admin/settings/group/3` 保存保护设置：`transfer_rate_mb`（0–10240 MiB/s，0 为不限速）、`transfer_max_relays`（默认 64，1–64）、`transfer_folder_concurrency`（默认 16，1–128）和 `transfer_max_file_mb`（1 至环境硬上限，MiB）。速率立即应用，并发限制用于新传输，文件大小用于新房间。GET 同组返回当前有效值；保存后重启仍保留。
 
 同组支持 `transfer_debug_logs`（布尔值，默认 `false`），控制互传浏览器控制台的 `[CloudPaste P2P]` 调试日志。保存后新建或加入连接读取最新值；`GET /api/public/settings?group=3` 返回该开关，方便未登录的加入者使用。开启时记录双方候选地址、端口、协议、选中的链路、往返延迟、协商耗时和传输摘要；浏览器隐藏的地址保留为空或 mDNS 名称。不输出凭证、配对码、用户内容或完整 SDP，也不轮询或逐块打印。
 
@@ -245,12 +247,12 @@ socket.addEventListener("open", () => {
 | `leave`           | 无                                             | 任一成员主动结束整个房间                                                             |
 | `text`            | `text`                                         | 配对后任一成员发送；长度为 1–4096 UTF-8 字节                                         |
 | `signal`          | `data`                                         | 配对后发送 WebRTC 协商数据；仅非强制中继房间可用，`data` 最大 12000 字节             |
-| `offer`           | `client_id`、`name`、`size`，可选 `image_type` | 配对后发送文件申请；`client_id` 长度为 1–64 字节，普通文件允许 0 字节                |
-| `accept`          | `id`、`mode`                                   | 仅该文件的接收方，在 `offered` 状态接受；`mode` 为 `relay`、`p2p` 或 `tool`          |
+| `offer`           | `client_id`、`name`、`size`，可选 `image_type`、`folder` | 配对后发送文件申请；`client_id` 长度为 1–64 字节，普通文件允许 0 字节；文件夹条目详见下文 |
+| `accept`          | `id`、`mode`                                   | 仅该文件的接收方，在 `offered` 状态接受；文件模式为 `relay`、`p2p` 或 `tool`，空目录用 `directory` |
 | `cancel`          | `id`                                           | 任一成员取消指定文件；活动或待接收任务变为 `cancelled`                               |
 | `fail`            | `id`                                           | 任一成员报告指定活动文件异常，任务变为 `failed`                                      |
 | `progress`        | `id`、`bytes`                                  | 仅 P2P 接收方报告累计写入量；不得倒退或超过文件大小                                  |
-| `complete`        | `id`、`bytes`                                  | 仅 P2P 接收方确认完成；`bytes` 必须等于文件大小                                      |
+| `complete`        | `id`、`bytes`                                  | P2P 或文件夹中继的接收方确认本地写入完成；`bytes` 必须等于文件大小                    |
 | `range-failed`    | `id`、`request_id`                             | 仅下载工具模式的发送方取消失败分段，其余分段和任务仍可继续                           |
 | `finish-download` | `id`                                           | 仅下载工具模式的接收方确认完成；服务端必须已经转发完整文件，且至少开始过一轮实际 GET |
 
@@ -350,11 +352,31 @@ socket.addEventListener("open", () => {
 
 WebSocket `error` 消息不包含 HTTP 状态或 `code`。HTTP 创建、加入与文件传输请求的错误仍按 HTTP API 格式返回；客户端应分别处理两种错误来源。
 
-服务端每 20 秒发送一次协议级 Ping，等待 Pong 最长 8 秒；浏览器自动回应，不需要发送 `{"type":"ping"}`。发送一条服务端消息的期限为 10 秒，单成员待发送队列最多 64 条。队列已满、写入失败或心跳失败会结束整个房间。
+服务端每 20 秒发送一次协议级 Ping，等待 Pong 最长 8 秒；浏览器自动回应，不需要发送 `{"type":"ping"}`。发送一条服务端消息的期限为 10 秒，单成员待发送队列最多 288 条。队列已满、写入失败或心跳失败会结束整个房间。
 
-单条 JSON 文本消息最大 16 KiB，认证后每成员每分钟默认最多 240 条应用消息，可通过 `TRANSFER_WS_MESSAGES_PER_MINUTE` 调整，超额会直接断开。房间从创建起最多存活 2 小时，配对码最多有效 5 分钟；创建者应在创建后 15 秒内连接，加入者取得第二席后应在 1 分钟内完成配对确认。期限由定时清理处理，不能依赖精确的关闭时刻。任一成员离开、拒绝或断线后，另一端也会断开，未完成文件被取消，相关 HTTP 票据失效；关闭前不保证送达所有状态通知。
+单条 JSON 文本消息最大 16 KiB，认证后普通应用消息每成员每分钟默认最多 240 条，可通过 `TRANSFER_WS_MESSAGES_PER_MINUTE` 调整；已授权文件夹的内部条目消息独立使用 `TRANSFER_FOLDER_WS_MESSAGES_PER_MINUTE`，默认 12000 条。任一消息额度超额会直接断开。房间从创建起最多存活 2 小时，配对码最多有效 5 分钟；创建者应在创建后 15 秒内连接，加入者取得第二席后应在 1 分钟内完成配对确认。期限由定时清理处理，不能依赖精确的关闭时刻。任一成员离开、拒绝或断线后，另一端也会断开，未完成文件被取消，相关 HTTP 票据失效；关闭前不保证送达所有状态通知。
 
 ### 传输模式与 HTTP 配合
+
+#### 文件夹队列
+
+发送端用 `folder-offer` 提交 `client_id/name/count/size`（count 包含空目录标记，size 为文件总字节）。服务端广播 `folder`，含上述字段、服务端 `id/from/state/sent_at/concurrency`。接收方选好可写目录后发送 `accept-folder`（`id/mode/concurrency`，mode 为 `relay` 或 `p2p`）。同一房间同时只运行一个文件夹队列，普通活动文件也不能与其交错接收。
+
+服务端用 `folder-next`（`id/count`）发放下一批条目的提交额度。发送端通过原 `offer` 附带 `folder:{id,path,directory}`，path 为文件夹内的相对路径；directory 为 true 表示空目录，大小必须为 0。`file` 通知携带该 folder 字段。目录创建成功后接收方用 `accept` 的 `mode:"directory"` 确认；普通条目沿用选定的中继或直连方式。接收时可传 `concurrency`（1–128，未传使用系统默认 16）；`folder-next.count` 是本次允许提交的条目数。条目完成后服务端立即释放其状态并补充额度。中继条目先预留全站并发额度，总额度默认 64，额度不足时排队。双方通过 `folder-state`（`id/state/mode/bytes/completed/concurrency`）更新整体任务，使用 `cancel-folder`（`id`）取消整个队列。
+
+传输中，接收方可发送 `folder-concurrency`（`id/concurrency`，1–128）修改当前文件夹并发，不修改系统默认值。服务端暂停发放额度并向发送方发送 `folder-reset`（`id`）；发送方清除未使用额度后，在同一 WebSocket 上回复 `folder-ready`（`id`）。服务端处理完确认之前的在途条目，再释放剩余预留额度并重新调度。已安排的条目不中断，调低后等其完成再补充；调高仍受中继总额度和限频约束。双方收到 `folder-state`，接收方另外收到 `folder-concurrency`（`id/concurrency`）确认。调整失败的 `error.action` 为 `folder-concurrency`，只提示错误，不取消文件夹。
+
+文件夹只占一个逻辑任务，内部条目不受 32 个累计文件额度限制；同一连接仍最多 32 个逻辑任务，文件夹与普通文件共同受单文件大小及累计 `max_file_size × 4` 的总字节额度约束。发送端仅按服务端发放的并发额度提交条目，条目完成后立即补位；不存在首批 32 项之后按秒逐项等待的客户端节拍。内部消息和有效文件夹票据的中继请求使用独立限频，仍受路径、权限、一次性票据、并发、带宽和缓冲保护。零字节普通文件与空目录分别处理。
+
+路径最大 1024 UTF-8 字节、16 层，单个名称最大 180 字节；拒绝绝对路径、空路径分量、`.`、`..`、反斜杠、控制字符及 Windows 特殊名称。客户端同样校验，并拒绝覆盖已有同名目录或文件。文件夹中继在本地文件写入并关闭后才发送 `complete`（`id/bytes`）；服务端同时确认转发完成后才将条目出队。取消或失败会保留已经成功保存的部分内容，不自动删除本地目录。
+
+浏览器网页接收目录需要安全上下文和 showDirectoryPicker 写入能力，不支持时明确禁用文件夹接收，不提供 ZIP 降级。原生目录选择支持保留空目录；兼容的 webkitdirectory 文件选择入口只能枚举文件，无法保留空目录。发送期间请勿修改源目录。日志沿用文件元数据记录，额外含 folder_name、relative_path、directory，不保存文件内容。
+
+文件夹中继收到多条 `download` 通知后，接收端一次只启动一条尚未配对的下载请求。服务端校验对应一次性上传票据、确认上传接入后，向接收端发送 `relay-ready`（`id`），接收端再启动下一条下载；已接入的文件内容继续并行传输。这样避免同一浏览器双标签页共享连接池时，下载请求占满连接导致上传无法开始。实际 HTTP 并发仍取决于浏览器、协议和代理能力，设置值是任务并发上限。尚未成对接入的排队文件参考整个文件夹的活动时间判断停滞；已接入的文件继续使用独立的停滞保护。
+
+文件夹点对点传输为每个活动文件建立独立数据通道，所有文件共享 8 MiB 未确认窗口和 4 MiB 发送缓冲上限，确认仅在写入完成后发送。接收方每秒合并发送一条 `folder-progress`，`progress` 为最多 128 个 `{id,bytes}` 项；服务端整批校验任务归属、状态与字节范围后广播。
+
+#### 单文件和图片
 
 直连客户端在 `signal.data.description` 的同级字段 `max_chunk_size` 声明应用可接收的分块上限，`receive_window` 声明待写盘数据窗口。双方支持时使用最高 256 KiB 分块；对方未声明分块上限时兼容旧页面的 64 KiB 上限，并始终遵守 SCTP 协商的消息上限。发送缓冲限制为 4 MiB，等待接收端写盘确认的数据不超过双方窗口中的较小值，最高 8 MiB；对方未声明窗口时兼容旧页面的 2 MiB 窗口。以上限制不随文件总大小增长，并非浏览器进程总内存上限。
 

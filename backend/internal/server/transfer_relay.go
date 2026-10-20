@@ -15,6 +15,7 @@ import (
 
 // 实时中继没有文件缓存；io.Pipe 把接收端背压一直传递到上传端。
 type transferFile struct {
+	reservedRelay                     bool
 	id, clientID, name, state, mode   string
 	imageType                         string
 	size, bytes                       int64
@@ -29,6 +30,22 @@ type transferFile struct {
 	writer                            *io.PipeWriter
 	tool                              *transferTool
 	connection                        *transferConnection
+	folder                            *transferFolder
+	folderEntry                       *transferFolderEntry
+	forwarded, folderSaved            bool
+}
+
+// 等待浏览器连接的文件沿用队列活动时间；已经成对接入的传输仍独立检查停滞。
+func (f *transferFile) lastActivity() time.Time {
+	last := f.progress
+	if f.state == "offered" {
+		last = f.created
+	}
+	if f.folder != nil && f.folder.mode == "relay" &&
+		(f.state == "offered" || !f.downloading || !f.uploading) && f.folder.progress.After(last) {
+		last = f.folder.progress
+	}
+	return last
 }
 
 func transferEndpointLabel(endpoint transferEndpoint) string {
@@ -64,6 +81,9 @@ func transferAuditDetails(f *transferFile) map[string]any {
 	if f.imageType != "" {
 		details["image_type"] = f.imageType
 	}
+	if f.folder != nil {
+		details["folder_name"], details["relative_path"], details["directory"] = f.folder.name, f.folderEntry.Path, f.folderEntry.Directory
+	}
 	return details
 }
 
@@ -90,11 +110,17 @@ func (h *transferHub) finishLocked(f *transferFile, state string) {
 	if f.cancel != nil {
 		f.cancel()
 	}
+	if f.reservedRelay {
+		h.folderReservations--
+		f.reservedRelay = false
+	}
 	if f.relaySlot {
 		f.relaySlot = false
 		h.relays--
 	}
 	h.broadcastLocked(f.room, map[string]any{"type": "state", "id": f.id, "state": state, "mode": f.mode, "bytes": f.bytes})
+	h.finishFolderEntryLocked(f, state)
+	h.dispatchFolderQueuesLocked()
 }
 
 func (a *App) claimTransfer(r *http.Request, download bool) (*transferFile, error) {
@@ -112,13 +138,20 @@ func (a *App) claimTransfer(r *http.Request, download bool) (*transferFile, erro
 	ip := a.clientIP(r)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if !h.allowLocked("relay:"+ip, a.cfg.RateLimits.TransferRelayPerIP) {
-		return nil, transferBusy()
-	}
 	for _, room := range h.rooms {
 		f := room.files[r.PathValue("id")]
 		if f == nil || f.mode != "relay" || f.state != "active" || room.ctx.Err() != nil || f.ctx.Err() != nil {
 			continue
+		}
+		key, limit := "relay:"+ip, a.cfg.RateLimits.TransferRelayPerIP
+		validTicket := download && !f.downloading && f.downloadToken == secretHash(secret) ||
+			!download && !f.uploading && f.downloading && f.uploadToken == secretHash(secret)
+		// 只把有效的一次性文件夹票据计入独立额度，扫描、伪造和重放仍走普通限频。
+		if f.folder != nil && validTicket {
+			key, limit = "folder-relay:"+ip, a.cfg.RateLimits.TransferFolderRelayPerIP
+		}
+		if !h.allowLocked(key, limit) {
+			return nil, transferBusy()
 		}
 		if download {
 			if f.downloading || f.downloadToken != secretHash(secret) {
@@ -139,8 +172,19 @@ func (a *App) claimTransfer(r *http.Request, download bool) (*transferFile, erro
 			}
 			f.uploading = true
 			f.uploadToken = ""
+			if f.folder != nil {
+				// 由有效的一次性上传票据触发，客户端不能提前伪造接入确认。
+				h.sendLocked(room.members[1-f.sender], map[string]any{"type": "relay-ready", "id": f.id})
+			}
+		}
+		f.progress = time.Now()
+		if f.folder != nil {
+			f.folder.progress = f.progress
 		}
 		return f, nil
+	}
+	if !h.allowLocked("relay:"+ip, a.cfg.RateLimits.TransferRelayPerIP) {
+		return nil, transferBusy()
 	}
 	return nil, transferUnavailable()
 }
@@ -269,7 +313,13 @@ func (a *App) transferDownload(w http.ResponseWriter, r *http.Request) error {
 	success := false
 	defer func() {
 		h.mu.Lock()
-		if success {
+		if success && f.folder != nil {
+			// 文件夹必须等接收端关闭本地文件后确认，才出队下一项。
+			f.forwarded = true
+			if f.folderSaved {
+				h.finishLocked(f, "complete")
+			}
+		} else if success {
 			h.finishLocked(f, "complete")
 		} else {
 			h.finishLocked(f, "failed")
@@ -319,6 +369,9 @@ func (a *App) transferDownload(w http.ResponseWriter, r *http.Request) error {
 			h.mu.Lock()
 			f.bytes = total
 			f.progress = time.Now()
+			if f.folder != nil {
+				f.folder.progress = f.progress
+			}
 			if time.Since(f.notified) >= time.Second {
 				h.broadcastLocked(f.room, map[string]any{"type": "progress", "id": f.id, "bytes": total})
 				f.notified = time.Now()

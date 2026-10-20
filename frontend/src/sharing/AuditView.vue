@@ -104,6 +104,9 @@ function detailName(key) {
       name: "文件名",
       image_type: "图片类型",
       started_at: "发起时间",
+      folder_name: "文件夹",
+      relative_path: "相对路径",
+      directory: "空目录",
       text: "发送内容",
       // 来源 IP 与直连 IP 可能不同，端口只能与浏览器上报的直连地址配对。
       sender_ip: "发送方来源 IP",

@@ -576,7 +576,7 @@ func TestTransferSettingsValidatePersistAndSnapshot(t *testing.T) {
 	f.request(t, "PUT", "/api/admin/settings/group/3", key, map[string]any{"transfer_debug_logs": true}, nil, 403)
 	for _, body := range []map[string]any{
 		{"transfer_rate_mb": -1}, {"transfer_rate_mb": "NaN"}, {"transfer_rate_mb": 10241},
-		{"transfer_max_relays": 0}, {"transfer_max_relays": 17}, {"transfer_max_file_mb": 10241},
+		{"transfer_max_relays": 0}, {"transfer_max_relays": 65}, {"transfer_max_file_mb": 10241},
 		{"transfer_rate_mb": 0, "transfer_max_relays": 99},
 		{"transfer_debug_logs": "yes"}, {"transfer_debug_logs": 1},
 	} {

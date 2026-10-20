@@ -210,7 +210,7 @@ func (a *App) transferToolDownload(w http.ResponseWriter, r *http.Request) error
 	var request *transferRangeRequest
 	if r.Method != "HEAD" {
 		// 并发占用现有中继额度；限制总请求数和实际重传流量，探测 GET 中断不消耗整文件额度。
-		if len(f.tool.requests) >= 4 || h.relays >= h.maxRelays || f.tool.attempts >= 256 || f.tool.sent >= max(1<<20, f.size*4) {
+		if len(f.tool.requests) >= 4 || h.relays+h.folderReservations >= h.maxRelays || f.tool.attempts >= 256 || f.tool.sent >= max(1<<20, f.size*4) {
 			h.mu.Unlock()
 			w.Header().Set("Retry-After", "2")
 			return transferBusy()
@@ -229,6 +229,7 @@ func (a *App) transferToolDownload(w http.ResponseWriter, r *http.Request) error
 			h.mu.Lock()
 			delete(f.tool.requests, request.id)
 			h.relays--
+			h.dispatchFolderQueuesLocked()
 			if request.round == f.tool.round {
 				f.tool.completed = mergeTransferRange(f.tool.completed, transferByteRange{request.start, request.start + request.forwarded})
 				if request.succeeded {

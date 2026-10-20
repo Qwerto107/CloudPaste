@@ -1,6 +1,15 @@
+import { FolderDirectTransfers } from "./transfer-folder-direct.js";
 import { apiURL, backendBase, request } from "./api.js";
 import { chatImageLimit, validateChatImage } from "./transfer-images.js";
 import { collectTransferDevice } from "./transfer-device.js";
+import {
+  canSaveFolders,
+  folderMaxConcurrency,
+  folderDefaultConcurrency,
+  folderPath,
+  createFolderDestination,
+  createFolderEntry,
+} from "./transfer-folders.js";
 
 const maxChunkSize = 256 * 1024;
 const legacyChunkSize = 64 * 1024;
@@ -42,6 +51,14 @@ export class TransferClient {
     this.transferTimings = new Map();
     this.directEndpoints = null;
     this.closed = false;
+    this.folders = new Map();
+    this.folderSources = new Map();
+    this.folderDestinations = new Map();
+    this.folderDownloads = new Map();
+    this.folderRelayStarting = null;
+    this.folderOfferOwners = new Map();
+    this.folderConcurrencyUpdates = new Set();
+    this.folderDirect = new FolderDirectTransfers(this);
   }
 
   debug(event, details = {}, warning = false) {
@@ -204,8 +221,75 @@ export class TransferClient {
   }
 
   handle(message) {
+    if (message.type === "relay-ready") {
+      // 上传实际接入后才放行下一对，避免同一浏览器的下载占满共享连接池。
+      if (this.folderRelayStarting?.id === message.id) {
+        this.folderRelayStarting = null;
+        this.startNextFolderRelay();
+      }
+      return;
+    }
+    if (message.type === "folder-reset") {
+      const folder = this.folders.get(message.id);
+      const source = this.folderSources.get(folder?.client_id);
+      // 清除尚未使用的额度；确认之后发出的 offer 只使用服务端重新分配的额度。
+      if (source) source.credits = 0;
+      this.send({ type: "folder-ready", id: message.id });
+      return;
+    }
+    if (message.type === "folder-concurrency") {
+      this.folderConcurrencyUpdates.delete(message.id);
+      const folder = this.folders.get(message.id);
+      if (folder) folder.concurrency = message.concurrency;
+      this.onEvent(message);
+      return;
+    }
+    if (message.type === "error" && message.action === "folder-concurrency") {
+      this.folderConcurrencyUpdates.delete(message.id);
+      // 调整失败只提示错误，不取消已经在传输的文件。
+      this.onEvent({
+        type: "folder-concurrency",
+        id: message.id,
+        error: message.message,
+      });
+      return;
+    }
+    if (message.type === "folder") {
+      this.folders.set(message.id, message);
+      this.onEvent(message);
+      return;
+    }
+    if (message.type === "folder-next") {
+      this.sendFolderEntry(message.id, message.count || 1).catch((error) =>
+        this.folderFailed(message.id, error),
+      );
+      return;
+    }
+    if (message.type === "folder-state") {
+      const folder = this.folders.get(message.id);
+      if (!folder) return;
+      Object.assign(folder, message);
+      if (["complete", "failed", "cancelled"].includes(message.state)) {
+        this.folderConcurrencyUpdates.delete(folder.id);
+        this.folderSources.get(folder.client_id)?.controller.abort();
+        this.folderSources.delete(folder.client_id);
+        this.stopFolderDownloads(folder.id);
+        this.folderDestinations.delete(folder.id);
+      }
+      this.onEvent(message);
+      return;
+    }
+    if (message.type === "folder-progress") {
+      for (const entry of message.progress || [])
+        this.handle({ type: "progress", ...entry });
+      return;
+    }
     // 接收端已按本地写盘进度更新，忽略服务器回传的同一份进度。
-    if (message.type === "progress" && this.receiving?.id === message.id)
+    if (
+      message.type === "progress" &&
+      (this.receiving?.id === message.id ||
+        this.folderDirect.hasReceiver(message.id))
+    )
       return;
     if (message.type === "paired") this.startPeer(message);
     if (message.type === "signal") {
@@ -236,6 +320,7 @@ export class TransferClient {
           retried: true,
         });
       }
+      this.folderOfferOwners.delete(message.client_id);
       this.files.set(message.id, message);
       if (message.from === this.member)
         this.pendingOffers.delete(message.client_id);
@@ -253,6 +338,17 @@ export class TransferClient {
       this.abortDirect(message.id);
       this.pendingOffers.delete(message.client_id);
       this.sources.delete(message.client_id);
+      const folderSource = this.folderSources.get(message.client_id);
+      if (folderSource) {
+        folderSource.controller.abort();
+        this.folderSources.delete(message.client_id);
+      }
+      const folderID =
+        this.files.get(message.id)?.folder?.id ||
+        (this.folders.has(message.id) ? message.id : null) ||
+        this.folderOfferOwners.get(message.client_id);
+      this.folderOfferOwners.delete(message.client_id);
+      if (folderID) this.folderFailed(folderID, new Error(message.message));
       if (message.id && this.autoAccepting === message.id) {
         this.autoAccepting = null;
         const file = this.files.get(message.id);
@@ -286,8 +382,17 @@ export class TransferClient {
       const task =
         message.mode === "relay"
           ? this.upload(message)
-          : this.sendDirect(message.id);
-      task.catch((error) => this.fileFailed(message.id, error));
+          : this.files.get(message.id)?.folder
+            ? this.folderDirect.start(
+                this.files.get(message.id),
+                this.sources.get(this.files.get(message.id).client_id),
+              )
+            : this.sendDirect(message.id);
+      task.catch((error) => {
+        const folder = this.files.get(message.id)?.folder;
+        if (folder) this.folderFailed(folder.id, error);
+        else this.fileFailed(message.id, error);
+      });
     }
     if (message.type === "range-start") {
       this.uploadRange(message).catch((error) => {
@@ -321,6 +426,10 @@ export class TransferClient {
       );
       return;
     }
+    if (message.type === "download" && this.files.get(message.id)?.folder) {
+      this.queueFolderRelay(message);
+      return;
+    }
     if (
       message.type === "state" &&
       ["complete", "failed", "cancelled"].includes(message.state)
@@ -339,10 +448,12 @@ export class TransferClient {
       )
         this.autoAccepting = null;
       this.abortDirect(message.id);
+      this.folderDirect.remove(message.id);
+      this.stopFolderDownload(message.id);
       // 取消后重建直连，旧通道及其残留分块不进入下一次接收。
       if (message.mode === "p2p" && message.state !== "complete") {
         const file = this.files.get(message.id);
-        if (file && !file.directReset) {
+        if (file && !file.folder && !file.directReset) {
           file.directReset = true;
           this.restartPeer();
         }
@@ -353,11 +464,333 @@ export class TransferClient {
         this.sources.delete(file.client_id);
     }
     this.onEvent(message);
+    if (
+      message.type === "file" &&
+      message.folder &&
+      message.from !== this.member
+    ) {
+      this.receiveFolderEntry(message).catch((error) =>
+        this.folderFailed(message.folder.id, error),
+      );
+    }
+    if (
+      message.type === "state" &&
+      ["complete", "failed", "cancelled"].includes(message.state)
+    ) {
+      const file = this.files.get(message.id);
+      if (file?.folder) {
+        this.sources.delete(file.client_id);
+        this.files.delete(message.id);
+      }
+    }
     this.receiveNextAutoFile();
   }
 
-  offer(files, images = false) {
-    if (this.files.size + this.pendingOffers.size + files.length > 32)
+  offerFolder(folder) {
+    if (this.folders.size + this.files.size + this.pendingOffers.size >= 32)
+      throw new Error("本次连接的任务额度已用完");
+    const id = transferID();
+    this.folderSources.set(id, {
+      folder,
+      controller: new AbortController(),
+      lastEntry: 0,
+    });
+    try {
+      this.send({
+        type: "folder-offer",
+        client_id: id,
+        name: folder.name,
+        count: folder.count,
+        size: folder.size,
+      });
+    } catch (error) {
+      this.folderSources.delete(id);
+      throw error;
+    }
+  }
+
+  async sendFolderEntry(id, credits) {
+    const folder = this.folders.get(id);
+    const source = this.folderSources.get(folder?.client_id);
+    if (!source || folder.state !== "active") return;
+    if (
+      !Number.isInteger(credits) ||
+      credits < 1 ||
+      credits > folderMaxConcurrency
+    )
+      throw new Error("文件夹队列额度无效");
+    source.credits = (source.credits || 0) + credits;
+    if (source.running) return;
+    source.running = true;
+    // 服务端额度已包含并发保护，完成即补位，不再人为等待固定间隔。
+    try {
+      const entries = source.folder.entries();
+      source.iterator ??=
+        entries[Symbol.asyncIterator]?.() || entries[Symbol.iterator]();
+      while (source.credits > 0) {
+        source.controller.signal.throwIfAborted();
+        if (!source.nextEntry) {
+          const { value, done } = await source.iterator.next();
+          if (done) throw new Error("文件夹内容已变化，请重新选择并发送");
+          source.nextEntry = value;
+        }
+        // 调整并发时，异步枚举可能刚好返回；保留该条目，等待新额度，不能跳过文件。
+        if (source.credits <= 0) break;
+        const entry = source.nextEntry;
+        folderPath(entry.path, entry.directory);
+        source.controller.signal.throwIfAborted();
+        source.credits--;
+        this.offer([entry.file], false, {
+          id,
+          path: entry.path,
+          directory: entry.directory,
+        });
+        source.nextEntry = null;
+      }
+    } finally {
+      source.running = false;
+    }
+  }
+
+  async acceptFolder(
+    id,
+    direct,
+    concurrency = this.folders.get(id)?.concurrency || folderDefaultConcurrency,
+  ) {
+    if (
+      !Number.isInteger(Number(concurrency)) ||
+      Number(concurrency) < 1 ||
+      Number(concurrency) > folderMaxConcurrency
+    )
+      throw new Error("文件夹并发数应为 1–128");
+    if (!canSaveFolders())
+      throw new Error("接收文件夹需要 HTTPS 和支持选择保存目录的浏览器");
+    const folder = this.folders.get(id);
+    if (!folder || folder.from === this.member || folder.state !== "offered")
+      throw new Error("文件夹任务不可用");
+    if (
+      this.accepting ||
+      this.receiving ||
+      this.folderDestinations.size ||
+      [...this.files.values()].some((file) => file.state === "active")
+    )
+      throw new Error("请先完成当前接收操作");
+    if (direct && !this.directReady) throw new Error("点对点连接尚未就绪");
+    this.accepting = true;
+    try {
+      const parent = await window.showDirectoryPicker({ mode: "readwrite" });
+      if (this.closed || folder.state !== "offered")
+        throw new Error("连接或文件夹任务已结束");
+      const root = await createFolderDestination(parent, folder.name);
+      if (this.closed || folder.state !== "offered")
+        throw new Error("连接或文件夹任务已结束");
+      this.folderDestinations.set(id, {
+        root,
+        direct,
+        preparing: Promise.resolve(),
+      });
+      this.send({
+        type: "accept-folder",
+        id,
+        mode: direct ? "p2p" : "relay",
+        concurrency: Number(concurrency),
+      });
+    } catch (error) {
+      this.folderDestinations.delete(id);
+      throw error;
+    } finally {
+      this.accepting = false;
+    }
+  }
+
+  updateFolderConcurrency(id, concurrency) {
+    const value = Number(concurrency);
+    if (!Number.isInteger(value) || value < 1 || value > folderMaxConcurrency)
+      throw new Error("文件夹并发数应为 1–128");
+    const folder = this.folders.get(id);
+    if (
+      this.closed ||
+      !folder ||
+      folder.from === this.member ||
+      folder.state !== "active"
+    )
+      throw new Error("当前文件夹不可调整并发数");
+    if (this.folderConcurrencyUpdates.has(id))
+      throw new Error("正在应用并发设置");
+    this.folderConcurrencyUpdates.add(id);
+    try {
+      this.send({ type: "folder-concurrency", id, concurrency: value });
+    } catch (error) {
+      this.folderConcurrencyUpdates.delete(id);
+      throw error;
+    }
+  }
+
+  async receiveFolderEntry(file) {
+    const destination = this.folderDestinations.get(file.folder.id);
+    if (!destination) throw new Error("请先选择文件夹保存目录");
+    // 路径检查与创建串行，避免同名目标竞争；文件内容在各自的流中并行写入。
+    const preparing = destination.preparing.then(() => {
+      if (this.closed || this.folders.get(file.folder.id)?.state !== "active")
+        return null;
+      return createFolderEntry(
+        destination.root,
+        file.folder.path,
+        file.folder.directory,
+      );
+    });
+    destination.preparing = preparing.catch(() => {});
+    const handle = await preparing;
+    if (this.closed || this.folders.get(file.folder.id)?.state !== "active")
+      return;
+    if (file.folder.directory) {
+      this.send({ type: "accept", id: file.id, mode: "directory" });
+      return;
+    }
+    const writer = await handle.createWritable();
+    if (this.closed || this.folders.get(file.folder.id)?.state !== "active") {
+      await writer.abort();
+      return;
+    }
+    try {
+      if (destination.direct) this.folderDirect.prepare(file, writer);
+      else
+        this.folderDownloads.set(file.id, {
+          id: file.id,
+          folder: file.folder.id,
+          writer,
+          controller: new AbortController(),
+        });
+      this.send({
+        type: "accept",
+        id: file.id,
+        mode: destination.direct ? "p2p" : "relay",
+      });
+    } catch (error) {
+      this.folderDirect.remove(file.id);
+      this.stopFolderDownload(file.id);
+      await writer.abort().catch(() => {});
+      throw error;
+    }
+  }
+
+  queueFolderRelay(message) {
+    const job = this.folderDownloads.get(message.id);
+    if (!job || job.download || job.controller.signal.aborted) return;
+    job.download = message;
+    this.startNextFolderRelay();
+  }
+
+  startNextFolderRelay() {
+    if (this.closed || this.folderRelayStarting) return;
+    for (const job of this.folderDownloads.values()) {
+      if (
+        !job.download ||
+        job.started ||
+        job.controller.signal.aborted ||
+        this.folders.get(job.folder)?.state !== "active"
+      )
+        continue;
+      job.started = true;
+      this.folderRelayStarting = job;
+      // 只串行配对启动，已接入的文件继续并行传输，不等待前一个文件完成。
+      this.receiveFolderRelay(job.download).catch((error) =>
+        this.folderFailed(job.folder, error),
+      );
+      return;
+    }
+  }
+
+  async receiveFolderRelay(message) {
+    const job = this.folderDownloads.get(message.id);
+    const file = this.files.get(message.id);
+    if (!job || job.id !== file?.id) throw new Error("文件夹接收状态无效");
+    let reader;
+    try {
+      const response = await fetch(this.downloadURL(message.url), {
+        signal: job.controller.signal,
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+      });
+      if (!response.ok || !response.body) throw new Error("文件夹中继接收失败");
+      reader = response.body.getReader();
+      let bytes = 0;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > file.size) throw new Error("文件长度不一致");
+        // 每次写盘完成后再读下一块，保持接收背压，不聚合为 Blob。
+        await job.writer.write(value);
+        this.onEvent({ type: "progress", id: file.id, bytes });
+      }
+      if (bytes !== file.size) throw new Error("文件长度不一致");
+      await job.writer.close();
+      if (this.folderDownloads.get(job.id) === job)
+        this.folderDownloads.delete(job.id);
+      if (!this.closed && !job.controller.signal.aborted)
+        this.send({ type: "complete", id: file.id, bytes });
+    } catch (error) {
+      await reader?.cancel().catch(() => {});
+      await job.writer.abort().catch(() => {});
+      throw error;
+    } finally {
+      if (this.folderDownloads.get(job.id) === job)
+        this.folderDownloads.delete(job.id);
+    }
+  }
+
+  stopFolderDownload(id) {
+    if (this.folderRelayStarting?.id === id) this.folderRelayStarting = null;
+    const job = this.folderDownloads.get(id);
+    if (!job) return;
+    this.folderDownloads.delete(id);
+    job.controller.abort();
+    job.writer.abort().catch(() => {});
+  }
+
+  stopFolderDownloads(id) {
+    if (this.folderRelayStarting?.folder === id)
+      this.folderRelayStarting = null;
+    this.folderDirect.cancelFolder(id);
+    for (const job of this.folderDownloads.values())
+      if (job.folder === id) this.stopFolderDownload(job.id);
+    for (const [clientID, folderID] of this.folderOfferOwners)
+      if (folderID === id) {
+        this.folderOfferOwners.delete(clientID);
+        this.sources.delete(clientID);
+        this.pendingOffers.delete(clientID);
+      }
+  }
+
+  cancelFolder(id) {
+    const folder = this.folders.get(id);
+    this.folderSources.get(folder?.client_id)?.controller.abort();
+    this.stopFolderDownloads(id);
+    this.send({ type: "cancel-folder", id });
+  }
+
+  folderFailed(id, error) {
+    if (this.closed || !id) return;
+    if (error.name !== "AbortError")
+      this.onEvent({ type: "error", message: error.message });
+    const folder = this.folders.get(id);
+    if (folder && ["offered", "active"].includes(folder.state)) {
+      try {
+        this.cancelFolder(id);
+      } catch {}
+    }
+  }
+
+  offer(files, images = false, folder = null) {
+    if (
+      !folder &&
+      this.files.size +
+        this.pendingOffers.size +
+        this.folders.size +
+        files.length >
+        32
+    )
       throw new Error("每次连接最多发送 32 个文件");
     for (const file of files) {
       if (file.size > this.maxFile)
@@ -378,8 +811,10 @@ export class TransferClient {
         name: file.name,
         size: file.size,
         ...(images ? { image_type: file.type } : {}),
+        ...(folder ? { folder } : {}),
       });
       this.sources.set(id, file);
+      if (folder) this.folderOfferOwners.set(id, folder.id);
       this.pendingOffers.add(id);
       offered.push(id);
     }
@@ -416,12 +851,14 @@ export class TransferClient {
       this.autoAccepting ||
       this.accepting ||
       this.receiving ||
+      this.folderDestinations.size ||
       [...this.files.values()].some((file) => file.state === "active")
     )
       return;
     const file = [...this.files.values()].find(
       (file) =>
         (file.image_type || this.autoReceive) &&
+        !file.folder &&
         !file.autoBlocked &&
         file.from !== this.member &&
         file.state === "offered",
@@ -482,6 +919,7 @@ export class TransferClient {
     if (
       this.accepting ||
       this.receiving ||
+      (this.folderDestinations.size && !file.folder) ||
       (this.autoAccepting && this.autoAccepting !== file.id)
     )
       throw new Error("请先完成当前接收操作");
@@ -611,6 +1049,7 @@ export class TransferClient {
   restartPeer() {
     if (this.closed || !this.peerSettings) return;
     this.debug("重建 WebRTC 连接");
+    this.folderDirect.close();
     this.directReady = false;
     this.onEvent({ type: "direct", ready: false });
     const peer = this.peer,
@@ -707,11 +1146,16 @@ export class TransferClient {
             this.peerFailed("offer 协商失败");
           }
         });
-    } else
-      peer.ondatachannel = (event) => {
-        if (this.closed || this.peer !== peer) event.channel.close();
-        else this.attachChannel(event.channel);
-      };
+    }
+    // 两端都可能发送文件夹；独立通道只绑定已授权的子任务。
+    peer.ondatachannel = ({ channel }) => {
+      if (this.closed || this.peer !== peer) channel.close();
+      else if (channel.label.startsWith("folder:"))
+        this.folderDirect.attach(channel);
+      else if (channel.label === "transfer" && !this.channel)
+        this.attachChannel(channel);
+      else channel.close();
+    };
   }
 
   async signal(data) {
@@ -1028,6 +1472,10 @@ export class TransferClient {
     this.debug("直连不可用", { reason }, true);
     this.directReady = false;
     this.onEvent({ type: "direct", ready: false });
+    for (const folder of this.folders.values())
+      if (folder.state === "active" && folder.mode === "p2p")
+        this.folderFailed(folder.id, new Error("直连中断，请重新发送文件夹"));
+    this.folderDirect.close();
     const id = this.sending?.id || this.receiving?.id;
     if (id)
       this.fileFailed(id, new Error("直连中断，本次传输已停止，请重新发送"));
@@ -1059,6 +1507,15 @@ export class TransferClient {
     this.debug("关闭连接并释放资源");
     this.closed = true;
     this.autoReceive = false;
+    for (const source of this.folderSources.values()) source.controller.abort();
+    this.folderDirect.close();
+    for (const id of this.folderDownloads.keys()) this.stopFolderDownload(id);
+    this.folderRelayStarting = null;
+    this.folderOfferOwners.clear();
+    this.folderConcurrencyUpdates.clear();
+    this.folderSources.clear();
+    this.folderDestinations.clear();
+    this.folders.clear();
     for (const controller of this.uploads.values()) controller.abort();
     for (const upload of this.rangeUploads.values()) upload.controller.abort();
     for (const controller of this.imageDownloads.values()) controller.abort();

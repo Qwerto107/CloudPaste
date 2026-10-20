@@ -944,3 +944,196 @@ test("慢写盘保持有界队列，批量确认只包含已写入字节，尾�
   assert.equal(controls.at(-1).bytes, job.size);
   assert.deepEqual(controls.at(-1).connection, client.directEndpoints);
 });
+
+// 调整是独立控制操作，校验失败不能破坏已有传输。
+test("传输中仅接收方可调整并发，失败只提示且允许重新应用", () => {
+  const events = [],
+    sent = [];
+  const client = new TransferClient((event) => events.push(event));
+  client.member = 1;
+  client.send = (message) => sent.push(message);
+  client.folders.set("folder", {
+    id: "folder",
+    from: 0,
+    state: "active",
+    concurrency: 32,
+  });
+  for (const value of [0, 129, 1.5, ""])
+    assert.throws(() => client.updateFolderConcurrency("folder", value));
+  client.updateFolderConcurrency("folder", 8);
+  assert.throws(() => client.updateFolderConcurrency("folder", 9), /正在应用/);
+  client.handle({
+    type: "error",
+    action: "folder-concurrency",
+    id: "folder",
+    message: "无法应用",
+  });
+  assert.equal(client.folderConcurrencyUpdates.size, 0);
+  assert.equal(
+    sent.some((message) => message.type === "cancel-folder"),
+    false,
+  );
+  client.updateFolderConcurrency("folder", 128);
+  client.handle({ type: "folder-concurrency", id: "folder", concurrency: 128 });
+  assert.equal(client.folders.get("folder").concurrency, 128);
+  assert.equal(client.folderConcurrencyUpdates.size, 0);
+  client.member = 0;
+  assert.throws(() => client.updateFolderConcurrency("folder", 1), /不可调整/);
+  assert.equal(events.at(-1).concurrency, 128);
+  client.close();
+});
+
+// 队列重置不能丢掉异步枚举刚刚返回的文件，也不能继续使用旧额度。
+test("调低并发时保留尚未提交的目录条目，取得新额度后只发送一次", async () => {
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const sent = [];
+  const client = new TransferClient(() => {});
+  client.member = 0;
+  client.maxFile = 100;
+  client.send = (message) => sent.push(message);
+  const file = new File(["a"], "a.txt");
+  client.folders.set("folder", {
+    id: "folder",
+    client_id: "source",
+    from: 0,
+    state: "active",
+    concurrency: 4,
+    interval_ms: 1000,
+  });
+  client.folderSources.set("source", {
+    controller: new AbortController(),
+    folder: {
+      async *entries() {
+        await gate;
+        yield { file, path: "a.txt", directory: false };
+      },
+    },
+  });
+  const pending = client.sendFolderEntry("folder", 4);
+  client.handle({ type: "folder-reset", id: "folder" });
+  release();
+  await pending;
+  assert.deepEqual(sent, [{ type: "folder-ready", id: "folder" }]);
+  await client.sendFolderEntry("folder", 1);
+  assert.equal(sent.filter((message) => message.type === "offer").length, 1);
+  assert.equal(sent.at(-1).folder.path, "a.txt");
+  client.close();
+});
+
+// 后续批次应立即使用补充额度，不能再次进入按秒等待的串行节拍。
+test("超过首批 32 个文件仍立即补充并发队列", async () => {
+  const sent = [];
+  const client = new TransferClient(() => {});
+  client.member = 0;
+  client.maxFile = 100;
+  client.send = (message) => sent.push(message);
+  client.folders.set("folder", {
+    id: "folder",
+    client_id: "source",
+    from: 0,
+    state: "active",
+    concurrency: 32,
+  });
+  client.folderSources.set("source", {
+    controller: new AbortController(),
+    folder: {
+      async *entries() {
+        for (let i = 0; i < 96; i++)
+          yield {
+            file: new File(["a"], `f-${i}.txt`),
+            path: `f-${i}.txt`,
+            directory: false,
+          };
+      },
+    },
+  });
+  const original = globalThis.setTimeout;
+  try {
+    globalThis.setTimeout = () => {
+      throw new Error("队列补位不应使用固定等待定时器");
+    };
+    await client.sendFolderEntry("folder", 32);
+    await client.sendFolderEntry("folder", 32);
+    await client.sendFolderEntry("folder", 32);
+    assert.equal(sent.filter((message) => message.type === "offer").length, 96);
+    assert.equal(new Set(sent.map((message) => message.folder.path)).size, 96);
+  } finally {
+    globalThis.setTimeout = original;
+    client.close();
+  }
+});
+
+// 已接入文件继续传输，仅限制尚未配对的下载启动，防止共享连接池被 GET 占满。
+test("文件夹中继先等上传接入再启动下一对，取消后迟到通知不能重启队列", async () => {
+  const sent = [],
+    started = [],
+    finishes = [];
+  const client = new TransferClient(() => {});
+  client.send = (message) => sent.push(message);
+  client.folders.set("folder", { id: "folder", state: "active" });
+  client.receiveFolderRelay = (message) => {
+    started.push(message.id);
+    return new Promise((resolve) => finishes.push(resolve));
+  };
+  for (const id of ["one", "two", "three"]) {
+    client.folderDownloads.set(id, {
+      id,
+      folder: "folder",
+      controller: new AbortController(),
+      writer: { async abort() {} },
+    });
+    client.queueFolderRelay({ type: "download", id, url: "unused" });
+  }
+  assert.deepEqual(started, ["one"]);
+  client.handle({ type: "relay-ready", id: "unknown" });
+  assert.deepEqual(started, ["one"], "未知通知不能释放配对保护");
+  client.handle({ type: "relay-ready", id: "one" });
+  assert.deepEqual(started, ["one", "two"], "无需等待第一项内容传完");
+  // 零字节文件可能先关闭目标文件并从 Map 移除，接入通知仍应正确释放当前等待。
+  client.folderDownloads.delete("two");
+  client.handle({ type: "relay-ready", id: "two" });
+  assert.deepEqual(started, ["one", "two", "three"]);
+  client.folderDownloads.delete("three");
+  client.cancelFolder("folder");
+  assert.equal(
+    client.folderRelayStarting,
+    null,
+    "目标已关闭时取消也必须释放配对状态",
+  );
+  client.handle({ type: "relay-ready", id: "three" });
+  assert.equal(started.length, 3);
+  for (const finish of finishes) finish();
+  client.close();
+});
+
+test("文件夹中继启动失败时清除剩余队列，不能继续占用连接", async () => {
+  const started = [],
+    sent = [];
+  const client = new TransferClient(() => {});
+  client.send = (message) => sent.push(message);
+  client.folders.set("folder", { id: "folder", state: "active" });
+  client.receiveFolderRelay = async (message) => {
+    started.push(message.id);
+    throw new Error("网络中断");
+  };
+  for (const id of ["one", "two"]) {
+    client.folderDownloads.set(id, {
+      id,
+      folder: "folder",
+      controller: new AbortController(),
+      writer: { async abort() {} },
+    });
+    client.queueFolderRelay({ type: "download", id, url: "unused" });
+  }
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(started, ["one"]);
+  assert.equal(client.folderDownloads.size, 0);
+  assert.equal(client.folderRelayStarting, null);
+  assert.equal(
+    sent.filter((message) => message.type === "cancel-folder").length,
+    1,
+  );
+  client.close();
+});

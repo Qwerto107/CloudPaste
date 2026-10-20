@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, markRaw, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { NModal } from "naive-ui";
 import { onBeforeRouteLeave } from "vue-router";
 import { session, canTransfer } from "./session.js";
@@ -7,6 +7,12 @@ import { settings, loadSettings } from "./settings.js";
 import Icon from "./Icon.vue";
 import PairCodeInput from "./PairCodeInput.vue";
 import IPLocation from "./IPLocation.vue";
+import {
+  canSaveFolders,
+  readFolder,
+  folderFromFiles,
+  folderMaxConcurrency,
+} from "./transfer-folders.js";
 import { chatImageHistory, validateChatImage } from "./transfer-images.js";
 import {
   normalizePairingCode,
@@ -47,6 +53,12 @@ let followMessages = true;
 const text = ref("");
 const files = ref([]);
 const selected = ref([]);
+const folders = ref([]);
+const selectedFolder = ref(null);
+const folderSelecting = ref(false);
+const folderInput = ref(null);
+const folderSavingSupported = canSaveFolders();
+let folderScan;
 const pastedImages = ref([]);
 const previewImage = ref(null);
 const previewViewport = ref(null);
@@ -70,8 +82,10 @@ const maxFile = ref(0);
 const busy = ref(false);
 const canCreate = computed(() => canTransfer("create"));
 const canJoin = computed(() => canTransfer("join"));
-const active = computed(() =>
-  files.value.some((file) => file.state === "active"),
+const active = computed(
+  () =>
+    files.value.some((file) => file.state === "active") ||
+    folders.value.some((folder) => folder.state === "active"),
 );
 const connected = computed(() => status.value === "paired");
 const canDirect = computed(() => direct.value && canSaveDirectly());
@@ -108,8 +122,18 @@ const directButtonTheme = {
   borderDisabled: "1px solid var(--transfer-blue)",
 };
 const ordinaryFiles = computed(() =>
-  files.value.filter((file) => !file.image_type),
+  files.value.filter((file) => !file.image_type && !file.folder),
 );
+// 复用已有逐文件进度；按文件夹分组，不增加请求或轮询。
+const folderFileGroups = computed(() => {
+  const groups = new Map();
+  for (const file of files.value) {
+    if (!file.folder || file.folder.directory) continue;
+    if (!groups.has(file.folder.id)) groups.set(file.folder.id, []);
+    groups.get(file.folder.id).push(file);
+  }
+  return groups;
+});
 // 当前任务与已结束记录共用一套操作模板，避免按钮行为在两个列表中分叉。
 const fileGroups = computed(() => {
   const finished = (file) =>
@@ -119,6 +143,7 @@ const fileGroups = computed(() => {
       key: "current",
       label: "当前任务",
       ended: false,
+      folders: folders.value.filter((folder) => !finished(folder)),
       files: ordinaryFiles.value
         .filter((file) => !finished(file))
         .sort(
@@ -129,9 +154,10 @@ const fileGroups = computed(() => {
       key: "history",
       label: "已结束的传输",
       ended: true,
+      folders: folders.value.filter(finished),
       files: ordinaryFiles.value.filter(finished),
     },
-  ].filter((group) => group.files.length);
+  ].filter((group) => group.files.length || group.folders.length);
 });
 let client;
 
@@ -271,7 +297,31 @@ function size(value) {
   return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${["B", "KiB", "MiB", "GiB"][index]}`;
 }
 function event(message) {
-  if (message.type === "created") {
+  if (message.type === "folder") {
+    folders.value.push({
+      ...message,
+      concurrencyDraft: message.concurrency,
+      bytes: 0,
+      completed: 0,
+      recent: [],
+      sentLabel: new Date(message.sent_at).toLocaleString("zh-CN", {
+        hour12: false,
+      }),
+    });
+  } else if (message.type === "folder-state") {
+    const folder = folders.value.find((item) => item.id === message.id);
+    if (folder) Object.assign(folder, message);
+  } else if (message.type === "folder-concurrency") {
+    const folder = folders.value.find((item) => item.id === message.id);
+    if (folder) {
+      folder.updatingConcurrency = false;
+      if (!message.error) {
+        folder.concurrency = message.concurrency;
+        folder.concurrencyDraft = message.concurrency;
+      }
+    }
+    if (message.error) error.value = message.error;
+  } else if (message.type === "created") {
     joining.value = "";
     joiningIP.value = "";
     joiningDevice.value = null;
@@ -291,8 +341,6 @@ function event(message) {
     joiningIP.value = message.ip || "";
     joiningDevice.value = message.device || null;
     joiningLocation.value = message.location || null;
-    // 可选自动确认仍由创建者发送原有 confirm 消息，服务端继续复核双方状态。
-    if (autoApproveDevice.value) send({ type: "confirm" });
   } else if (message.type === "paired") {
     status.value = "paired";
     names.value = message.names;
@@ -319,7 +367,7 @@ function event(message) {
   } else if (message.type === "text") {
     appendMessage({ ...message, id: transferID() });
   } else if (message.type === "file") {
-    offeredCount.value++;
+    if (!message.folder) offeredCount.value++;
     // 双方使用服务端的发送时间；只在收到任务时格式化，进度更新不重复计算。
     const sent = new Date(message.sent_at);
     files.value.push({
@@ -426,8 +474,27 @@ function event(message) {
     if (message.bytes !== undefined) {
       file.bytes = Math.max(file.bytes, message.bytes);
     }
+    if (
+      file.folder &&
+      ["complete", "failed", "cancelled"].includes(file.state)
+    ) {
+      const folder = folders.value.find((item) => item.id === file.folder.id);
+      if (folder) {
+        folder.recent.push({
+          path: file.folder.path || "（空目录）",
+          state: file.state,
+        });
+        if (folder.recent.length > 20) folder.recent.shift();
+      }
+      files.value = files.value.filter((item) => item !== file);
+    }
   } else if (message.type === "error") error.value = message.message;
   else if (message.type === "closed") {
+    folderScan?.abort();
+    selectedFolder.value = null;
+    for (const folder of folders.value)
+      if (["active", "offered"].includes(folder.state))
+        folder.state = "cancelled";
     autoReceive.value = false;
     clearImages();
     status.value = "closed";
@@ -458,6 +525,8 @@ async function open(kind) {
   client?.close();
   clearImages();
   files.value = [];
+  folders.value = [];
+  selectedFolder.value = null;
   offeredCount.value = 0;
   selected.value = [];
   messages.value = [];
@@ -496,6 +565,11 @@ function send(value) {
     error.value = reason.message;
   }
 }
+watch([autoApproveDevice, joining], ([enabled, device]) => {
+  // 新申请或开启开关时统一确认，仍由服务端校验创建者身份和双方状态。
+  if (enabled && myMember.value === 0 && status.value === "waiting" && device)
+    send({ type: "confirm" });
+});
 function sendText() {
   if (!text.value.trim() && !pastedImages.value.length) return;
   if (new TextEncoder().encode(text.value).length > 4096) {
@@ -532,8 +606,111 @@ function choose(event) {
 }
 function dropFiles(event) {
   dragDepth.value = 0;
+  if (
+    Array.from(event.dataTransfer.items || []).some(
+      (item) => item.webkitGetAsEntry?.()?.isDirectory,
+    )
+  ) {
+    error.value = "发送文件夹请使用“选择文件夹”，以保留目录结构";
+    return;
+  }
   addFiles(event.dataTransfer.files);
 }
+async function selectFolder(inputFiles = null) {
+  if (folderSelecting.value || selectedFolder.value) return;
+  if (!inputFiles && !folderSavingSupported) {
+    folderInput.value?.click();
+    return;
+  }
+  folderSelecting.value = true;
+  error.value = "";
+  folderScan = new AbortController();
+  const current = client;
+  try {
+    // 选择器由点击直接触发；扫描只统计数量和总大小，不缓存所有 File。
+    const folder = inputFiles
+      ? await folderFromFiles(inputFiles, maxFile.value, folderScan.signal)
+      : await readFolder(
+          await window.showDirectoryPicker({ mode: "read" }),
+          maxFile.value,
+          folderScan.signal,
+        );
+    if (current === client && connected.value)
+      selectedFolder.value = markRaw(folder);
+  } catch (reason) {
+    if (reason.name !== "AbortError") error.value = reason.message;
+  } finally {
+    folderSelecting.value = false;
+  }
+}
+function chooseFolderFiles(event) {
+  if (event.target.files.length)
+    void selectFolder(Array.from(event.target.files));
+  event.target.value = "";
+}
+function offerFolder() {
+  try {
+    client.offerFolder(selectedFolder.value);
+    selectedFolder.value = null;
+  } catch (reason) {
+    error.value = reason.message;
+  }
+}
+async function acceptFolder(folder, direct) {
+  folder.accepting = true;
+  error.value = "";
+  try {
+    await client.acceptFolder(
+      folder.id,
+      direct,
+      Number(folder.concurrencyDraft),
+    );
+  } catch (reason) {
+    if (reason.name !== "AbortError") error.value = reason.message;
+  } finally {
+    folder.accepting = false;
+  }
+}
+function updateFolderConcurrency(folder) {
+  error.value = "";
+  try {
+    client.updateFolderConcurrency(folder.id, folder.concurrencyDraft);
+    folder.updatingConcurrency = true;
+  } catch (reason) {
+    error.value = reason.message;
+  }
+}
+function cancelFolder(folder) {
+  try {
+    client.cancelFolder(folder.id);
+  } catch (reason) {
+    error.value = reason.message;
+  }
+}
+function folderBytes(folder) {
+  return Math.min(
+    folder.size,
+    folder.bytes +
+      files.value
+        .filter((file) => file.folder?.id === folder.id)
+        .reduce((total, file) => total + file.bytes, 0),
+  );
+}
+function folderFiles(folder) {
+  return folderFileGroups.value.get(folder.id) || [];
+}
+function filePercent(file) {
+  return file.size
+    ? Math.min(100, Math.round((file.bytes / file.size) * 100))
+    : 0;
+}
+const folderStateLabels = {
+  offered: "等待接收",
+  active: "传输中",
+  complete: "已完成",
+  failed: "传输失败",
+  cancelled: "已取消",
+};
 function removeTask(file) {
   if (!["cancelled", "failed", "complete"].includes(file.state)) return;
   client?.forgetSource(file.id);
@@ -717,7 +894,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="transfer-page">
-    <div class="page-heading">
+    <div v-if="!connected" class="page-heading">
       <div>
         <p class="eyebrow">文字与文件，即时互传</p>
         <h1>设备互传</h1>
@@ -826,6 +1003,16 @@ onBeforeUnmount(() => {
         <UiButton type="button" @click="copyCode">复制配对码</UiButton>
         <p class="muted">配对成功后失效。请通过可信渠道把配对码发送给对方。</p>
       </template>
+      <div
+        v-if="myMember === 0 && status === 'waiting'"
+        class="transfer-auto-approve"
+      >
+        <label class="check">
+          <UiCheckbox v-model="autoApproveDevice" :disabled="busy" />
+          自动同意设备加入
+        </label>
+        <p class="muted small">开启后，持有码的设备会自动加入。</p>
+      </div>
       <div v-if="joining" class="transfer-joining" role="status">
         <div class="transfer-peer-info">
           <strong>{{ joining }}</strong>
@@ -861,10 +1048,31 @@ onBeforeUnmount(() => {
       <div class="panel transfer-peer">
         <div class="transfer-peer-bar">
           <div class="transfer-peer-info">
-            <strong>已连接：{{ names[1 - myMember] }}</strong>
-            <span class="transfer-peer-state">{{
-              direct ? "已授权 · 点对点可用 · 中继可用" : "已授权 · 中继可用"
-            }}</span>
+            <div class="transfer-peer-device">
+              <Icon name="monitor" />
+              <div>
+                <strong>{{ names[myMember] || name }}</strong
+                ><small class="muted">这台设备</small>
+              </div>
+            </div>
+            <span class="transfer-peer-wire" aria-hidden="true"></span>
+            <div class="transfer-peer-device">
+              <Icon
+                :name="
+                  peerDevices[1 - myMember]?.type === 'mobile'
+                    ? 'mobile'
+                    : 'monitor'
+                "
+              />
+              <div>
+                <strong>已连接：{{ names[1 - myMember] }}</strong>
+                <span class="transfer-peer-state">{{
+                  direct
+                    ? "已授权 · 点对点可用 · 中继可用"
+                    : "已授权 · 中继可用"
+                }}</span>
+              </div>
+            </div>
           </div>
           <div class="transfer-peer-actions">
             <UiButton
@@ -1004,13 +1212,18 @@ onBeforeUnmount(() => {
               <p v-else>{{ message.text }}</p>
             </div>
           </div>
-          <form @submit.prevent="sendText" @paste="pasteImage">
+          <form
+            class="transfer-message-composer"
+            @submit.prevent="sendText"
+            @paste="pasteImage"
+          >
             <UiInput
               v-model="text"
               type="textarea"
               aria-label="发送文字"
               placeholder="输入文字，或粘贴图片"
-              :rows="3"
+              :rows="1"
+              :autosize="{ minRows: 1, maxRows: 4 }"
               maxlength="4096"
             />
             <div
@@ -1031,9 +1244,14 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <UiButton
-              class="primary"
+              class="primary transfer-send"
+              icon="send"
+              :aria-label="pastedImages.length ? '发送消息' : '发送文字'"
+              :title="pastedImages.length ? '发送消息' : '发送文字'"
               :disabled="pasting || (!text.trim() && !pastedImages.length)"
-              >{{ pastedImages.length ? "发送消息" : "发送文字" }}</UiButton
+              ><span class="transfer-send-label">{{
+                pastedImages.length ? "发送消息" : "发送文字"
+              }}</span></UiButton
             >
           </form>
           <p class="muted transfer-hint">
@@ -1067,15 +1285,33 @@ onBeforeUnmount(() => {
                 dragDepth ? "松开即可添加文件" : "拖入文件，或点击选择"
               }}</strong
               ><span class="muted"
-                >单文件最多 {{ size(maxFile) }} · 本次最多 32 个</span
+                >单文件最多 {{ size(maxFile) }} · 文件夹按顺序传输</span
               >
             </div>
-            <UiButton
-              type="button"
-              class="transfer-choose"
-              @click="fileInput?.click()"
-              >选择文件</UiButton
-            >
+            <div class="transfer-drop-actions">
+              <UiButton
+                type="button"
+                class="transfer-choose"
+                @click="fileInput?.click()"
+                >选择文件</UiButton
+              >
+              <UiButton
+                type="button"
+                class="transfer-choose"
+                :disabled="folderSelecting || Boolean(selectedFolder)"
+                @click="selectFolder()"
+                >{{ folderSelecting ? "正在扫描…" : "选择文件夹" }}</UiButton
+              >
+            </div>
+            <input
+              ref="folderInput"
+              hidden
+              type="file"
+              webkitdirectory
+              multiple
+              aria-label="选择互传文件夹"
+              @change="chooseFolderFiles"
+            />
             <input
               ref="fileInput"
               hidden
@@ -1085,6 +1321,40 @@ onBeforeUnmount(() => {
               @change="choose"
             />
           </div>
+          <section
+            v-if="selectedFolder"
+            class="transfer-queue"
+            aria-label="待发送文件夹"
+          >
+            <h3 class="transfer-list-heading">待发送文件夹</h3>
+            <div class="transfer-selected-folder">
+              <Icon name="folder" />
+              <div class="transfer-selected-folder-copy">
+                <strong :title="selectedFolder.name">{{
+                  selectedFolder.name
+                }}</strong>
+                <span class="muted"
+                  >{{ selectedFolder.count }} 项 ·
+                  {{ size(selectedFolder.size) }}</span
+                >
+              </div>
+              <UiButton
+                type="button"
+                class="quiet"
+                size="small"
+                icon="close"
+                aria-label="移除待发送文件夹"
+                @click="selectedFolder = null"
+              />
+            </div>
+            <UiButton
+              class="primary"
+              size="small"
+              icon="upload"
+              @click="offerFolder"
+              >发送文件夹</UiButton
+            >
+          </section>
           <section
             v-if="selected.length"
             class="transfer-queue"
@@ -1115,7 +1385,10 @@ onBeforeUnmount(() => {
               >发送所选文件（{{ selected.length }}）</UiButton
             >
           </section>
-          <p v-if="!ordinaryFiles.length" class="muted transfer-empty">
+          <p
+            v-if="!ordinaryFiles.length && !folders.length"
+            class="muted transfer-empty"
+          >
             暂无文件，发送或接收后将在这里显示。
           </p>
           <!-- 历史默认展开，原生 details 保留手动收起状态；有效的中继仍属于当前任务。 -->
@@ -1128,13 +1401,225 @@ onBeforeUnmount(() => {
             :aria-label="group.label"
           >
             <summary v-if="group.ended">
-              已结束的传输（{{ group.files.length }}）
+              已结束的传输（{{ group.files.length + group.folders.length }}）
             </summary>
             <h3 v-else class="transfer-list-heading">
               当前任务
-              <span class="transfer-count">{{ group.files.length }}</span>
+              <span class="transfer-count">{{
+                group.files.length + group.folders.length
+              }}</span>
             </h3>
             <div class="transfer-file-list">
+              <article
+                v-for="folder in group.folders"
+                :key="folder.id"
+                class="transfer-file transfer-folder"
+                :data-folder-id="folder.id"
+              >
+                <div class="transfer-file-head">
+                  <Icon name="folder" class="transfer-file-icon" />
+                  <div class="transfer-file-copy">
+                    <div class="transfer-file-title">
+                      <strong>{{ folder.name }}</strong
+                      ><span>{{ size(folder.size) }}</span>
+                    </div>
+                    <div class="transfer-file-meta">
+                      <span class="muted">{{
+                        folder.from === myMember ? "↑ 我发送的" : "↓ 对方发送的"
+                      }}</span>
+                      <span
+                        class="transfer-tag"
+                        :class="
+                          folder.state === 'complete'
+                            ? 'complete'
+                            : folder.state === 'active'
+                              ? 'active'
+                              : 'neutral'
+                        "
+                        >{{ folderStateLabels[folder.state] }}</span
+                      >
+                      <span class="muted"
+                        >{{ folder.completed }}/{{ folder.count }} 项</span
+                      >
+                      <span v-if="folder.mode" class="muted">{{
+                        folder.mode === "p2p" ? "点对点" : "实时中继"
+                      }}</span>
+                    </div>
+                    <time
+                      class="muted transfer-folder-time"
+                      :datetime="folder.sent_at"
+                      >{{ folder.sentLabel }}</time
+                    >
+                  </div>
+                </div>
+                <template v-if="folder.state === 'active'">
+                  <progress
+                    :value="
+                      folder.size ? folderBytes(folder) : folder.completed
+                    "
+                    :max="folder.size || folder.count"
+                    :aria-label="`${folder.name} 文件夹传输进度`"
+                  />
+                  <p class="muted transfer-progress-text">
+                    <span
+                      >{{ size(folderBytes(folder)) }} /
+                      {{ size(folder.size) }}</span
+                    ><span>并发上限 {{ folder.concurrency }} 个</span>
+                  </p>
+                  <details
+                    v-if="folderFiles(folder).length"
+                    class="transfer-folder-files"
+                    open
+                  >
+                    <summary>
+                      文件进度（{{ folderFiles(folder).length }}）
+                    </summary>
+                    <ul>
+                      <li
+                        v-for="file in folderFiles(folder)"
+                        :key="file.id"
+                        class="transfer-folder-entry"
+                      >
+                        <div class="transfer-folder-entry-head">
+                          <span :title="file.folder.path">{{
+                            file.folder.path
+                          }}</span>
+                          <span class="muted">{{
+                            file.state === "offered"
+                              ? "准备中"
+                              : `${filePercent(file)}%`
+                          }}</span>
+                        </div>
+                        <progress
+                          :value="file.bytes"
+                          :max="file.size || 1"
+                          :aria-label="`${file.folder.path} 传输进度`"
+                        />
+                        <p class="muted transfer-folder-entry-meta">
+                          {{ size(file.bytes) }} / {{ size(file.size) }}
+                        </p>
+                      </li>
+                    </ul>
+                  </details>
+                  <p v-else class="muted transfer-folder-path">
+                    正在准备下一项…
+                  </p>
+                </template>
+                <details
+                  v-if="
+                    ['offered', 'active'].includes(folder.state) &&
+                    folder.from !== myMember
+                  "
+                  class="transfer-folder-options"
+                >
+                  <summary>接收选项</summary>
+                  <label class="transfer-folder-concurrency">
+                    <span>并发数</span>
+                    <input
+                      v-model.number="folder.concurrencyDraft"
+                      :disabled="folder.updatingConcurrency"
+                      type="range"
+                      :min="1"
+                      :max="folderMaxConcurrency"
+                      :step="1"
+                      aria-label="文件夹并发数"
+                      :title="`范围 1–${folderMaxConcurrency} 个`"
+                    />
+                    <output>{{ folder.concurrencyDraft }} 个</output>
+                  </label>
+                  <p class="muted transfer-folder-range">
+                    范围 1–{{ folderMaxConcurrency }} 个
+                  </p>
+                  <div
+                    v-if="folder.state === 'active'"
+                    class="transfer-folder-apply"
+                  >
+                    <UiButton
+                      size="small"
+                      :disabled="
+                        folder.updatingConcurrency ||
+                        Number(folder.concurrencyDraft) === folder.concurrency
+                      "
+                      @click="updateFolderConcurrency(folder)"
+                      >{{
+                        folder.updatingConcurrency ? "正在应用…" : "应用"
+                      }}</UiButton
+                    >
+                    <span class="muted"
+                      >调整后逐步生效，不中断正在传输的文件。</span
+                    >
+                  </div>
+                </details>
+                <div class="transfer-file-actions">
+                  <template
+                    v-if="
+                      folder.state === 'offered' && folder.from !== myMember
+                    "
+                  >
+                    <UiButton
+                      class="primary"
+                      size="small"
+                      :disabled="
+                        active || folder.accepting || !folderSavingSupported
+                      "
+                      @click="acceptFolder(folder, false)"
+                      >中继接收文件夹</UiButton
+                    >
+                    <UiButton
+                      v-if="canDirect && folderSavingSupported"
+                      size="small"
+                      :theme-overrides="directButtonTheme"
+                      :disabled="active || folder.accepting"
+                      @click="acceptFolder(folder, true)"
+                      >点对点接收</UiButton
+                    >
+                  </template>
+                  <UiButton
+                    v-if="['active', 'offered'].includes(folder.state)"
+                    class="quiet"
+                    size="small"
+                    @click="cancelFolder(folder)"
+                    >{{
+                      folder.from !== myMember && folder.state === "offered"
+                        ? "拒绝接收"
+                        : "取消传输"
+                    }}</UiButton
+                  >
+                  <UiButton
+                    v-else
+                    class="quiet"
+                    size="small"
+                    @click="
+                      folders = folders.filter((item) => item.id !== folder.id)
+                    "
+                    >移除记录</UiButton
+                  >
+                </div>
+                <p
+                  v-if="
+                    folder.from !== myMember &&
+                    folder.state === 'offered' &&
+                    !folderSavingSupported
+                  "
+                  class="muted transfer-hint"
+                >
+                  接收文件夹需要 HTTPS，以及支持选择保存目录的浏览器。
+                </p>
+                <details
+                  v-if="folder.recent.length"
+                  class="transfer-folder-recent"
+                >
+                  <summary>
+                    已处理条目（最近 {{ folder.recent.length }} 项）
+                  </summary>
+                  <ul>
+                    <li v-for="(entry, index) in folder.recent" :key="index">
+                      <span>{{ entry.path }}</span
+                      ><span>{{ folderStateLabels[entry.state] }}</span>
+                    </li>
+                  </ul>
+                </details>
+              </article>
               <article
                 v-for="file in group.files"
                 :key="file.id"
@@ -1339,7 +1824,10 @@ onBeforeUnmount(() => {
       </div>
     </template>
     <!-- 常用操作就近提示，详细限制集中折叠，避免传输卡片被说明文字占满。 -->
-    <details class="panel transfer-help">
+    <details
+      class="panel transfer-help"
+      :class="{ 'transfer-help-connected': connected }"
+    >
       <summary>使用说明</summary>
       <dl class="transfer-help-content">
         <dt>文字与图片</dt>
@@ -1351,6 +1839,15 @@ onBeforeUnmount(() => {
         <dt>文件接收</dt>
         <dd>
           文件逐个接收。点击“中继下载”即开始下载，也可复制链接到下载工具，中继边传边下载；“点对点下载”取决于浏览器支持。开启自动接收后直接启动中继下载，浏览器仍可能询问保存位置或多文件下载许可。
+        </dd>
+        <dt>文件夹接收</dt>
+        <dd>
+          选择文件夹后整体发送，接收方选择保存目录，保留目录结构。文件并发传输，默认
+          32 个，可调整至 128
+          个；超过并发额度的文件自动排队，不受普通文件每次连接 32
+          个的累计限制，仍沿用单文件大小和本次连接总大小上限。同名目录不会自动覆盖。需要
+          HTTPS
+          和支持目录写入的浏览器；扫描和传输期间请勿修改源文件夹。文件夹需单独确认，不随“自动接收”写入磁盘。
         </dd>
         <dt>连接与隐私</dt>
         <dd>
@@ -1432,9 +1929,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .transfer-page {
-  /* 与文本、文件分享使用相同内容宽度，标题和卡片沿同一条左边线。 */
-  max-width: 960px;
+  /* 互传页独立调整宽度和字号，避免影响文本分享与后台页面。 */
+  max-width: 1200px;
   margin: 0 auto;
+  font-size: 14px;
   --transfer-blue: #1f5da0;
   --transfer-blue-bg: #eaf2ff;
   --transfer-teal: #0b716b;
@@ -1501,6 +1999,16 @@ onBeforeUnmount(() => {
 .transfer-waiting {
   text-align: center;
 }
+.transfer-auto-approve {
+  margin: 20px 0;
+}
+.transfer-auto-approve > label {
+  justify-content: center;
+  margin-bottom: 6px;
+}
+.transfer-auto-approve > p {
+  margin: 0;
+}
 .transfer-code {
   font-size: clamp(24px, 6vw, 40px);
   font-family: ui-monospace, monospace;
@@ -1521,7 +2029,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
 }
-.transfer-peer {
+.transfer-page > .transfer-peer {
+  max-width: none;
   margin-bottom: 16px;
   padding: 16px;
 }
@@ -1543,13 +2052,51 @@ onBeforeUnmount(() => {
   min-width: 0;
   font-size: 14px;
 }
-.transfer-peer-info strong::before {
-  content: "";
-  width: 7px;
-  height: 7px;
+.transfer-peer-device {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.transfer-peer-device > .icon {
+  width: 40px;
+  height: 40px;
+  padding: 9px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+}
+.transfer-peer-device > div {
+  min-width: 0;
+}
+.transfer-peer-device small,
+.transfer-peer-device .transfer-peer-state {
+  display: block;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.transfer-peer-wire {
+  position: relative;
+  width: 90px;
+  height: 2px;
   flex-shrink: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--accent) 0 6px,
+    transparent 6px 11px
+  );
+}
+.transfer-peer-wire::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  top: -4px;
+  left: calc(50% - 5px);
   border-radius: 50%;
   background: var(--accent);
+  box-shadow: 0 0 0 5px var(--soft);
 }
 .transfer-peer-state {
   color: var(--accent);
@@ -1610,9 +2157,14 @@ onBeforeUnmount(() => {
   background: var(--surface-subtle);
   border-radius: 8px;
 }
-.transfer-help {
+.transfer-page > .transfer-help {
+  /* 连接前沿用表单宽度，连接后才随双栏工作区展开。 */
+  max-width: 960px;
   margin: 20px auto 0;
   padding: 16px 20px;
+}
+.transfer-page > .transfer-help-connected {
+  max-width: none;
 }
 .transfer-help summary {
   cursor: pointer;
@@ -1641,7 +2193,8 @@ onBeforeUnmount(() => {
 }
 .transfer-workspace {
   align-items: start;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr);
+  grid-template-columns: minmax(0, 1fr) 400px;
+  gap: 16px;
 }
 .transfer-workspace .panel {
   min-width: 0;
@@ -1664,12 +2217,33 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 .transfer-messages {
-  height: 230px;
+  height: auto;
+  min-height: 0;
+  flex: 1;
   overflow: auto;
-  padding: 8px 0;
+  padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  background: radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0)
+    0 0 / 18px 18px;
+}
+/* 消息区和发送栏独立留白，长记录只在消息区内滚动。 */
+.transfer-workspace .transfer-chat {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  height: 600px;
+  overflow: hidden;
+}
+.transfer-chat .transfer-section-heading {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.transfer-chat > .transfer-hint {
+  padding: 0 18px 12px;
+  margin: 0;
+  font-size: 11px;
 }
 .transfer-chat-empty {
   flex: 1;
@@ -1694,14 +2268,27 @@ onBeforeUnmount(() => {
   /* 每条消息保持自身高度，消息区滚动时不会压缩或遮住图片的操作栏。 */
   flex-shrink: 0;
   min-width: 0;
-  max-width: 92%;
+  max-width: 78%;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 8px 12px;
+  border-radius: 16px 16px 16px 5px;
+  padding: 10px 14px;
+  background: var(--surface);
   align-self: flex-start;
 }
 .transfer-message.mine {
   align-self: flex-end;
+  border-radius: 16px 16px 5px 16px;
+  border-color: transparent;
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.transfer-message.mine .transfer-message-meta,
+.transfer-message.mine .muted {
+  color: inherit;
+  opacity: 0.7;
+}
+.transfer-message.mine .transfer-message-remove {
+  color: inherit;
 }
 .transfer-message small {
   opacity: 0.7;
@@ -1824,11 +2411,98 @@ onBeforeUnmount(() => {
 }
 .transfer-chat form {
   display: grid;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  padding: 12px;
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+.transfer-message-composer .transfer-pasted-images {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.transfer-send {
+  grid-column: 2;
+  grid-row: 1;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+}
+.transfer-send :deep(.n-button__icon) {
+  margin: 0;
+}
+.transfer-send-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.transfer-selected-folder {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.transfer-selected-folder > .icon {
+  margin-top: 2px;
+}
+.transfer-selected-folder-copy {
+  min-width: 0;
+}
+/* 名称单行省略，完整名称通过 title 查看；移除按钮使用独立列，避免被长名称挤走。 */
+.transfer-selected-folder-copy > strong {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+}
+.transfer-selected-folder-copy > span {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+}
+.transfer-folder-time,
+.transfer-folder-path,
+.transfer-folder-recent {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.transfer-folder-time {
+  display: block;
+  margin-top: 6px;
+}
+.transfer-folder-recent {
   margin-top: 12px;
+}
+.transfer-folder-recent ul {
+  list-style: none;
+  padding: 0;
+}
+.transfer-folder-recent li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+}
+.transfer-folder-recent li > span:last-child {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+/* 两种选择方式单独成行，避免按钮把文件说明挤窄。 */
+.transfer-drop-actions {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  justify-content: flex-end;
 }
 .transfer-drop {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin: 16px 0 18px;
@@ -1983,25 +2657,15 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 .transfer-file {
-  border-bottom: 1px solid var(--line);
-  padding: 18px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  min-width: 0;
+  background: var(--surface);
 }
-.transfer-file:first-child {
-  padding-top: 0;
-}
-.transfer-file:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
-}
-.transfer-history .transfer-file {
-  padding-top: 12px;
-  padding-bottom: 12px;
-}
-.transfer-history .transfer-file:first-child {
-  padding-top: 0;
-}
-.transfer-history .transfer-file:last-child {
-  padding-bottom: 0;
+.transfer-file-list {
+  display: grid;
+  gap: 10px;
 }
 .transfer-file-head {
   display: flex;
@@ -2009,10 +2673,13 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 .transfer-file-icon {
-  color: var(--muted);
+  color: var(--accent);
   flex-shrink: 0;
-  width: 16px;
-  height: 20px;
+  width: 34px;
+  height: 34px;
+  padding: 8px;
+  border-radius: 9px;
+  background: var(--soft);
 }
 .transfer-file-copy {
   flex: 1;
@@ -2124,13 +2791,146 @@ onBeforeUnmount(() => {
   font-size: 14px;
   text-decoration: underline;
 }
-@media (max-width: 800px) {
+@media (max-width: 900px) {
   .transfer-entry-grid,
   .transfer-workspace {
     grid-template-columns: 1fr;
   }
-  .transfer-messages {
-    height: 180px;
+  .transfer-workspace .transfer-chat {
+    height: 540px;
   }
+  .transfer-peer-wire {
+    display: none;
+  }
+  .transfer-peer-info {
+    gap: 14px;
+  }
+  /* 小屏先展示完整设备信息，再排列操作按钮，避免名称被挤成逐字换行。 */
+  .transfer-peer-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .transfer-peer-device {
+    flex: 1 1 200px;
+  }
+  .transfer-peer-actions {
+    justify-content: flex-end;
+  }
+  .transfer-drop {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .transfer-drop-copy {
+    flex-basis: 160px;
+  }
+  .transfer-message {
+    max-width: 90%;
+  }
+}
+</style>
+
+<style scoped>
+.transfer-folder-options {
+  margin-top: 12px;
+  font-size: 13px;
+}
+.transfer-folder-options > summary {
+  width: fit-content;
+  color: var(--muted);
+  cursor: pointer;
+}
+.transfer-folder-options > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+/* 并发设置只在展开后显示，并覆盖通用表单标签的纵向排版。 */
+.transfer-folder-options .transfer-folder-concurrency {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+.transfer-folder-concurrency > span,
+.transfer-folder-concurrency > output {
+  flex-shrink: 0;
+}
+.transfer-folder-concurrency > output {
+  min-width: 42px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.transfer-folder-concurrency > input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.transfer-folder-concurrency > input:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.transfer-folder-range {
+  margin: 2px 0 0;
+  font-size: 12px;
+}
+.transfer-folder-files {
+  margin-top: 12px;
+  font-size: 12px;
+}
+.transfer-folder-files > summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+/* 活动文件有上限，列表内滚动，避免并发较多时撑长整个页面。 */
+.transfer-folder-files > ul {
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0 8px 0 0;
+}
+.transfer-folder-entry + .transfer-folder-entry {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.transfer-folder-entry-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.transfer-folder-entry-head > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.transfer-folder-entry-head > span:last-child {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.transfer-folder-entry progress {
+  margin-top: 6px;
+}
+.transfer-folder-entry-meta {
+  margin: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.transfer-folder-apply {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
 }
 </style>
