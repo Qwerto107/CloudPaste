@@ -375,16 +375,67 @@ small {
   margin-top: 2rem;
   padding: 2rem;
 }
-/* 公告仅保留内容，减少容器与 Markdown 首尾段落的额外留白。 */
-.panel.site-announcement {
-  padding: 0.65rem 1rem;
-  margin-bottom: 1rem;
+/* 公告使用紧凑提示条，图标、正文与关闭按钮各占一列。 */
+.site-announcement {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 10px;
+  max-width: 960px;
+  margin: 0 auto 1rem;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: var(--soft);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.site-announcement-icon {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  color: var(--accent);
+}
+.site-announcement-content {
+  min-width: 0;
+}
+.site-announcement .md-editor {
+  background: transparent;
+}
+.site-announcement .md-editor-preview-wrapper {
+  padding: 0;
+}
+.site-announcement .md-editor-preview {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  word-break: break-word;
+}
+.site-announcement .md-editor-preview p {
+  margin: 0.35em 0;
 }
 .site-announcement .md-editor-preview > :first-child {
   margin-top: 0;
 }
 .site-announcement .md-editor-preview > :last-child {
   margin-bottom: 0;
+}
+.site-announcement-close.ui-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  color: var(--muted);
+}
+/* 弹出通知不占页面宽度，小屏幕保留两侧间距。 */
+.site-notifications .n-notification {
+  width: min(360px, calc(100vw - 32px));
+  margin-left: 16px;
+  margin-right: 16px;
+}
+.site-notifications .n-notification-main__content {
+  overflow-wrap: anywhere;
+  line-height: 1.6;
 }
 .wide {
   width: 100%;

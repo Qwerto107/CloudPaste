@@ -11,6 +11,7 @@ import {
 import {
   NConfigProvider,
   NDialogProvider,
+  NNotificationProvider,
   darkTheme,
   zhCN,
   dateZhCN,
@@ -236,15 +237,33 @@ async function logout() {
         <div class="custom-content" v-html="head"></div>
         <section
           v-if="announcement && announcementEnabled"
-          class="panel site-announcement"
+          class="site-announcement"
           role="region"
           aria-label="站点公告"
         >
+          <span class="site-announcement-icon"><Icon name="bell" /></span>
           <MarkdownPreview
+            class="site-announcement-content"
             :content="settings.site_announcement_content || ''"
           />
+          <UiButton
+            type="button"
+            class="quiet site-announcement-close"
+            size="small"
+            icon="close"
+            aria-label="关闭公告"
+            title="关闭公告"
+            @click="announcement = false"
+          />
         </section>
-        <RouterView />
+        <NNotificationProvider
+          container-class="site-notifications"
+          placement="top-right"
+          :max="3"
+          keep-alive-on-hover
+        >
+          <RouterView />
+        </NNotificationProvider>
         <div class="custom-content" v-html="body"></div>
       </main>
       <footer class="site-footer">

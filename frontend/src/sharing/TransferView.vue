@@ -1,6 +1,14 @@
 <script setup>
-import { computed, markRaw, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { NModal } from "naive-ui";
+import {
+  computed,
+  h,
+  markRaw,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  watch,
+} from "vue";
+import { NModal, useNotification } from "naive-ui";
 import { onBeforeRouteLeave } from "vue-router";
 import { session, canTransfer } from "./session.js";
 import { settings, loadSettings } from "./settings.js";
@@ -35,6 +43,37 @@ const pairingCode = ref("");
 const relayOnly = ref(false);
 const autoReceive = ref(false);
 const error = ref("");
+const notification = useNotification();
+const notices = new Map();
+function notify(type, content) {
+  const key = `${type}:${content}`;
+  if (notices.has(key)) return;
+  if (notices.size >= 3) {
+    const [oldKey, oldest] = notices.entries().next().value;
+    notices.delete(oldKey);
+    oldest.destroy();
+  }
+  const notice = notification[type]({
+    content: () =>
+      h("span", { role: type === "error" ? "alert" : "status" }, content),
+    duration: type === "error" ? 6000 : 3000,
+    closable: true,
+    onAfterLeave: () => {
+      if (notices.get(key) === notice) notices.delete(key);
+    },
+  });
+  notices.set(key, notice);
+}
+watch(
+  error,
+  (message) => {
+    if (!message) return;
+    notify("error", message);
+    // 提示关闭后，同一个错误仍可再次显示；活动中的相同提示由上方合并。
+    error.value = "";
+  },
+  { flush: "sync" },
+);
 const status = ref("idle");
 const joining = ref("");
 const joiningIP = ref("");
@@ -762,6 +801,7 @@ async function copyDownloadLink(file) {
   try {
     await navigator.clipboard.writeText(file.url);
     file.linkCopied = true;
+    notify("success", "下载链接已复制");
   } catch {
     file.linkExpanded = true;
     error.value = "复制失败，请选择下方下载链接手动复制";
@@ -772,6 +812,7 @@ async function copyCode() {
     await navigator.clipboard.writeText(
       normalizePairingCode(pairingCode.value),
     );
+    notify("success", "配对码已复制");
   } catch {
     error.value = "复制失败，请手动选择配对码复制";
   }
@@ -901,6 +942,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("beforeunload", beforeUnload);
   leave();
   clearImages();
+  for (const notice of notices.values()) notice.destroy();
+  notices.clear();
 });
 </script>
 
@@ -913,8 +956,6 @@ onBeforeUnmount(() => {
         <p class="muted">输入配对码，互发文字和文件。双方请保持页面在线。</p>
       </div>
     </div>
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
-
     <section
       v-if="['idle', 'closed'].includes(status)"
       class="panel transfer-entry"
