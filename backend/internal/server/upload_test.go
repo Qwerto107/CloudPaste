@@ -69,7 +69,7 @@ func TestUploadsScopeLimitsNoOverwriteAndCleanup(t *testing.T) {
 	}
 	invalid := uploadHeaders("invalid.txt", map[string]any{"storage_config_id": storage, "path": "/disk/public/../private"}, true)
 	f.upload(t, "PUT", "/api/share/upload", writer, strings.NewReader("bad"), invalid, 400)
-	f.app.cfg.MaxUploadBytes = 8
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.MaxUploadBytes = 8 })
 	r := httptest.NewRequest("PUT", "/api/share/upload", strings.NewReader("more than eight bytes"))
 	r.ContentLength = -1
 	r.Header.Set("Authorization", writer)

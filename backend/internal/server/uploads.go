@@ -329,7 +329,7 @@ func (a *App) reserveUpload(ctx context.Context, size int64) error {
 	if err != nil {
 		return err
 	}
-	if size > a.cfg.MaxStagedBytes-used {
+	if size > a.runtimeLimits().MaxStagedBytes-used {
 		return uploadQuota()
 	}
 	a.rawReserved += size
@@ -361,12 +361,19 @@ func (r *uploadBodyReader) Read(b []byte) (int, error) {
 }
 func (a *App) uploadEndpoint(fn endpoint) endpoint {
 	return func(w http.ResponseWriter, r *http.Request) error {
-		select {
-		case a.uploads <- struct{}{}:
-			defer func() { <-a.uploads }()
-		default:
+		a.uploadMu.Lock()
+		if a.uploadCount >= a.runtimeLimits().MaxUploads {
+			a.uploadMu.Unlock()
 			return &apiError{429, "UPLOAD_BUSY", "同时上传数量已达上限，请稍后重试"}
 		}
+		a.uploadCount++
+		a.uploadMu.Unlock()
+		// 调低限制只影响新请求，已占用额度正常归还，不中断当前上传。
+		defer func() {
+			a.uploadMu.Lock()
+			a.uploadCount--
+			a.uploadMu.Unlock()
+		}()
 		ctx, cancel := context.WithTimeout(r.Context(), time.Hour)
 		defer cancel()
 		r = r.WithContext(ctx)

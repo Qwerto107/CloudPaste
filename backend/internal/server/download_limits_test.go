@@ -33,7 +33,8 @@ func downloadTestApp(t *testing.T) (*App, Driver, FileInfo) {
 	}
 	t.Cleanup(func() { _ = driver.Close() })
 	size := int64(len("download fixture"))
-	app := &App{downloads: make(chan struct{}, 8), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	setRuntimeLimitsForTest(app, func(limits *runtimeLimits) { limits.MaxDownloads = 8 })
 	return app, driver, FileInfo{Name: "example.txt", MimeType: "text/plain", Size: &size}
 }
 
@@ -60,7 +61,7 @@ func TestSlowDownloadsLeaveCapacityForOtherClients(t *testing.T) {
 				t.Error("下载未能在恢复读取后退出")
 			}
 		}
-		if len(app.downloads) != 0 || len(app.downloadsByIP) != 0 {
+		if app.downloadCount != 0 || len(app.downloadsByIP) != 0 {
 			t.Error("下载完成后未释放额度")
 		}
 	})
@@ -133,7 +134,7 @@ func TestStalledDownloadTimesOutAndReleasesCapacity(t *testing.T) {
 	if timeout, ok := writer.err.(net.Error); !ok || !timeout.Timeout() {
 		t.Fatalf("期望真实连接写入超时，得到 %v", writer.err)
 	}
-	if len(app.downloads) != 0 || len(app.downloadsByIP) != 0 {
+	if app.downloadCount != 0 || len(app.downloadsByIP) != 0 {
 		t.Fatal("超时后仍占用下载额度")
 	}
 	if err := app.deliver(httptest.NewRecorder(), httptest.NewRequest("GET", "/file", nil), driver, "example.txt", info, false); err != nil {

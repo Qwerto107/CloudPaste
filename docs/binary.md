@@ -82,4 +82,6 @@ Nginx 配置可参考[HTTPS 反向代理示例](deployment.md#nginx-https-反向
 
 程序默认不信任转发头。使用反向代理时，将 `TRUSTED_PROXIES` 设置为明确的代理 IP、CIDR 或主机名，让入口代理覆盖客户端自带的 `X-Forwarded-For`，不能填写 `*` 或 `/0`。
 
+上传、下载、暂存额度、设备互传和限频均在管理后台“系统设置”中配置，保存后无需重启；原业务环境变量不再生效。端口、目录、内存、密钥及代理配置仍通过环境变量设置。
+
 完整环境变量说明见 [部署文档](https://github.com/Qwerto107/CloudPaste/blob/main/docs/deployment.md)。

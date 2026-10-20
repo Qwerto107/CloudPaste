@@ -2,8 +2,6 @@ package server
 
 import (
 	"fmt"
-	"os"
-	"strconv"
 )
 
 // 次数均按一分钟统计；WebSocket 消息按成员，其余按真实来源 IP。
@@ -19,8 +17,8 @@ type RateLimitConfig struct {
 	TransferFolderRelayPerIP        int
 }
 
-// 环境配置与直接创建 App 共用默认值，避免测试或其他启动入口遗漏限频保护。
-func (c *Config) configureRateLimits(readEnv bool) error {
+// 启动入口共用默认值；运行中的次数由后台设置快照提供。
+func (c *Config) configureRateLimits() error {
 	entries := []struct {
 		name     string
 		target   *int
@@ -37,15 +35,6 @@ func (c *Config) configureRateLimits(readEnv bool) error {
 		{"TRANSFER_FOLDER_RELAY_PER_MINUTE", &c.RateLimits.TransferFolderRelayPerIP, 12000},
 	}
 	for _, entry := range entries {
-		if readEnv {
-			if raw := os.Getenv(entry.name); raw != "" {
-				value, err := strconv.Atoi(raw)
-				if err != nil || value < 1 || value > 1000000 {
-					return fmt.Errorf("%s 必须为 1-1000000 的整数", entry.name)
-				}
-				*entry.target = value
-			}
-		}
 		if *entry.target == 0 {
 			*entry.target = entry.fallback
 		}

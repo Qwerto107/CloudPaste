@@ -71,7 +71,7 @@ func (a *App) allowPasswordAttempt(r *http.Request) bool {
 		}
 		entry = attemptWindow{Started: now}
 	}
-	if entry.Count >= a.cfg.RateLimits.PasswordPerIP {
+	if entry.Count >= a.runtimeLimits().RateLimits.PasswordPerIP {
 		return false
 	}
 	entry.Count++
@@ -91,9 +91,9 @@ func (a *App) allowAPIKeyAttempt(r *http.Request, failed bool) bool {
 		a.apiKeyFailures = newRateLimitTable(2048)
 	}
 	if failed {
-		return a.apiKeyFailures.allow(ip, a.cfg.RateLimits.PasswordPerIP, time.Now())
+		return a.apiKeyFailures.allow(ip, a.runtimeLimits().RateLimits.PasswordPerIP, time.Now())
 	}
-	return !a.apiKeyFailures.blocked(ip, a.cfg.RateLimits.PasswordPerIP, time.Now())
+	return !a.apiKeyFailures.blocked(ip, a.runtimeLimits().RateLimits.PasswordPerIP, time.Now())
 }
 
 func apiKeyRateLimited() error {

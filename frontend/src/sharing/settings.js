@@ -16,6 +16,7 @@ export const settings = reactive({
   preview_max_text_kb: "512",
   max_upload_size: "10240",
   transfer_debug_logs: "false",
+  transfer_enabled: "true",
 });
 let pending;
 export function loadSettings(force = false) {

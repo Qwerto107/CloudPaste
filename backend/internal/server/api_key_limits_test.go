@@ -12,7 +12,7 @@ import (
 
 func TestAPIKeyFailureBudgetSharedAcrossFormats(t *testing.T) {
 	f := newFixture(t)
-	f.app.cfg.RateLimits.PasswordPerIP = 3
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.PasswordPerIP = 3 })
 	key, _ := f.key(t, "valid", "/", 0)
 	request := func(ip string, headers map[string]string, want int) {
 		t.Helper()
@@ -46,7 +46,7 @@ func TestAPIKeyFailureBudgetSharedAcrossFormats(t *testing.T) {
 
 func TestAPIKeySuccessAndPermissionDeniedDoNotConsumeBudget(t *testing.T) {
 	f := newFixture(t)
-	f.app.cfg.RateLimits.PasswordPerIP = 2
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.PasswordPerIP = 2 })
 	f.request(t, "POST", "/api/admin/api-keys", f.admin, map[string]any{"name": "short", "custom_key": "abc123", "permissions": 0}, nil, 201)
 	for i := 0; i < 5; i++ {
 		requireRateStatus(t, rateLimitRequest(t, f, "GET", "/api/test/api-key", "198.51.100.1", "ApiKey abc123", nil), 200)
@@ -61,7 +61,7 @@ func TestAPIKeySuccessAndPermissionDeniedDoNotConsumeBudget(t *testing.T) {
 
 func TestAPIKeyMalformedAndDisabledKeysShareIPv6PrefixBudget(t *testing.T) {
 	f := newFixture(t)
-	f.app.cfg.RateLimits.PasswordPerIP = 3
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.PasswordPerIP = 3 })
 	f.request(t, "POST", "/api/admin/api-keys", f.admin, map[string]any{"name": "disabled", "custom_key": "disabled-key", "is_enable": 0}, nil, 201)
 	for _, step := range []struct {
 		ip, auth string
@@ -79,7 +79,7 @@ func TestAPIKeyMalformedAndDisabledKeysShareIPv6PrefixBudget(t *testing.T) {
 
 func TestAPIKeyConcurrentFailureLimit(t *testing.T) {
 	f := newFixture(t)
-	f.app.cfg.RateLimits.PasswordPerIP = 10
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.PasswordPerIP = 10 })
 	const requests = 32
 	statuses := make(chan int, requests)
 	var wg sync.WaitGroup

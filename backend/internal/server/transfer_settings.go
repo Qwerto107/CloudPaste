@@ -45,13 +45,13 @@ func (a *App) transferSettingRange(key string) (int64, int64) {
 	case "transfer_folder_concurrency":
 		return 1, transferFolderMaxConcurrency
 	case "transfer_max_file_mb":
-		return 1, a.cfg.TransferMaxFileBytes >> 20
+		return 1, 10240
 	}
 	return 0, 0
 }
 
 func (a *App) restoreTransferSettings() error {
-	rows, err := a.db.Query("SELECT key,value FROM settings WHERE key IN ('transfer_rate_mb','transfer_max_relays','transfer_max_file_mb','transfer_folder_concurrency','transfer_stun')")
+	rows, err := a.db.Query("SELECT key,value FROM settings WHERE key IN ('transfer_rate_mb','transfer_max_relays','transfer_max_file_mb','transfer_folder_concurrency','transfer_stun','transfer_enabled')")
 	if err != nil {
 		return err
 	}
@@ -76,6 +76,12 @@ func (a *App) applyTransferSettings(values map[string]string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for key, raw := range values {
+		if key == "transfer_enabled" {
+			if raw == "true" || raw == "false" {
+				h.enabled.Store(raw == "true")
+			}
+			continue
+		}
 		if key == "transfer_stun" {
 			// 仅在新配对消息中下发，保存设置不触发已有连接重新协商。
 			if validTransferSTUN(raw) {
@@ -108,6 +114,7 @@ func (a *App) transferSettingValues() map[string]string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return map[string]string{
+		"transfer_enabled":            strconv.FormatBool(h.enabled.Load()),
 		"transfer_stun":               h.stun,
 		"transfer_rate_mb":            strconv.FormatInt(h.bytesPerSecond>>20, 10),
 		"transfer_max_relays":         strconv.Itoa(h.maxRelays),

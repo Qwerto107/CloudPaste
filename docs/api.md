@@ -32,30 +32,38 @@ API Key 必须启用且未过期，并满足权限、路径范围与存储 ACL�
 
 互传申请成功的“申请加入互传”日志包含 `room`、`creator_name/type/account/ip`、`joiner_name/type/account/ip`（分别为四个独立字段）、`requested_at`、`relay_only` 和 `join_state:"pending"`。创建者同意后另记“加入互传”，保留相同申请时间，并补充 `approved_at` 和 `join_state:"approved"`；来源 IP 使用该阶段服务端保存的地址。时间为 UTC RFC3339，身份值沿用 `admin/apikey/guest`。不记录配对码或成员凭证，不提前记录尚未建立的点对点地址。
 
+## 运行参数设置
+
+管理员通过 `PUT /api/admin/settings/group/1` 更新 `max_uploads`、`max_downloads`（1–65535）、`max_upload_size`（MiB，1–10240）和 `max_staged_size_mb`（MiB，1–102400）。暂存额度不能小于单文件上限，按整次提交合并校验，不会部分保存。并发或额度调低后，已有请求继续完成，新请求按当前占用与新额度判断。
+
+`PUT /api/admin/settings/group/3` 中的 `transfer_enabled` 控制新建和加入互传，关闭不影响已有连接继续传输。中继速率、互传单文件上限沿用同组现有设置，不再受环境变量上限覆盖。
+
+限频使用 `PUT /api/admin/settings/group/6` 更新下表的九个设置项。第 6 组、普通上传下载并发及暂存额度仅向管理员返回，公开设置仍提供单文件上传上限和互传开关。原业务和限频环境变量均不再读取，已保存的后台设置优先，未保存时使用默认值。
+
 ## 限频策略
 
-不再设置跨 IP 的每分钟总次数。下表使用一分钟固定窗口，环境变量为空或未配置时使用默认值，配置范围为 1–1000000 的整数；`0` 不表示关闭限频，非法配置会阻止启动。
+不再设置跨 IP 的每分钟总次数。下表使用一分钟固定窗口，在“系统设置 → 安全与限频”配置，范围为 1–1000000 的整数；`0` 不表示关闭限频，非法值无法保存。
 
-| 操作                         | 计数范围                 | 默认次数/分钟 | 环境变量                          |
+| 操作                         | 计数范围                 | 默认次数/分钟 | 后台设置项                          |
 | ---------------------------- | ------------------------ | ------------- | --------------------------------- |
-| 密码验证                     | 每 IP，管理/访客入口独立 | 10            | `PASSWORD_ATTEMPTS_PER_MINUTE`    |
-| API Key 失败验证             | 每 IP，与密码额度独立    | 10            | `PASSWORD_ATTEMPTS_PER_MINUTE`    |
-| 创建互传连接                 | 每 IP                    | 30            | `TRANSFER_CREATE_PER_MINUTE`      |
-| 输入配对码加入连接           | 每 IP                    | 30            | `TRANSFER_JOIN_PER_MINUTE`        |
-| 普通实时中继上传、下载       | 两者共享每 IP 的额度     | 180           | `TRANSFER_RELAY_PER_MINUTE`       |
-| WebSocket 连接尝试           | 每 IP                    | 30            | `TRANSFER_WS_CONNECT_PER_MINUTE`  |
-| 已认证 WebSocket 应用消息    | 每成员                   | 240           | `TRANSFER_WS_MESSAGES_PER_MINUTE` |
-| 下载工具 HEAD、GET、分段 GET | 共享每 IP 的额度         | 240           | `TRANSFER_TOOL_PER_MINUTE`        |
-| 已授权文件夹内部 WebSocket 消息 | 每成员 | 12000 | `TRANSFER_FOLDER_WS_MESSAGES_PER_MINUTE` |
-| 有效文件夹票据的中继上传、下载 | 两者共享每 IP 的额度 | 12000 | `TRANSFER_FOLDER_RELAY_PER_MINUTE` |
+| 密码验证                     | 每 IP，管理/访客入口独立 | 10            | `password_attempts_per_minute`    |
+| API Key 失败验证             | 每 IP，与密码额度独立    | 10            | `password_attempts_per_minute`    |
+| 创建互传连接                 | 每 IP                    | 30            | `transfer_create_per_minute`      |
+| 输入配对码加入连接           | 每 IP                    | 30            | `transfer_join_per_minute`        |
+| 普通实时中继上传、下载       | 两者共享每 IP 的额度     | 180           | `transfer_relay_per_minute`       |
+| WebSocket 连接尝试           | 每 IP                    | 30            | `transfer_ws_connect_per_minute`  |
+| 已认证 WebSocket 应用消息    | 每成员                   | 240           | `transfer_ws_messages_per_minute` |
+| 下载工具 HEAD、GET、分段 GET | 共享每 IP 的额度         | 240           | `transfer_tool_per_minute`        |
+| 已授权文件夹内部 WebSocket 消息 | 每成员 | 12000 | `transfer_folder_ws_messages_per_minute` |
+| 有效文件夹票据的中继上传、下载 | 两者共享每 IP 的额度 | 12000 | `transfer_folder_relay_per_minute` |
 
-密码验证成功或失败均计数，配对码未匹配也计数；格式或授权在计数前被拒绝的请求不计数。中继在票据长度合法后计数：有效票据使用普通中继或文件夹中继额度；未知编号、无效票据和票据重放使用独立探测表，次数由 `TRANSFER_RELAY_PER_MINUTE` 控制，不挤占正常传输额度。下载工具在确认有效票据后计数，HEAD 和非法 Range 也计入每分钟限频。创建文件夹、确认接收、修改并发及聊天、信令仍计入普通 WebSocket 消息额度。各操作的额度独立，普通中继、文件夹中继与下载工具不共享次数。HTTP 超限返回 429；WebSocket 应用消息超限直接断开。
+密码验证成功或失败均计数，配对码未匹配也计数；格式或授权在计数前被拒绝的请求不计数。中继在票据长度合法后计数：有效票据使用普通中继或文件夹中继额度；未知编号、无效票据和票据重放使用独立探测表，次数由 `transfer_relay_per_minute` 控制，不挤占正常传输额度。下载工具在确认有效票据后计数，HEAD 和非法 Range 也计入每分钟限频。创建文件夹、确认接收、修改并发及聊天、信令仍计入普通 WebSocket 消息额度。各操作的额度独立，普通中继、文件夹中继与下载工具不共享次数。HTTP 超限返回 429；WebSocket 应用消息超限直接断开。
 
 API Key 仅认证失败计数，包括无效、停用、过期及格式错误；成功认证和后续权限不足不计数。`ApiKey`、`ApiKeyBase64`、`X-Custom-Auth-Key` 共用来源额度，达到次数后该来源的 API Key 认证均返回 429，直到窗口结束。管理登录和分享密码验证不受此额度影响。
 
 互传按 IP 计数的操作及 API Key 失败验证，将 IPv6 按 `/64` 前缀聚合，防止同一网段轮换地址绕过限频；日志仍保留完整来源 IP。互传正常表最多 1024 项，探测表最多 256 项，API Key 失败表最多 2048 项；表满时按 LRU 淘汰旧条目，继续接纳新来源，不因表满拒绝所有新 IP。
 
-窗口从各计数项首次请求起算，一分钟后恢复额度。计数保存在单个服务进程内，重启清空，多实例之间不共享。环境变量在启动时读取，修改后需重启进程或重建容器，详情见 [部署指南的限频配置](deployment.md#每分钟限频配置)。
+窗口从各计数项首次请求起算，一分钟后恢复额度。计数保存在单个服务进程内，重启清空，多实例之间不共享。设置保存后立即生效且重启保留，修改不清空当前计数，详情见 [部署指南的限频配置](deployment.md#每分钟限频配置)。
 
 并发、房间容量和带宽保护继续生效：普通 API 总并发 16，密码验证总并发 2；互传在线房间最多 16，同一创建者或 IP 最多 2 个房间；WebSocket 总连接最多 40、每 IP 最多 8。中继并发与总带宽仍由后台保护设置控制，下载工具每文件并发、累计请求数和流量上限也保留。限频放宽不会增加这些容量。
 
@@ -124,7 +132,7 @@ API Key 仅认证失败计数，包括无效、停用、过期及格式错误；
 
 文件上传只使用 PUT /api/share/upload，管理员使用 /api/admin/share/upload。请求体是原始文件，X-Share-Filename 为 URL 编码文件名；X-Share-Options 为 UTF-8 JSON 的标准 Base64，包含 storage_config_id、expires_in（小时，允许小数）、password、remark、max_views、可选 path、slug 和 original_filename。默认以随机名称保存文件，original_filename:true 时保留原名但仍禁止覆盖。
 
-本地上传直接写入目标目录的隐藏临时文件，校验实际大小、当前授权和目标配置并刷盘后原子发布，不再完整复制文件。上传失败时清理临时文件；进程中断遗留的本地临时文件在下次启动回收。S3 上传仍先写私有暂存，再按需分片保存。单文件默认最大 10 GiB（10240 MiB），站点设置与环境变量可调低；两种存储共用默认 20 GiB 暂存总额度。冲突返回 409，超过单文件上限返回 413，临时额度不足返回 507。HTTP 分片及 POST 表单上传已移除。
+本地上传直接写入目标目录的隐藏临时文件，校验实际大小、当前授权和目标配置并刷盘后原子发布，不再完整复制文件。上传失败时清理临时文件；进程中断遗留的本地临时文件在下次启动回收。S3 上传仍先写私有暂存，再按需分片保存。单文件默认最大 10 GiB（10240 MiB），可在后台调低；两种存储共用默认 20 GiB 暂存总额度。冲突返回 409，超过单文件上限返回 413，临时额度不足返回 507。HTTP 分片及 POST 表单上传已移除。
 
 新文本省略 expires_at、新文件省略 expires_in 时使用站点默认有效期。文本 expires_at:null、文件 expires_in:0 表示不过期。分享过期只撤销访客访问，不自动删除原文件。
 
@@ -152,11 +160,11 @@ API Key 仅认证失败计数，包括无效、停用、过期及格式错误；
 
 PUT /api/files/{id} 支持 filename、remark、password、clearPassword、expires_at、max_views、slug。filename 只修改显示名。省略 max_views 保留当前计数；显式修改上限重置计数。
 
-全局、预览、互传和站点设置分组分别为 1、2、3、4。只读设置不能修改；上传、互传大小只能收紧环境硬上限。文本预览限制为 16–2048 KiB，Markdown 默认禁止站外图片，自定义 HTML 始终经过清洗。
+常规、预览、互传、站点、日志、安全与限频分组分别为 1、2、3、4、5、6。只读设置不能修改；上传和互传单文件最大 10 GiB。文本预览限制为 16–2048 KiB，Markdown 默认禁止站外图片，自定义 HTML 始终经过清洗。
 
 ## 临时设备互传
 
-管理员通过 `PUT /api/admin/settings/group/3` 保存保护设置：`transfer_rate_mb`（0–10240 MiB/s，0 为不限速）、`transfer_max_relays`（默认 64，非负整数，无固定上限，0 为不限制总并发）、`transfer_folder_concurrency`（默认 16，1–128）和 `transfer_max_file_mb`（1 至环境硬上限，MiB）。速率立即应用，并发限制用于新传输，文件大小用于新房间。GET 同组返回当前有效值；保存后重启仍保留。
+管理员通过 `PUT /api/admin/settings/group/3` 保存保护设置：`transfer_rate_mb`（0–10240 MiB/s，0 为不限速）、`transfer_max_relays`（默认 64，非负整数，无固定上限，0 为不限制总并发）、`transfer_folder_concurrency`（默认 16，1–128）和 `transfer_max_file_mb`（1–10240 MiB）。速率立即应用，并发限制用于新传输，文件大小用于新房间。GET 同组返回当前有效值；保存后重启仍保留。
 
 同组支持 `transfer_debug_logs`（布尔值，默认 `false`），控制互传浏览器控制台的 `[CloudPaste P2P]` 调试日志。保存后新建或加入连接读取最新值；`GET /api/public/settings?group=3` 返回该开关，方便未登录的加入者使用。开启时记录双方候选地址、端口、协议、选中的链路、往返延迟、协商耗时和传输摘要；浏览器隐藏的地址保留为空或 mDNS 名称。不输出凭证、配对码、用户内容或完整 SDP，也不轮询或逐块打印。
 
@@ -344,7 +352,7 @@ socket.addEventListener("open", () => {
 
 ### WebSocket 错误、心跳与关闭
 
-握手阶段仍返回 HTTP 错误响应：无效或缺少 `Origin`、附带 `Authorization`、功能被关闭时返回 `403 / FORBIDDEN`；连接或连接尝试超额时返回 `429 / TRANSFER_BUSY`。Upgrade 后的首帧超时、认证失败、非 JSON 或非文本消息会直接断开，不保证收到 `error` 消息或指定的关闭码。
+握手阶段仍返回 HTTP 错误响应：无效或缺少 `Origin`、附带 `Authorization` 时返回 `403 / FORBIDDEN`；关闭互传后已有房间仍可继续建立信令和传输，创建与加入新连接返回 `404 / TRANSFER_UNAVAILABLE`；连接或连接尝试超额时返回 `429 / TRANSFER_BUSY`。Upgrade 后的首帧超时、认证失败、非 JSON 或非文本消息会直接断开，不保证收到 `error` 消息或指定的关闭码。
 
 已认证连接中的业务错误使用以下格式，连接通常仍可继续使用，客户端应按关联 ID 更新该次操作：
 
@@ -361,7 +369,7 @@ WebSocket `error` 消息不包含 HTTP 状态或 `code`。HTTP 创建、加入�
 
 服务端每 20 秒发送一次协议级 Ping，等待 Pong 最长 8 秒；浏览器自动回应，不需要发送 `{"type":"ping"}`。发送一条服务端消息的期限为 10 秒，单成员待发送队列最多 288 条。队列已满、写入失败或心跳失败会结束整个房间。
 
-单条 JSON 文本消息最大 16 KiB，认证后普通应用消息每成员每分钟默认最多 240 条，可通过 `TRANSFER_WS_MESSAGES_PER_MINUTE` 调整；已授权文件夹的内部条目消息独立使用 `TRANSFER_FOLDER_WS_MESSAGES_PER_MINUTE`，默认 12000 条。任一消息额度超额会直接断开。房间从创建起最多存活 2 小时，配对码最多有效 5 分钟；创建者应在创建后 15 秒内连接，加入者取得第二席后应在 1 分钟内完成配对确认。期限由定时清理处理，不能依赖精确的关闭时刻。任一成员离开、拒绝或断线后，另一端也会断开，未完成文件被取消，相关 HTTP 票据失效；关闭前不保证送达所有状态通知。
+单条 JSON 文本消息最大 16 KiB，认证后普通应用消息每成员每分钟默认最多 240 条，可通过 `transfer_ws_messages_per_minute` 调整；已授权文件夹的内部条目消息独立使用 `transfer_folder_ws_messages_per_minute`，默认 12000 条。任一消息额度超额会直接断开。房间从创建起最多存活 2 小时，配对码最多有效 5 分钟；创建者应在创建后 15 秒内连接，加入者取得第二席后应在 1 分钟内完成配对确认。期限由定时清理处理，不能依赖精确的关闭时刻。任一成员离开、拒绝或断线后，另一端也会断开，未完成文件被取消，相关 HTTP 票据失效；关闭前不保证送达所有状态通知。
 
 ### 传输模式与 HTTP 配合
 

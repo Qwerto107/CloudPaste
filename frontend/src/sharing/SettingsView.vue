@@ -27,11 +27,19 @@ const IPLocationSettings = defineAsyncComponent(
 
 const route = useRoute();
 const panel = computed(() => route.meta.panel);
-const groups = { global: 1, preview: 2, transfer: 3, site: 4, logs: 5 };
+const groups = {
+  global: 1,
+  preview: 2,
+  transfer: 3,
+  site: 4,
+  logs: 5,
+  security: 6,
+};
 const tabs = [
   { key: "global", label: "常规", icon: "settings" },
   { key: "preview", label: "文件预览", icon: "file" },
   { key: "transfer", label: "设备互传", icon: "transfer" },
+  { key: "security", label: "安全与限频", icon: "key" },
   { key: "ip-location", label: "IP 归属地", icon: "globe" },
   { key: "site", label: "站点外观", icon: "cloud" },
   { key: "logs", label: "日志设置", icon: "file" },

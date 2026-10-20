@@ -59,7 +59,8 @@ func TestHTTPStalledDownloadsReleaseCapacity(t *testing.T) {
 			if kind == "chunked" {
 				driver = chunkedDownloadDriver{driver}
 			}
-			app := &App{downloads: make(chan struct{}, 8), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			setRuntimeLimitsForTest(app, func(limits *runtimeLimits) { limits.MaxDownloads = 8 })
 			info := FileInfo{Name: "large.bin", MimeType: "application/octet-stream", Size: &size}
 			done := make(chan error, 1)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +97,7 @@ func TestHTTPStalledDownloadsReleaseCapacity(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("真实 HTTP 停读连接未退出")
 			}
-			if len(app.downloads) != 0 || len(app.downloadsByIP) != 0 {
+			if app.downloadCount != 0 || len(app.downloadsByIP) != 0 {
 				t.Fatal("HTTP 停读超时后仍占用下载额度")
 			}
 		})

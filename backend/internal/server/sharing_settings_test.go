@@ -25,8 +25,10 @@ func (r *limitChangingReader) Read(buffer []byte) (int, error) {
 func TestChangingUploadLimitKeepsReservationBound(t *testing.T) {
 	f := newFixture(t)
 	storage, _ := f.local(t, t.TempDir(), "/disk")
-	f.app.uploadLimit.Store(1 << 20)
-	body := &limitChangingReader{Reader: strings.NewReader(strings.Repeat("a", (1<<20)+1)), change: func() { f.app.uploadLimit.Store(2 << 20) }}
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.MaxUploadBytes = 1 << 20 })
+	body := &limitChangingReader{Reader: strings.NewReader(strings.Repeat("a", (1<<20)+1)), change: func() {
+		setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.MaxUploadBytes = 2 << 20 })
+	}}
 	f.upload(t, "PUT", "/api/share/upload", f.admin, body, uploadHeaders("bounded.txt", map[string]any{"storage_config_id": storage}, true), 413)
 	if f.app.rawReserved != 0 {
 		t.Fatal("失败上传未释放暂存额度")

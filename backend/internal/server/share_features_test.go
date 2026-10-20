@@ -252,7 +252,7 @@ func TestTenGiBUploadBoundary(t *testing.T) {
 		t.Fatalf("环境配置默认大小错误: %+v %v", cfg, err)
 	}
 	t.Setenv("MAX_UPLOAD_SIZE_MB", "10241")
-	if _, err := ConfigFromEnv(); err == nil {
-		t.Fatal("配置接受了超过 10 GiB 的上传上限")
+	if cfg, err := ConfigFromEnv(); err != nil || cfg.MaxUploadBytes != 10<<30 {
+		t.Fatal("已移除的环境变量仍影响上传上限", err)
 	}
 }

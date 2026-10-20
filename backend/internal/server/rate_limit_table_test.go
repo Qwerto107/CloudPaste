@@ -49,7 +49,7 @@ func TestRateLimitIP(t *testing.T) {
 
 func TestTransferIPv6RatePrefix(t *testing.T) {
 	f := newFixture(t)
-	f.app.cfg.RateLimits.TransferJoinPerIP = 2
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferJoinPerIP = 2 })
 	for _, step := range []struct {
 		ip     string
 		status int
@@ -85,7 +85,7 @@ func TestTransferInvalidTicketsCannotFillNormalRateTable(t *testing.T) {
 		}
 		h.rooms[room.id] = room
 		// 同一来源的探测额度耗尽后，合法票据仍有独立的正常传输额度。
-		for i := 1; i < f.app.cfg.RateLimits.TransferRelayPerIP; i++ {
+		for i := 1; i < f.app.runtimeLimits().RateLimits.TransferRelayPerIP; i++ {
 			h.invalidRelayLocked("198.18.1.43")
 		}
 		if err := h.invalidRelayLocked("198.18.1.43"); err.(*apiError).Status != 429 {

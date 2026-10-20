@@ -42,7 +42,8 @@ func BenchmarkLocalDownload(b *testing.B) {
 				b.Fatal(err)
 			}
 			defer d.Close()
-			app := &App{downloads: make(chan struct{}, 8), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			app := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			setRuntimeLimitsForTest(app, func(limits *runtimeLimits) { limits.MaxDownloads = 8 })
 			info := FileInfo{Name: "file.bin", Size: &size, MimeType: "application/octet-stream"}
 			b.ReportAllocs()
 			b.SetBytes(size)

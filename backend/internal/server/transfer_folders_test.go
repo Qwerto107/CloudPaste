@@ -37,7 +37,7 @@ func startFolderTest(t *testing.T, a, b transferTestPeer, count int, size int64)
 func TestTransferFolderQueueBeyond32AndBoundedState(t *testing.T) {
 	f, _, a, b := transferPair(t)
 	// 条目队列超过旧的 32 个累计上限，但服务端始终只保留当前一个子任务。
-	f.app.cfg.RateLimits.TransferMessagesPerMember = 3
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferMessagesPerMember = 3 })
 	id := startFolderTest(t, a, b, 64, 0)
 	for index := 0; index < 64; index++ {
 		name := fmt.Sprintf("empty-%03d", index)

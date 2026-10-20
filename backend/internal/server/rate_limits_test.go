@@ -31,22 +31,12 @@ func TestRateLimitEnvironment(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(cfg.RateLimits, want) {
 		t.Fatalf("defaults: got %+v, error %v", cfg.RateLimits, err)
 	}
-	for i, name := range rateLimitEnvNames {
-		t.Setenv(name, fmt.Sprint(i+1))
+	for _, name := range rateLimitEnvNames {
+		t.Setenv(name, "invalid-removed-setting")
 	}
 	cfg, err = ConfigFromEnv()
-	if err != nil || !reflect.DeepEqual(cfg.RateLimits, RateLimitConfig{1, 2, 3, 4, 5, 6, 7, 8, 9}) {
-		t.Fatalf("custom limits: got %+v, error %v", cfg.RateLimits, err)
-	}
-	for _, name := range rateLimitEnvNames {
-		for _, invalid := range []string{"0", "-1", "abc", "1.5", "1000001"} {
-			t.Run(name+"/"+invalid, func(t *testing.T) {
-				t.Setenv(name, invalid)
-				if _, err := ConfigFromEnv(); err == nil || !strings.Contains(err.Error(), name) {
-					t.Fatalf("invalid limit accepted: %v", err)
-				}
-			})
-		}
+	if err != nil || !reflect.DeepEqual(cfg.RateLimits, want) {
+		t.Fatalf("removed environment variables still affect limits: %+v %v", cfg.RateLimits, err)
 	}
 }
 
@@ -80,7 +70,7 @@ func TestTransferCreateRatePerIP(t *testing.T) {
 		t.Run(fmt.Sprint(limit), func(t *testing.T) {
 			f := newFixture(t)
 			if limit != 30 {
-				f.app.cfg.RateLimits.TransferCreatePerIP = limit
+				setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferCreatePerIP = limit })
 			}
 			create := func(ip string) *httptest.ResponseRecorder {
 				return rateLimitRequest(t, f, "POST", "/api/admin/transfer/create", ip, f.admin, map[string]any{"name": "测试设备"})
@@ -117,7 +107,7 @@ func TestTransferJoinRatePerIP(t *testing.T) {
 		}
 		requireRateStatus(t, join(fmt.Sprintf("198.51.100.%d", ip)), 429)
 	}
-	f.app.cfg.RateLimits.TransferJoinPerIP = 2
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferJoinPerIP = 2 })
 	for i := 0; i < 2; i++ {
 		requireRateStatus(t, join("198.51.100.6"), 404)
 	}
@@ -129,7 +119,7 @@ func TestTransferRelayUploadDownloadShareRate(t *testing.T) {
 		t.Run(fmt.Sprint(limit), func(t *testing.T) {
 			f := newFixture(t)
 			if limit != 180 {
-				f.app.cfg.RateLimits.TransferRelayPerIP = limit
+				setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferRelayPerIP = limit })
 			}
 			request := func(i int, ip string) *httptest.ResponseRecorder {
 				ticket := strings.Repeat("a", 43)
@@ -150,7 +140,7 @@ func TestTransferRelayUploadDownloadShareRate(t *testing.T) {
 
 func TestPasswordCustomRatePerIP(t *testing.T) {
 	f := newFixture(t)
-	f.app.cfg.RateLimits.PasswordPerIP = 2
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.PasswordPerIP = 2 })
 	login := func(ip string) *httptest.ResponseRecorder {
 		return rateLimitRequest(t, f, "POST", "/api/admin/login", ip, "", map[string]any{"username": "missing", "password": "wrong"})
 	}
@@ -163,7 +153,7 @@ func TestPasswordCustomRatePerIP(t *testing.T) {
 
 func TestTransferSocketCustomRatePerIP(t *testing.T) {
 	f := newFixture(t)
-	f.app.cfg.RateLimits.TransferSocketPerIP = 2
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferSocketPerIP = 2 })
 	// 合法 Origin、失败的升级尝试也占次数，但应释放并发连接槽。
 	for i := 0; i < 2; i++ {
 		w := rateLimitRequest(t, f, "GET", "/api/transfer/socket", "198.51.100.1", "", nil)
@@ -181,7 +171,7 @@ func TestTransferMessagesCustomRatePerMember(t *testing.T) {
 	f, _, sender, receiver := transferPair(t)
 	h := f.app.transfers
 	h.mu.Lock()
-	f.app.cfg.RateLimits.TransferMessagesPerMember = 3
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferMessagesPerMember = 3 })
 	h.mu.Unlock()
 	// 创建者的 confirm 已计一次；两个成员的消息额度相互独立。
 	for i := 0; i < 2; i++ {
@@ -202,7 +192,7 @@ func TestTransferMessagesCustomRatePerMember(t *testing.T) {
 
 func TestTransferToolCustomRatePerIP(t *testing.T) {
 	f, _, sender, receiver := transferPair(t)
-	f.app.cfg.RateLimits.TransferToolPerIP = 2
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferToolPerIP = 2 })
 	_, link := offerTool(t, sender, receiver, 10)
 	for i := 0; i < 2; i++ {
 		requireRateStatus(t, rateLimitRequest(t, f, "HEAD", link, "198.51.100.1", "", nil), http.StatusOK)
@@ -216,8 +206,8 @@ func TestTransferToolCustomRatePerIP(t *testing.T) {
 func TestTransferFolderRelaySeparateRate(t *testing.T) {
 	f := newFixture(t)
 	h := f.app.transfers
-	f.app.cfg.RateLimits.TransferRelayPerIP = 1
-	f.app.cfg.RateLimits.TransferFolderRelayPerIP = 2
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferRelayPerIP = 1 })
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferFolderRelayPerIP = 2 })
 	ctx, cancel := context.WithCancel(context.Background())
 	room := &transferRoom{id: randomID(), ctx: ctx, cancel: cancel, created: time.Now(), expires: time.Now().Add(time.Hour), files: map[string]*transferFile{}, folders: map[string]*transferFolder{}}
 	room.members[0] = &transferMember{room: room, index: 0}
@@ -262,7 +252,7 @@ func TestTransferFolderRelaySeparateRate(t *testing.T) {
 // 独立消息额度也必须执行，不能把文件夹授权当作不限频许可。
 func TestTransferFolderMessagesCustomRate(t *testing.T) {
 	f, _, a, b := transferPair(t)
-	f.app.cfg.RateLimits.TransferFolderMessagesPerMember = 2
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferFolderMessagesPerMember = 2 })
 	id := startFolderTest(t, a, b, 3, 0)
 	for i := 0; i < 2; i++ {
 		name := fmt.Sprintf("empty-%d", i)

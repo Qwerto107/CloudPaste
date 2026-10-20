@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -48,6 +49,7 @@ type transferHub struct {
 	nextByte                              time.Time
 	maxFile, bytesPerSecond               int64
 	stun                                  string
+	enabled                               atomic.Bool
 }
 
 type transferRoom struct {
@@ -125,6 +127,7 @@ func newTransferHub(a *App) *transferHub {
 	}
 	h.maxRelays = 64
 	h.folderConcurrency = transferFolderDefaultConcurrency
+	h.enabled.Store(!a.cfg.TransferDisabled)
 	h.wg.Add(1)
 	go h.sweep()
 	return h
@@ -299,7 +302,7 @@ func (a *App) transferOrigin(r *http.Request, required bool) bool {
 }
 
 func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
-	if a.cfg.TransferDisabled {
+	if !a.transfers.enabled.Load() {
 		return transferUnavailable()
 	}
 	if !a.transferOrigin(r, false) {
@@ -324,7 +327,7 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 	h := a.transfers
 	ip := a.clientIP(r)
 	h.mu.Lock()
-	if h.ctx.Err() != nil || !h.allowIPLocked("create", ip, a.cfg.RateLimits.TransferCreatePerIP) || len(h.rooms) >= transferRooms {
+	if h.ctx.Err() != nil || !h.allowIPLocked("create", ip, a.runtimeLimits().RateLimits.TransferCreatePerIP) || len(h.rooms) >= transferRooms {
 		h.mu.Unlock()
 		return transferBusy()
 	}
@@ -382,7 +385,7 @@ func (a *App) joinTransfer(w http.ResponseWriter, r *http.Request) error {
 			return &apiError{403, "FORBIDDEN", "访客无加入互传权限，请登录后重试"}
 		}
 	}
-	if a.cfg.TransferDisabled {
+	if !a.transfers.enabled.Load() {
 		return transferUnavailable()
 	}
 	if !a.transferOrigin(r, false) {
@@ -404,7 +407,7 @@ func (a *App) joinTransfer(w http.ResponseWriter, r *http.Request) error {
 	h := a.transfers
 	ip := a.clientIP(r)
 	h.mu.Lock()
-	if !h.allowIPLocked("join", ip, a.cfg.RateLimits.TransferJoinPerIP) {
+	if !h.allowIPLocked("join", ip, a.runtimeLimits().RateLimits.TransferJoinPerIP) {
 		h.mu.Unlock()
 		return transferBusy()
 	}
@@ -456,14 +459,14 @@ func (h *transferHub) broadcastLocked(room *transferRoom, value any) {
 }
 
 func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
-	if a.cfg.TransferDisabled || !a.transferOrigin(r, true) || r.Header.Get("Authorization") != "" {
+	if !a.transferOrigin(r, true) || r.Header.Get("Authorization") != "" {
 		a.fail(w, forbidden())
 		return
 	}
 	h := a.transfers
 	ip := a.clientIP(r)
 	h.mu.Lock()
-	if h.ctx.Err() != nil || h.connectionCount >= transferConnections || h.connections[ip] >= 8 || !h.allowIPLocked("socket", ip, a.cfg.RateLimits.TransferSocketPerIP) {
+	if h.ctx.Err() != nil || h.connectionCount >= transferConnections || h.connections[ip] >= 8 || !h.allowIPLocked("socket", ip, a.runtimeLimits().RateLimits.TransferSocketPerIP) {
 		h.mu.Unlock()
 		a.fail(w, transferBusy())
 		return
@@ -551,9 +554,9 @@ func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.mu.Lock()
-		key, limit := "message:"+member.token, a.cfg.RateLimits.TransferMessagesPerMember
+		key, limit := "message:"+member.token, a.runtimeLimits().RateLimits.TransferMessagesPerMember
 		if h.isFolderMessageLocked(member, message) {
-			key, limit = "folder-message:"+member.token, a.cfg.RateLimits.TransferFolderMessagesPerMember
+			key, limit = "folder-message:"+member.token, a.runtimeLimits().RateLimits.TransferFolderMessagesPerMember
 		}
 		if !h.allowLocked(key, limit) {
 			h.mu.Unlock()

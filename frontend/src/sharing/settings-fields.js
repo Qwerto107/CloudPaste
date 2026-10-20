@@ -1,7 +1,63 @@
 import { auditModules } from "./audit-modules.js";
 
+const rateFields = [
+  [
+    "password_attempts_per_minute",
+    "密码及 API Key 验证",
+    "每个来源的次数；管理密码、分享密码和 API Key 分别计数，API Key 仅记录失败。",
+  ],
+  ["transfer_create_per_minute", "创建互传", "每个来源创建互传连接的次数。"],
+  [
+    "transfer_join_per_minute",
+    "加入互传",
+    "每个来源输入配对码的次数，未匹配也计数。",
+  ],
+  [
+    "transfer_ws_connect_per_minute",
+    "WebSocket 连接",
+    "每个来源尝试建立互传信令连接的次数。",
+  ],
+  [
+    "transfer_ws_messages_per_minute",
+    "普通互传消息",
+    "每个已认证成员的聊天、信令及控制消息数量。",
+  ],
+  [
+    "transfer_relay_per_minute",
+    "普通中继请求",
+    "每个来源的上传、下载共享次数；无效票据单独使用相同次数。",
+  ],
+  [
+    "transfer_tool_per_minute",
+    "下载工具请求",
+    "每个来源的 HEAD、GET 和分段下载共享次数。",
+  ],
+  [
+    "transfer_folder_ws_messages_per_minute",
+    "文件夹内部消息",
+    "每个已授权成员的文件夹条目消息数量，与普通消息独立计数。",
+  ],
+  [
+    "transfer_folder_relay_per_minute",
+    "文件夹中继请求",
+    "每个来源持有效文件夹票据上传、下载的共享次数。",
+  ],
+];
+
 // 展示信息与后端配置键分开维护；服务端仍负责权限和最终数值校验。
 export const fields = {
+  ...Object.fromEntries(
+    rateFields.map(([key, label, help]) => [
+      key,
+      {
+        label,
+        help,
+        min: 1,
+        max: 1000000,
+        unit: "次/分钟",
+      },
+    ]),
+  ),
   ...Object.fromEntries(
     auditModules.map(({ key, label, description }) => [
       `audit_${key}_enabled`,
@@ -50,7 +106,7 @@ export const fields = {
   },
   transfer_max_file_mb: {
     label: "互传单文件上限",
-    help: "新建配对连接使用此上限，不能超过服务器配置的硬上限；不影响普通文件分享。",
+    help: "新建配对连接使用此上限，最大 10 GiB；不影响普通文件分享。",
     unit: "MiB",
     min: 1,
     max: 10240,
@@ -62,6 +118,10 @@ export const fields = {
     min: 1,
     max: 128,
   },
+  transfer_enabled: {
+    label: "启用设备互传",
+    help: "关闭后不能创建或加入新连接，已有连接仍可继续传输。",
+  },
   transfer_stun: {
     label: "STUN 服务器",
     help: "用于跨网络点对点连接，留空停用。保存后新配对生效，已有连接不受影响；浏览器会向此服务器查询网络地址。",
@@ -71,9 +131,30 @@ export const fields = {
     label: "点对点调试日志",
     help: "默认关闭。开启后，浏览器控制台输出双方连接地址、端口、链路指标和传输异常；保存后重新连接生效。",
   },
+  max_uploads: {
+    label: "上传并发数",
+    help: "普通文件同时上传的数量，范围 1–65535；调低后不影响正在上传的文件。",
+    unit: "个",
+    min: 1,
+    max: 65535,
+  },
+  max_downloads: {
+    label: "下载并发数",
+    help: "普通文件同时下载的数量，范围 1–65535；每个来源仍最多占用两个下载槽。",
+    unit: "个",
+    min: 1,
+    max: 65535,
+  },
+  max_staged_size_mb: {
+    label: "上传暂存总额度",
+    help: "范围 1–102400 MiB，不能小于单文件上传上限；调低后已有上传继续完成。",
+    unit: "MiB",
+    min: 1,
+    max: 102400,
+  },
   max_upload_size: {
     label: "单文件上传上限",
-    help: "单文件最大 10 GiB（10240 MiB），可调低，不能超过服务器配置的上限。",
+    help: "单文件最大 10 GiB（10240 MiB），不能超过上传暂存总额度。",
     unit: "MiB",
     min: 1,
     max: 10240,
@@ -194,6 +275,37 @@ export const fields = {
   },
 };
 export const sections = {
+  security: [
+    {
+      title: "认证限频",
+      icon: "key",
+      description:
+        "一分钟固定窗口，范围 1–1000000；修改后保留当前计数，0 不表示关闭。",
+      keys: ["password_attempts_per_minute"],
+    },
+    {
+      title: "连接限频",
+      icon: "link",
+      keys: [
+        "transfer_create_per_minute",
+        "transfer_join_per_minute",
+        "transfer_ws_connect_per_minute",
+      ],
+    },
+    {
+      title: "消息与中继限频",
+      icon: "transfer",
+      description:
+        "互传按来源计数时，IPv6 使用 /64 网段；消息按已认证成员计数。",
+      keys: [
+        "transfer_ws_messages_per_minute",
+        "transfer_relay_per_minute",
+        "transfer_tool_per_minute",
+        "transfer_folder_ws_messages_per_minute",
+        "transfer_folder_relay_per_minute",
+      ],
+    },
+  ],
   logs: [
     {
       title: "操作日志",
@@ -220,7 +332,7 @@ export const sections = {
     {
       title: "连接设置",
       icon: "settings",
-      keys: ["transfer_stun", "transfer_debug_logs"],
+      keys: ["transfer_enabled", "transfer_stun", "transfer_debug_logs"],
     },
   ],
   global: [
@@ -240,6 +352,13 @@ export const sections = {
       description: "为新分享设置默认规则。",
       icon: "link",
       keys: ["share_default_expiry_hours", "max_upload_size"],
+    },
+    {
+      title: "传输资源",
+      icon: "transfer",
+      description:
+        "保存后立即生效，不中断已有上传和下载；设备互传的中继并发独立设置。",
+      keys: ["max_uploads", "max_downloads", "max_staged_size_mb"],
     },
     {
       title: "下载安全",

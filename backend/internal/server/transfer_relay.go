@@ -123,7 +123,7 @@ func (h *transferHub) finishLocked(f *transferFile, state string) {
 }
 
 func (a *App) claimTransfer(r *http.Request, download bool) (*transferFile, error) {
-	if a.cfg.TransferDisabled || !a.transferOrigin(r, false) {
+	if !a.transferOrigin(r, false) {
 		return nil, transferUnavailable()
 	}
 	secret := strings.TrimPrefix(r.Header.Get("Authorization"), "Transfer ")
@@ -147,9 +147,9 @@ func (a *App) claimTransfer(r *http.Request, download bool) (*transferFile, erro
 		if !validTicket {
 			return nil, h.invalidRelayLocked(ip)
 		}
-		scope, limit := "relay", a.cfg.RateLimits.TransferRelayPerIP
+		scope, limit := "relay", a.runtimeLimits().RateLimits.TransferRelayPerIP
 		if f.folder != nil {
-			scope, limit = "folder-relay", a.cfg.RateLimits.TransferFolderRelayPerIP
+			scope, limit = "folder-relay", a.runtimeLimits().RateLimits.TransferFolderRelayPerIP
 		}
 		if !h.allowIPLocked(scope, ip, limit) {
 			return nil, transferBusy()
@@ -183,7 +183,7 @@ func (a *App) claimTransfer(r *http.Request, download bool) (*transferFile, erro
 
 func (h *transferHub) invalidRelayLocked(ip string) error {
 	// 无效、未知或重放的票据共用独立小表，不能挤占正常传输的来源额度。
-	if !h.probes.allow(rateLimitIP(ip), h.app.cfg.RateLimits.TransferRelayPerIP, time.Now()) {
+	if !h.probes.allow(rateLimitIP(ip), h.app.runtimeLimits().RateLimits.TransferRelayPerIP, time.Now()) {
 		return transferBusy()
 	}
 	return transferUnavailable()

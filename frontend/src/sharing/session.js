@@ -101,6 +101,7 @@ export function hasPermission(flag) {
 }
 
 export function canTransfer(action) {
+  if (settings.transfer_enabled === "false") return false;
   if (session.type !== "none") return action === "join" || hasPermission(3);
   return settings[`guest_transfer_${action}_enabled`] === "true";
 }

@@ -44,12 +44,12 @@ type passwordAttemptBudget struct {
 // App 统一持有数据库和有界并发资源，不创建后台轮询池或无限缓存。
 type App struct {
 	cfg                   Config
-	uploadLimit           atomic.Int64
+	limits                atomic.Pointer[runtimeLimits]
 	db                    *sql.DB
 	key                   []byte
 	logger                *slog.Logger
 	audit                 *auditLogger
-	downloads             chan struct{}
+	downloadCount         int
 	downloadMu            sync.Mutex
 	downloadsByIP         map[string]int
 	requests              chan struct{}
@@ -61,7 +61,7 @@ type App struct {
 	mutationMu            sync.Mutex
 	clientsMu             sync.Mutex
 	storageClients        map[string]cachedDriver
-	uploads               chan struct{}
+	uploadCount           int
 	uploadMu              sync.Mutex
 	rawReserved           int64
 	uploadDir             string
@@ -72,7 +72,7 @@ type App struct {
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
-	if err := cfg.configureRateLimits(false); err != nil {
+	if err := cfg.configureRateLimits(); err != nil {
 		return nil, err
 	}
 	if logger == nil {
@@ -100,12 +100,11 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	}
 	a := &App{
 		cfg: cfg, db: db, logger: logger,
-		downloads:      make(chan struct{}, cfg.MaxDownloads),
 		requests:       make(chan struct{}, 16),
 		passwordChecks: make(chan struct{}, 2),
 		storageClients: make(map[string]cachedDriver),
-		uploads:        make(chan struct{}, cfg.MaxUploads),
 	}
+	a.limits.Store(&runtimeLimits{MaxDownloads: cfg.MaxDownloads, MaxUploads: cfg.MaxUploads, MaxUploadBytes: cfg.MaxUploadBytes, MaxStagedBytes: cfg.MaxStagedBytes, RateLimits: cfg.RateLimits})
 	a.key, err = loadKey(cfg)
 	if err != nil {
 		_ = db.Close()
@@ -119,12 +118,9 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	// 恢复保存的较小上传上限，旧库中的异常值不覆盖环境配置。
-	var limit string
-	if err := db.QueryRow("SELECT value FROM settings WHERE key='max_upload_size'").Scan(&limit); err == nil {
-		if value, e := strconv.ParseInt(limit, 10, 64); e == nil && value >= 1 && value <= cfg.MaxUploadBytes/(1<<20) {
-			a.uploadLimit.Store(value << 20)
-		}
+	if err = a.restoreRuntimeLimits(); err != nil {
+		_ = a.Close()
+		return nil, err
 	}
 	if err = a.restoreIPLocation(); err != nil {
 		_ = a.Close()

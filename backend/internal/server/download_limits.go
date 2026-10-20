@@ -15,15 +15,15 @@ func (a *App) beginDownload(r *http.Request) (func(), error) {
 	ip := a.clientIP(r)
 	a.downloadMu.Lock()
 	defer a.downloadMu.Unlock()
-	limit := max(1, min(2, cap(a.downloads)/2))
+	maximum := a.runtimeLimits().MaxDownloads
+	limit := max(1, min(2, maximum/2))
 	if a.downloadsByIP[ip] >= limit {
 		return nil, &apiError{429, "DOWNLOAD_RATE_LIMITED", "当前来源同时下载过多，请稍后重试"}
 	}
-	select {
-	case a.downloads <- struct{}{}:
-	default:
+	if a.downloadCount >= maximum {
 		return nil, &apiError{503, "BUSY", "下载并发已满，请稍后重试"}
 	}
+	a.downloadCount++
 	if a.downloadsByIP == nil {
 		a.downloadsByIP = make(map[string]int)
 	}
@@ -35,7 +35,7 @@ func (a *App) beginDownload(r *http.Request) (func(), error) {
 		if a.downloadsByIP[ip] == 0 {
 			delete(a.downloadsByIP, ip)
 		}
-		<-a.downloads
+		a.downloadCount--
 	}, nil
 }
 

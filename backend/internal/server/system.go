@@ -36,7 +36,10 @@ var defaultSettings = []setting{
 	{guestJoinTransfer, "true", "bool", 1, 0, "允许访客加入互传"},
 	{"proxy_sign_all", "true", "bool", 1, 2, "Go 后端始终验证下载票据"},
 	{"proxy_sign_expires", "600", "number", 1, 2, "公开分享下载票据有效期（秒）"},
-	{"max_upload_size", "10240", "number", 1, 0, "上传上限（MiB，最大 10 GiB，不超过环境配置）"},
+	{"max_upload_size", "10240", "number", 1, 0, "上传上限（MiB，最大 10 GiB）"},
+	{"max_uploads", "16", "number", 1, 0, "普通文件上传并发（1–65535）"},
+	{"max_downloads", "48", "number", 1, 0, "普通文件下载并发（1–65535）"},
+	{"max_staged_size_mb", "20480", "number", 1, 0, "上传暂存总额度（MiB，不小于单文件上限）"},
 	{"share_default_expiry_hours", "24", "number", 1, 0, "新分享默认有效期（小时，0 表示不过期）"},
 	{"preview_max_text_kb", "512", "number", 2, 0, "文本文件预览上限（KiB，16–2048）"},
 	{"preview_text_types", "txt,md,markdown,json,xml,csv,log,yaml,yml,html,css,js,go,rs,py,toml", "text", 2, 0, "文本预览扩展名（逗号分隔）"},
@@ -44,10 +47,11 @@ var defaultSettings = []setting{
 	{"preview_video_types", "mp4,webm,ogv,mov", "text", 2, 0, "视频预览扩展名（浏览器原生播放）"},
 	{"preview_audio_types", "mp3,wav,ogg,flac,m4a,aac,opus", "text", 2, 0, "音频预览扩展名（浏览器原生播放）"},
 	{"preview_allow_external_images", "false", "bool", 2, 0, "允许 Markdown 加载站外图片（默认关闭）"},
+	{"transfer_enabled", "true", "bool", 3, 0, "启用设备互传（关闭后已有连接继续传输）"},
 	{"transfer_rate_mb", "64", "number", 3, 0, "全站中继速率（MiB/s，0 表示不限速）"},
 	{"transfer_max_relays", "64", "number", 3, 0, "中继总并发请求数（0 表示不限，分段下载各占一路）"},
 	{"transfer_folder_concurrency", "16", "number", 3, 0, "文件夹默认并发数"},
-	{"transfer_max_file_mb", "10240", "number", 3, 0, "互传单文件上限（MiB，不超过环境配置）"},
+	{"transfer_max_file_mb", "10240", "number", 3, 0, "互传单文件上限（MiB，最大 10 GiB）"},
 	{"transfer_stun", "", "text", 3, 0, "STUN 服务器（留空停用，仅用于新配对）"},
 	{"transfer_debug_logs", "false", "bool", 3, 0, "点对点调试日志（浏览器控制台，默认关闭）"},
 	{"site_title", "CloudPaste", "text", 4, 0, "站点标题"},
@@ -62,14 +66,25 @@ var defaultSettings = []setting{
 	{"site_announcement_enabled", "false", "bool", 4, 0, "启用公告"},
 	{"site_announcement_default_open", "false", "bool", 4, 0, "默认显示公告内容"},
 	{"site_announcement_content", "", "textarea", 4, 0, "公告内容"},
+	{"password_attempts_per_minute", "10", "number", 6, 0, "密码与 API Key 验证次数"},
+	{"transfer_create_per_minute", "30", "number", 6, 0, "创建互传次数"},
+	{"transfer_join_per_minute", "30", "number", 6, 0, "加入互传次数"},
+	{"transfer_relay_per_minute", "180", "number", 6, 0, "普通中继请求次数"},
+	{"transfer_ws_connect_per_minute", "30", "number", 6, 0, "WebSocket 连接尝试次数"},
+	{"transfer_ws_messages_per_minute", "240", "number", 6, 0, "普通 WebSocket 消息次数"},
+	{"transfer_tool_per_minute", "240", "number", 6, 0, "下载工具请求次数"},
+	{"transfer_folder_ws_messages_per_minute", "12000", "number", 6, 0, "文件夹内部消息次数"},
+	{"transfer_folder_relay_per_minute", "12000", "number", 6, 0, "文件夹中继请求次数"},
 }
 
-// 环境变量给出硬上限，站点设置只能收紧；并发上传读取原子快照。
+// 进行中的上传持有开始时的上限；新请求读取当前设置快照。
 func (a *App) maxUploadBytes() int64 {
-	if value := a.uploadLimit.Load(); value > 0 {
-		return min(value, a.cfg.MaxUploadBytes)
-	}
-	return a.cfg.MaxUploadBytes
+	return a.runtimeLimits().MaxUploadBytes
+}
+
+func privateSetting(item setting) bool {
+	return item.Group == 5 || item.Group == 6 || item.Key == "transfer_stun" ||
+		item.Key == "max_downloads" || item.Key == "max_uploads" || item.Key == "max_staged_size_mb"
 }
 
 func (a *App) defaultShareExpiry(r *http.Request) (*string, error) {
@@ -124,12 +139,13 @@ func (a *App) loadSettings(r *http.Request) ([]setting, error) {
 		return nil, err
 	}
 	transferValues := a.transferSettingValues()
+	runtimeValues := a.runtimeSettingValues()
 	for i := range items {
 		if v, ok := values[items[i].Key]; ok && items[i].Flags != 2 {
 			items[i].Value = v
 		}
-		if items[i].Key == "max_upload_size" {
-			items[i].Value = strconv.FormatInt(a.maxUploadBytes()/(1<<20), 10)
+		if value, ok := runtimeValues[items[i].Key]; ok {
+			items[i].Value = value
 		}
 		if value, ok := transferValues[items[i].Key]; ok {
 			items[i].Value = value
@@ -146,16 +162,16 @@ func (a *App) settings(w http.ResponseWriter, r *http.Request) error {
 	group := r.URL.Query().Get("group")
 	if group != "" {
 		id, err := strconv.Atoi(group)
-		if err != nil || id < 1 || id > 5 {
+		if err != nil || id < 1 || id > 6 {
 			return badRequest("分组编号无效")
 		}
-		if id == 5 && !adminRequest(r) {
+		if (id == 5 || id == 6) && !adminRequest(r) {
 			return forbidden()
 		}
 		filtered := []setting{}
 		for _, s := range items {
 			if s.Group == id {
-				if s.Key == "transfer_stun" && !adminRequest(r) {
+				if privateSetting(s) && !adminRequest(r) {
 					continue
 				}
 				filtered = append(filtered, s)
@@ -167,7 +183,7 @@ func (a *App) settings(w http.ResponseWriter, r *http.Request) error {
 	groups := map[int][]setting{2: {}}
 	for _, s := range items {
 		// 日志规则及 STUN 配置不在公开设置中披露；配对后通过信令下发 STUN。
-		if (s.Group == 5 || s.Key == "transfer_stun") && !adminRequest(r) {
+		if !adminRequest(r) && privateSetting(s) {
 			continue
 		}
 		groups[s.Group] = append(groups[s.Group], s)
@@ -177,7 +193,7 @@ func (a *App) settings(w http.ResponseWriter, r *http.Request) error {
 }
 func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 	group, err := strconv.Atoi(r.PathValue("group"))
-	if err != nil || group < 1 || group > 5 {
+	if err != nil || group < 1 || group > 6 {
 		return badRequest("分组编号无效")
 	}
 	var body map[string]json.RawMessage
@@ -237,8 +253,8 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 		if definition.Type == "number" {
 			number, err := strconv.ParseInt(value, 10, 64)
 			minimum, maximum := int64(0), int64(876000)
-			if key == "max_upload_size" {
-				minimum, maximum = 1, a.cfg.MaxUploadBytes/(1<<20)
+			if low, high, ok := runtimeSettingRange(key); ok {
+				minimum, maximum = low, high
 			}
 			if key == "preview_max_text_kb" {
 				minimum, maximum = 16, 2048
@@ -272,6 +288,10 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 	err = func() error {
 		a.mutationMu.Lock()
 		defer a.mutationMu.Unlock()
+		limits := a.updatedRuntimeLimits(values)
+		if limits.MaxStagedBytes < limits.MaxUploadBytes {
+			return badRequest("上传暂存总额度不能小于单文件上传上限")
+		}
 		tx, err := a.db.BeginTx(r.Context(), nil)
 		if err != nil {
 			return err
@@ -301,10 +321,7 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 		if err = tx.Commit(); err != nil {
 			return err
 		}
-		if value, ok := values["max_upload_size"]; ok {
-			limit, _ := strconv.ParseInt(value, 10, 64)
-			a.uploadLimit.Store(limit << 20)
-		}
+		a.limits.Store(&limits)
 		if group == 3 {
 			a.applyTransferSettings(values)
 		}

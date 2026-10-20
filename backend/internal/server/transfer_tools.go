@@ -163,7 +163,7 @@ func (h *transferHub) toolProgressLocked(f *transferFile, force bool) {
 }
 
 func (a *App) toolFileLocked(r *http.Request) (*transferFile, error) {
-	if a.cfg.TransferDisabled || !a.transferOrigin(r, false) {
+	if !a.transferOrigin(r, false) {
 		return nil, transferUnavailable()
 	}
 	secret := r.URL.Query().Get("ticket")
@@ -188,7 +188,7 @@ func (a *App) transferToolDownload(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	requestIP := a.clientIP(r)
-	if !h.allowIPLocked("tool", requestIP, a.cfg.RateLimits.TransferToolPerIP) {
+	if !h.allowIPLocked("tool", requestIP, a.runtimeLimits().RateLimits.TransferToolPerIP) {
 		h.mu.Unlock()
 		return transferBusy()
 	}
@@ -330,7 +330,7 @@ func (a *App) transferToolDownload(w http.ResponseWriter, r *http.Request) error
 }
 
 func (a *App) transferToolUpload(w http.ResponseWriter, r *http.Request) error {
-	if a.cfg.TransferDisabled || !a.transferOrigin(r, false) {
+	if !a.transferOrigin(r, false) {
 		return transferUnavailable()
 	}
 	secret := strings.TrimPrefix(r.Header.Get("Authorization"), "Transfer ")

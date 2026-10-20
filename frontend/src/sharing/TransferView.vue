@@ -996,6 +996,9 @@ onBeforeUnmount(() => {
             @click="open('create')"
             >创建配对码</UiButton
           >
+          <p v-else-if="settings.transfer_enabled === 'false'" class="muted">
+            设备互传已关闭。
+          </p>
           <RouterLink
             v-else-if="session.type === 'none'"
             :to="{ path: '/login', query: { redirect: '/transfer' } }"
@@ -1006,7 +1009,11 @@ onBeforeUnmount(() => {
         <form class="transfer-entry-card" @submit.prevent="open('join')">
           <h2>加入连接</h2>
           <p v-if="!canJoin" class="muted">
-            访客加入互传已关闭，请登录后使用。
+            {{
+              settings.transfer_enabled === "false"
+                ? "设备互传已关闭。"
+                : "访客加入互传已关闭，请登录后使用。"
+            }}
           </p>
           <div class="transfer-code-field">
             <label for="transfer-pair-code">配对码</label>
