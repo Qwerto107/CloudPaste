@@ -6,15 +6,15 @@ import (
 
 // 次数均按一分钟统计；WebSocket 消息按成员，其余按真实来源 IP。
 type RateLimitConfig struct {
-	PasswordPerIP                   int
-	TransferCreatePerIP             int
-	TransferJoinPerIP               int
-	TransferRelayPerIP              int
-	TransferSocketPerIP             int
-	TransferMessagesPerMember       int
-	TransferToolPerIP               int
-	TransferFolderMessagesPerMember int
-	TransferFolderRelayPerIP        int
+	PasswordPerIP               int
+	TransferCreatePerIP         int
+	TransferJoinPerIP           int
+	TransferRelayPerIP          int
+	TransferSocketPerIP         int
+	TransferMessagesPerMember   int
+	TransferToolPerIP           int
+	TransferFolderMessagesPerIP int
+	TransferFolderRelayPerIP    int
 }
 
 // 启动入口共用默认值；运行中的次数由后台设置快照提供。
@@ -31,7 +31,7 @@ func (c *Config) configureRateLimits() error {
 		{"TRANSFER_WS_CONNECT_PER_MINUTE", &c.RateLimits.TransferSocketPerIP, 30},
 		{"TRANSFER_WS_MESSAGES_PER_MINUTE", &c.RateLimits.TransferMessagesPerMember, 240},
 		{"TRANSFER_TOOL_PER_MINUTE", &c.RateLimits.TransferToolPerIP, 240},
-		{"TRANSFER_FOLDER_WS_MESSAGES_PER_MINUTE", &c.RateLimits.TransferFolderMessagesPerMember, 12000},
+		{"TRANSFER_FOLDER_WS_MESSAGES_PER_MINUTE", &c.RateLimits.TransferFolderMessagesPerIP, 12000},
 		{"TRANSFER_FOLDER_RELAY_PER_MINUTE", &c.RateLimits.TransferFolderRelayPerIP, 12000},
 	}
 	for _, entry := range entries {

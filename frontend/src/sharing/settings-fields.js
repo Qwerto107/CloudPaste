@@ -35,7 +35,7 @@ const rateFields = [
   [
     "transfer_folder_ws_messages_per_minute",
     "文件夹内部消息",
-    "每个已授权成员的文件夹条目消息数量，与普通消息独立计数。",
+    "同一来源的已授权文件夹消息共享次数，IPv6 按 /64 网段计数；与普通消息独立。",
   ],
   [
     "transfer_folder_relay_per_minute",

@@ -6,6 +6,7 @@ import {
   canSaveFolders,
   folderMaxConcurrency,
   folderDefaultConcurrency,
+  folderMaxEntries,
   folderPath,
   createFolderDestination,
   createFolderEntry,
@@ -487,6 +488,12 @@ export class TransferClient {
   }
 
   offerFolder(folder) {
+    if (
+      !Number.isInteger(folder.count) ||
+      folder.count < 1 ||
+      folder.count > folderMaxEntries
+    )
+      throw new Error(`文件夹最多包含 ${folderMaxEntries} 个文件和空目录`);
     if (this.folders.size + this.files.size + this.pendingOffers.size >= 32)
       throw new Error("本次连接的任务额度已用完");
     const id = transferID();

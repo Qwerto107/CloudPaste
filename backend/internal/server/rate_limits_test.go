@@ -252,7 +252,7 @@ func TestTransferFolderRelaySeparateRate(t *testing.T) {
 // 独立消息额度也必须执行，不能把文件夹授权当作不限频许可。
 func TestTransferFolderMessagesCustomRate(t *testing.T) {
 	f, _, a, b := transferPair(t)
-	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferFolderMessagesPerMember = 2 })
+	setRuntimeLimitsForTest(f.app, func(limits *runtimeLimits) { limits.RateLimits.TransferFolderMessagesPerIP = 4 })
 	id := startFolderTest(t, a, b, 3, 0)
 	for i := 0; i < 2; i++ {
 		name := fmt.Sprintf("empty-%d", i)

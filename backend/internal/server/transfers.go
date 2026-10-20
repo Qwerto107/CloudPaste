@@ -557,7 +557,7 @@ func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
 		key, limit := "message:"+member.token, a.runtimeLimits().RateLimits.TransferMessagesPerMember
 		if h.isFolderMessageLocked(member, message) {
-			key, limit = "folder-message:"+member.token, a.runtimeLimits().RateLimits.TransferFolderMessagesPerMember
+			key, limit = "folder-message:"+rateLimitIP(member.ip), a.runtimeLimits().RateLimits.TransferFolderMessagesPerIP
 		}
 		if !h.allowLocked(key, limit) {
 			h.mu.Unlock()

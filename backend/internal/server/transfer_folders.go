@@ -9,6 +9,7 @@ import (
 const (
 	transferFolderMaxConcurrency     = 128
 	transferFolderDefaultConcurrency = 16
+	transferFolderMaxEntries         = 10000
 )
 
 // 文件夹只保存活动条目和待发额度，并发完成后立即释放子任务。
@@ -272,7 +273,7 @@ func (h *transferHub) folderMessageLocked(member *transferMember, msg transferMe
 		return nil
 	}
 	if msg.Type == "folder-offer" {
-		if !validTransferPath(msg.Name, false) || strings.Contains(msg.Name, "/") || msg.ClientID == "" || len(msg.ClientID) > 64 || msg.Count < 1 || int64(msg.Count) > 1<<53-1 || msg.Size < 0 || msg.Size > room.maxFile*4-room.offeredBytes || ordinaryTransferTasks(room)+len(room.folders) >= transferFiles {
+		if !validTransferPath(msg.Name, false) || strings.Contains(msg.Name, "/") || msg.ClientID == "" || len(msg.ClientID) > 64 || msg.Count < 1 || msg.Count > transferFolderMaxEntries || msg.Size < 0 || msg.Size > room.maxFile*4-room.offeredBytes || ordinaryTransferTasks(room)+len(room.folders) >= transferFiles {
 			return badRequest("文件夹名称、大小或任务额度无效")
 		}
 		if room.folders == nil {

@@ -30,7 +30,7 @@ func rateLimitTargets(limits *RateLimitConfig) map[string]*int {
 		"transfer_ws_connect_per_minute":         &limits.TransferSocketPerIP,
 		"transfer_ws_messages_per_minute":        &limits.TransferMessagesPerMember,
 		"transfer_tool_per_minute":               &limits.TransferToolPerIP,
-		"transfer_folder_ws_messages_per_minute": &limits.TransferFolderMessagesPerMember,
+		"transfer_folder_ws_messages_per_minute": &limits.TransferFolderMessagesPerIP,
 		"transfer_folder_relay_per_minute":       &limits.TransferFolderRelayPerIP,
 	}
 }

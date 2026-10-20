@@ -1,6 +1,7 @@
 // 文件夹按需枚举并排队传输，不读取或打包整个文件夹内容。
 export const folderMaxConcurrency = 128;
 export const folderDefaultConcurrency = 16;
+export const folderMaxEntries = 10000;
 const encoder = new TextEncoder();
 
 export function canSaveFolders() {
@@ -62,6 +63,8 @@ async function prepareFolder(name, entries, maxFile, signal) {
       throw new Error(`${entry.path} 超过单文件大小限制`);
     size += entry.file.size;
     count++;
+    if (count > folderMaxEntries)
+      throw new Error(`文件夹最多包含 ${folderMaxEntries} 个文件和空目录`);
     if (!Number.isSafeInteger(size) || size > maxFile * 4)
       throw new Error("文件夹总大小超过本次连接额度");
   }

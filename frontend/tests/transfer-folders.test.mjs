@@ -6,6 +6,7 @@ import {
   folderFromFiles,
   createFolderDestination,
   createFolderEntry,
+  folderMaxEntries,
 } from "../src/sharing/transfer-folders.js";
 
 function directory(name, initial = []) {
@@ -141,4 +142,20 @@ test("路径拒绝 Unicode 格式字符，正常非 ASCII 文件名保留", () =
   ])
     assert.throws(() => folderPath(`dir/report${char}.txt`));
   assert.deepEqual(folderPath("资料/中文-é.txt"), ["资料", "中文-é.txt"]);
+});
+
+test("文件夹最多一万项，扫描不读取正文", async () => {
+  const files = Array.from({ length: folderMaxEntries + 1 }, (_, index) => ({
+    name: `file-${index}`,
+    size: 0,
+    webkitRelativePath: `folder/file-${index}`,
+    arrayBuffer() {
+      throw new Error("不得读取正文");
+    },
+  }));
+  assert.equal(
+    (await folderFromFiles(files.slice(0, folderMaxEntries), 1)).count,
+    folderMaxEntries,
+  );
+  await assert.rejects(folderFromFiles(files, 1), /10000/);
 });

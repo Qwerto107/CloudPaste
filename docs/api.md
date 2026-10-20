@@ -54,7 +54,7 @@ API Key 必须启用且未过期，并满足权限、路径范围与存储 ACL�
 | WebSocket 连接尝试           | 每 IP                    | 30            | `transfer_ws_connect_per_minute`  |
 | 已认证 WebSocket 应用消息    | 每成员                   | 240           | `transfer_ws_messages_per_minute` |
 | 下载工具 HEAD、GET、分段 GET | 共享每 IP 的额度         | 240           | `transfer_tool_per_minute`        |
-| 已授权文件夹内部 WebSocket 消息 | 每成员 | 12000 | `transfer_folder_ws_messages_per_minute` |
+| 已授权文件夹内部 WebSocket 消息 | 每来源 IP（IPv6 按 /64） | 12000 | `transfer_folder_ws_messages_per_minute` |
 | 有效文件夹票据的中继上传、下载 | 两者共享每 IP 的额度 | 12000 | `transfer_folder_relay_per_minute` |
 
 密码验证成功或失败均计数，配对码未匹配也计数；格式或授权在计数前被拒绝的请求不计数。中继在票据长度合法后计数：有效票据使用普通中继或文件夹中继额度；未知编号、无效票据和票据重放使用独立探测表，次数由 `transfer_relay_per_minute` 控制，不挤占正常传输额度。下载工具在确认有效票据后计数，HEAD 和非法 Range 也计入每分钟限频。创建文件夹、确认接收、修改并发及聊天、信令仍计入普通 WebSocket 消息额度。各操作的额度独立，普通中继、文件夹中继与下载工具不共享次数。HTTP 超限返回 429；WebSocket 应用消息超限直接断开。
@@ -369,13 +369,13 @@ WebSocket `error` 消息不包含 HTTP 状态或 `code`。HTTP 创建、加入�
 
 服务端每 20 秒发送一次协议级 Ping，等待 Pong 最长 8 秒；浏览器自动回应，不需要发送 `{"type":"ping"}`。发送一条服务端消息的期限为 10 秒，单成员待发送队列最多 288 条。队列已满、写入失败或心跳失败会结束整个房间。
 
-单条 JSON 文本消息最大 16 KiB，认证后普通应用消息每成员每分钟默认最多 240 条，可通过 `transfer_ws_messages_per_minute` 调整；已授权文件夹的内部条目消息独立使用 `transfer_folder_ws_messages_per_minute`，默认 12000 条。任一消息额度超额会直接断开。房间从创建起最多存活 2 小时，配对码最多有效 5 分钟；创建者应在创建后 15 秒内连接，加入者取得第二席后应在 1 分钟内完成配对确认。期限由定时清理处理，不能依赖精确的关闭时刻。任一成员离开、拒绝或断线后，另一端也会断开，未完成文件被取消，相关 HTTP 票据失效；关闭前不保证送达所有状态通知。
+单条 JSON 文本消息最大 16 KiB，认证后普通应用消息每成员每分钟默认最多 240 条，可通过 `transfer_ws_messages_per_minute` 调整；已授权文件夹的内部条目消息独立使用 `transfer_folder_ws_messages_per_minute`，默认每来源 IP 每分钟 12000 条，IPv6 按 `/64` 聚合，同源设备及多个房间共享额度。任一消息额度超额会直接断开。房间从创建起最多存活 2 小时，配对码最多有效 5 分钟；创建者应在创建后 15 秒内连接，加入者取得第二席后应在 1 分钟内完成配对确认。期限由定时清理处理，不能依赖精确的关闭时刻。任一成员离开、拒绝或断线后，另一端也会断开，未完成文件被取消，相关 HTTP 票据失效；关闭前不保证送达所有状态通知。
 
 ### 传输模式与 HTTP 配合
 
 #### 文件夹队列
 
-发送端用 `folder-offer` 提交 `client_id/name/count/size`（count 包含空目录标记，size 为文件总字节）。服务端广播 `folder`，含上述字段、服务端 `id/from/state/sent_at/concurrency`。接收方选好可写目录后发送 `accept-folder`（`id/mode/concurrency`，mode 为 `relay` 或 `p2p`）。同一房间同时只运行一个文件夹队列，普通活动文件也不能与其交错接收。
+发送端用 `folder-offer` 提交 `client_id/name/count/size`（count 包含空目录标记，范围 1–10000，size 为文件总字节）。服务端广播 `folder`，含上述字段、服务端 `id/from/state/sent_at/concurrency`。接收方选好可写目录后发送 `accept-folder`（`id/mode/concurrency`，mode 为 `relay` 或 `p2p`）。同一房间同时只运行一个文件夹队列，普通活动文件也不能与其交错接收。
 
 服务端用 `folder-next`（`id/count`）发放下一批条目的提交额度。发送端通过原 `offer` 附带 `folder:{id,path,directory}`，path 为文件夹内的相对路径；directory 为 true 表示空目录，大小必须为 0。`file` 通知携带该 folder 字段。目录创建成功后接收方用 `accept` 的 `mode:"directory"` 确认；普通条目沿用选定的中继或直连方式。接收时可传 `concurrency`（1–128，未传使用系统默认 16）；`folder-next.count` 是本次允许提交的条目数。条目完成后服务端立即释放其状态并补充额度。中继条目先预留全站并发额度，总额度默认 64，额度不足时排队。双方通过 `folder-state`（`id/state/mode/bytes/completed/concurrency`）更新整体任务，使用 `cancel-folder`（`id`）取消整个队列。
 
