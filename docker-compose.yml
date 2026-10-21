@@ -3,7 +3,7 @@ name: cloudpaste
 
 services:
   standalone:
-    image: ghcr.io/qwerto107/cloudpaste:0.8.10
+    image: ghcr.io/qwerto107/cloudpaste:0.8.11
     # 应用参数统一从文件读取，下面仅覆盖容器路径与必需的启动约束。
     env_file: .env
     ports:
