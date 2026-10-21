@@ -16,7 +16,7 @@ docker-compose.yml        单容器镜像部署（推荐）
 docker-compose.split.yml  前后端分离镜像部署
 ```
 
-使用 Go 1.27.2 与 npm 构建工具链；具体构建环境和依赖版本以工作流及锁文件为准。SQLite 使用纯 Go 实现，无需 C 编译器。
+使用 Go 1.27.3 与 npm 构建工具链；具体构建环境和依赖版本以工作流及锁文件为准。SQLite 使用纯 Go 实现，无需 C 编译器。
 
 ## 启动后端
 

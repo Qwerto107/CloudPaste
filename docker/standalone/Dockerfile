@@ -11,7 +11,7 @@ COPY scripts/ ./scripts/
 RUN node --test scripts/prepare-webui.test.mjs && node scripts/prepare-webui.mjs
 
 # 使用构建主机编译器交叉编译，前后端最终嵌入同一个纯 Go 可执行文件。
-FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS build
 WORKDIR /src
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}

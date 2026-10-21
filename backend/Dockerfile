@@ -1,6 +1,6 @@
 # 使用纯 Go SQLite，构建和运行都不依赖 CGO。
 # 使用构建主机架构运行编译器，再交叉编译目标架构，避免模拟器拖慢 Go 构建。
-FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS build
 WORKDIR /src
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}
