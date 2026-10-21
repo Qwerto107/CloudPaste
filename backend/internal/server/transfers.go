@@ -278,6 +278,7 @@ func (a *App) registerTransfers(mux *apiMux) {
 	// 加入入口可认证登录身份；后续互传仍只使用短期成员凭证。
 	mux.HandleFunc("POST /api/transfer/join", a.handle(a.joinTransfer))
 	mux.ServeMux.HandleFunc("GET /api/transfer/socket", a.transferSocket)
+	mux.ServeMux.HandleFunc("POST /api/transfer/leave", a.handle(a.leaveTransfer))
 	mux.ServeMux.HandleFunc("PUT /api/transfer/upload/{id}", a.handle(a.transferUpload))
 	mux.ServeMux.HandleFunc("GET /api/transfer/download/{id}", a.handle(a.transferDownload))
 	mux.ServeMux.HandleFunc("GET /api/transfer/download/{id}/tool", a.handle(a.transferToolDownload))

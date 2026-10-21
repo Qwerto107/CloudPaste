@@ -1,11 +1,49 @@
 package server
 
 import (
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/coder/websocket"
 )
+
+func (a *App) leaveTransfer(w http.ResponseWriter, r *http.Request) error {
+	if !a.transferOrigin(r, true) {
+		return forbidden()
+	}
+	h := a.transfers
+	h.mu.Lock()
+	allowed := h.allowIPLocked("leave", a.clientIP(r), a.runtimeLimits().RateLimits.TransferSocketPerIP)
+	h.mu.Unlock()
+	if !allowed {
+		return transferBusy()
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := transferDecode(w, r, &body); err != nil {
+		return err
+	}
+	if len(body.Token) != 43 {
+		return badRequest("连接信息无效")
+	}
+	// 仅凭请求体中的短期成员票据退出；重复通知不暴露票据是否仍然有效。
+	hash := secretHash(body.Token)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, room := range h.rooms {
+		for _, member := range room.members {
+			if member != nil && member.token == hash {
+				h.removeLocked(room)
+				w.WriteHeader(http.StatusNoContent)
+				return nil
+			}
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
 
 func (h *transferHub) reconnectExpiredLocked(room *transferRoom, now time.Time) bool {
 	for _, member := range room.members {

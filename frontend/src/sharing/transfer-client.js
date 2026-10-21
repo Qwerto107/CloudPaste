@@ -65,6 +65,8 @@ export class TransferClient {
     this.paused = false;
     this.paired = false;
     this.reconnectAttempt = 0;
+    // pagehide 只在真正离开页面时触发；切后台仍保留五分钟恢复机会。
+    this.pageLeave = () => this.close(true);
     this.foreground = () => {
       if (globalThis.document?.visibilityState === "hidden" || this.closed)
         return;
@@ -213,6 +215,7 @@ export class TransferClient {
     this.debug("连接申请成功");
     globalThis.document?.addEventListener("visibilitychange", this.foreground);
     globalThis.window?.addEventListener?.("online", this.foreground);
+    globalThis.window?.addEventListener?.("pagehide", this.pageLeave);
     this.connectSocket();
   }
 
@@ -1712,8 +1715,30 @@ export class TransferClient {
     this.close();
   }
 
-  close() {
+  notifyLeave() {
+    if (this.closed || !this.resumeToken) return;
+    const url = apiURL("/transfer/leave", true);
+    const body = JSON.stringify({ token: this.resumeToken });
+    // 简单请求避免卸载期间的跨域预检；票据不写入 URL、日志或持久存储。
+    try {
+      if (globalThis.navigator?.sendBeacon?.(url, body)) return;
+    } catch {}
+    try {
+      void fetch(url, {
+        method: "POST",
+        body,
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        keepalive: true,
+        credentials: "omit",
+        cache: "no-store",
+      }).catch(() => {});
+    } catch {}
+  }
+
+  close(notify = false) {
     if (this.closed) return;
+    if (notify || this.socket?.readyState !== WebSocket.OPEN)
+      this.notifyLeave();
     // 主动离开立即销毁房间，不把用户退出当成可恢复的网络故障。
     try {
       if (this.socket?.readyState === WebSocket.OPEN)
@@ -1735,6 +1760,7 @@ export class TransferClient {
       this.foreground,
     );
     globalThis.window?.removeEventListener?.("online", this.foreground);
+    globalThis.window?.removeEventListener?.("pagehide", this.pageLeave);
     this.autoReceive = false;
     for (const source of this.folderSources.values()) source.controller.abort();
     this.folderDirect.close();

@@ -2,11 +2,20 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 const listeners = new Map();
+const pageListeners = new Map();
+Object.defineProperty(globalThis, "navigator", {
+  configurable: true,
+  value: { sendBeacon: () => false },
+});
 globalThis.window = {
   location: { origin: "https://share.example" },
   appConfig: {},
-  addEventListener() {},
-  removeEventListener() {},
+  addEventListener(name, listener) {
+    pageListeners.set(name, listener);
+  },
+  removeEventListener(name) {
+    pageListeners.delete(name);
+  },
 };
 const browserDocument = {
   visibilityState: "visible",
@@ -173,4 +182,55 @@ test("对方离线保留界面并禁止发送，双方恢复后解除暂停", as
   client.handle({ ...paired, generation: 1 });
   assert.equal(client.paused, false);
   assert.equal(client.paired, true);
+});
+
+test("切后台不退出，真正离开页面用 Beacon 通知且只在请求体携带票据", async (t) => {
+  const calls = [];
+  t.mock.method(navigator, "sendBeacon", (url, body) => {
+    calls.push({ url, body });
+    return true;
+  });
+  const { client } = await setup(t);
+  document.visibilityState = "hidden";
+  listeners.get("visibilitychange")();
+  assert.equal(client.closed, false);
+  assert.equal(calls.length, 0);
+  pageListeners.get("pagehide")();
+  assert.deepEqual(calls, [
+    {
+      url: "https://share.example/api/transfer/leave",
+      body: JSON.stringify({ token: "memory-only-token" }),
+    },
+  ]);
+  assert.equal(client.closed, true);
+  assert.equal(client.resumeToken, null);
+  assert.equal(pageListeners.has("pagehide"), false);
+  client.pageLeave();
+  assert.equal(calls.length, 1);
+});
+
+test("Beacon 拒绝或抛错时使用无登录凭据的 keepalive 请求", async (t) => {
+  for (const throws of [false, true]) {
+    const calls = [];
+    t.mock.method(navigator, "sendBeacon", () => {
+      if (throws) throw new Error("unavailable");
+      return false;
+    });
+    const { client } = await setup(t);
+    t.mock.method(globalThis, "fetch", (url, options) => {
+      calls.push({ url, options });
+      return Promise.reject(new Error("offline"));
+    });
+    client.pageLeave();
+    await Promise.resolve();
+    assert.equal(client.closed, true);
+    assert.equal(calls.length, 1);
+    const { url, options } = calls[0];
+    assert.equal(url, "https://share.example/api/transfer/leave");
+    assert.equal(options.keepalive, true);
+    assert.equal(options.credentials, "omit");
+    assert.equal(options.headers.Authorization, undefined);
+    assert.equal(JSON.parse(options.body).token, "memory-only-token");
+    t.mock.restoreAll();
+  }
 });

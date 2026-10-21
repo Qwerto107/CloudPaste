@@ -1227,7 +1227,11 @@ onBeforeUnmount(() => {
               @click="peerDetailsOpen = !peerDetailsOpen"
               >连接详情</UiButton
             >
-            <UiButton type="button" class="quiet" size="small" @click="leave"
+            <UiButton
+              type="button"
+              :class="connected ? 'quiet' : 'danger'"
+              size="small"
+              @click="leave"
               >断开连接</UiButton
             >
           </div>

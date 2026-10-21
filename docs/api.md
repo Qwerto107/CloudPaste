@@ -175,6 +175,7 @@ PUT /api/files/{id} 支持 filename、remark、password、clearPassword、expire
 | `POST /api/transfer/create`                     | 允许访客时无需登录；API Key 必须同时具备文本与文件分享权限，管理员改用 `/api/admin/transfer/create` |
 | `POST /api/transfer/join`                       | 通过配对码申请第二席；匿名加入受访客开关控制，登录用户附带对应凭据（管理员走 `/api/admin/transfer/join`） |
 | `GET /api/transfer/socket`                      | WebSocket，首条 JSON 消息提交临时成员票据                                        |
+| `POST /api/transfer/leave`                      | 页面离开通知，请求体提交成员票据并结束配对                                       |
 | `GET /api/transfer/download/{id}?ticket=…`      | 接收方一次性票据，返回附件流                                                     |
 | `PUT /api/transfer/upload/{id}`                 | 发送方 `Authorization: Transfer …`，请求体为原文件流                             |
 | `GET /api/transfer/download/{id}/tool?ticket=…` | 下载工具短期票据，支持 HEAD、单个 HTTP Range 和重试                              |
@@ -233,6 +234,8 @@ CloudPaste uses the IP2Location LITE database for [IP geolocation](https://www.i
 `member:0` 为创建者，`member:1` 为加入者。已配对成员意外断线后保留配对 5 分钟，立即停止未完成文件及文件夹并撤销其传输票据，归还全部中继和预留额度。恢复期限不能超过房间原有的 2 小时寿命；未配对连接、主动离开、权限撤销不保留。
 
 恢复时重新打开 WebSocket，首条消息发送 `{"type":"auth","token":"原成员凭证","resume":true}`。凭证只保留在页面内存，不进入 URL、日志或浏览器存储；刷新或页面被系统销毁后需重新配对。服务端重新校验原创建者权限和期限，同一成员仍只有一条有效连接；旧套接字未及时断开时，新连接会替换旧连接，旧事件不能影响新会话。
+
+页面实际离开时通过 Beacon（失败时尝试 keepalive POST）向 `/api/transfer/leave` 发送 `{"token":"原成员凭证"}`，不使用登录凭据。接口要求同源或允许的 Origin，严格限制请求体及每来源频率，沿用 WebSocket 建连限频值的独立额度；已结束或未知票据均返回 204。刷新、关闭或离开页面时尽力结束配对，切后台不发送退出通知；浏览器未送达通知时仍按意外断线保留 5 分钟。
 
 恢复认证后收到 `ready`（`paired:true`）、`sync`（`files` 为普通文件的终态 `state` 消息，`folders` 为文件夹的终态 `folder-state` 消息）。双方都在线时广播新的 `paired`，其 `generation` 标识连接代次；对端仍离线时返回 `peer-offline`，包含 `reconnect_until` 和 `generation`。该通知也发送给仍在线的另一端。等待恢复时不能发送业务消息；`check` / `checked` 可检查旧连接是否仍可用，仍计入普通消息限频。服务端不补发离线期间的文字或信令，不提供文件断点续传；中断文件需重新发送，生成新任务及票据。
 
