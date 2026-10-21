@@ -18,8 +18,9 @@ import (
 )
 
 type transferTestPeer struct {
-	conn *websocket.Conn
-	t    *testing.T
+	conn  *websocket.Conn
+	t     *testing.T
+	token string
 }
 
 func (p transferTestPeer) send(value any) {
@@ -66,7 +67,7 @@ func transferPair(t *testing.T) (*fixture, *httptest.Server, transferTestPeer, t
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = conn.CloseNow() })
-		p := transferTestPeer{conn, t}
+		p := transferTestPeer{conn: conn, t: t, token: token}
 		p.send(map[string]any{"type": "auth", "token": token})
 		p.next("ready")
 		return p

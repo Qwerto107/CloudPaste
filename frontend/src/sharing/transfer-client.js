@@ -19,6 +19,7 @@ const diskBatchSize = 256 * 1024;
 const receiveWindow = 8 * 1024 * 1024;
 const legacyReceiveWindow = 2 * 1024 * 1024;
 const sendBufferLimit = 4 * 1024 * 1024;
+const reconnectWindow = 5 * 60 * 1000;
 
 // getRandomValues 也能用于局域网 HTTP；这些编号仅关联消息，认证票据由服务端生成。
 export function transferID() {
@@ -60,6 +61,27 @@ export class TransferClient {
     this.folderOfferOwners = new Map();
     this.folderConcurrencyUpdates = new Set();
     this.folderDirect = new FolderDirectTransfers(this);
+    this.paused = false;
+    this.paired = false;
+    this.reconnectAttempt = 0;
+    this.foreground = () => {
+      if (globalThis.document?.visibilityState === "hidden" || this.closed)
+        return;
+      if (this.reconnecting) {
+        clearTimeout(this.reconnectTimer);
+        this.connectSocket(true);
+      } else if (this.paired && this.socket?.readyState === WebSocket.OPEN) {
+        // 恢复前台后先检查旧连接，不能只依赖可能尚未更新的 readyState。
+        clearTimeout(this.checkTimer);
+        try {
+          this.send({ type: "check" });
+        } catch {
+          this.connectionLost();
+          return;
+        }
+        this.checkTimer = setTimeout(() => this.connectionLost(), 3000);
+      }
+    };
   }
 
   debug(event, details = {}, warning = false) {
@@ -181,17 +203,44 @@ export class TransferClient {
     if (this.closed) return;
     this.member = data.member;
     this.maxFile = data.max_file_size;
+    this.resumeToken = data.token;
+    this.expiresAt = Date.parse(data.expires_at) || Infinity;
     this.onEvent({ type: "created", ...data, token: undefined });
     this.debug("连接申请成功");
+    globalThis.document?.addEventListener("visibilitychange", this.foreground);
+    globalThis.window?.addEventListener?.("online", this.foreground);
+    this.connectSocket();
+  }
+
+  connectSocket(resume = false) {
+    if (this.closed || (resume && !this.paired)) return;
+    if (resume && globalThis.document?.visibilityState === "hidden") return;
+    if (resume && Date.now() >= this.reconnectUntil) {
+      this.fail("超过 5 分钟未恢复连接，请重新配对");
+      return;
+    }
+    // 丢弃旧套接字事件，迟到的 close 不能关闭恢复后的连接。
+    const previous = this.socket;
+    this.socket = null;
+    previous?.close();
     const url = new URL(apiURL("/transfer/socket", true));
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    this.socket = new WebSocket(url);
+    const socket = new WebSocket(url);
+    this.socket = socket;
     // 临时凭证只通过首条消息提交，不写入 URL 或浏览器存储；公网应部署 HTTPS/WSS。
-    this.socket.onopen = () => {
+    socket.onopen = () => {
+      if (this.socket !== socket || this.closed) return;
       this.debug("WebSocket 已连接");
-      this.send({ type: "auth", token: data.token });
+      socket.send(
+        JSON.stringify({
+          type: "auth",
+          token: this.resumeToken,
+          ...(resume ? { resume: true } : {}),
+        }),
+      );
     };
-    this.socket.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (this.socket !== socket || this.closed) return;
       try {
         this.handle(JSON.parse(event.data));
       } catch {
@@ -199,29 +248,166 @@ export class TransferClient {
         this.fail("连接消息无效，请重新配对");
       }
     };
-    this.socket.onerror = () => {
+    socket.onerror = () => {
+      if (this.socket !== socket || this.closed) return;
       this.debug("WebSocket 连接异常", {}, true);
+      if (this.paired) return;
       this.onEvent({
         type: "error",
         message: "连接失败，请检查服务和 WebSocket 代理配置",
       });
     };
-    this.socket.onclose = (event) => {
+    socket.onclose = (event) => {
+      if (this.socket !== socket || this.closed) return;
       this.debug("WebSocket 已断开", {
         code: event.code,
         clean: event.wasClean,
       });
-      this.close();
+      if (this.paired && event.code !== 1008) this.connectionLost();
+      else this.close();
     };
+    clearTimeout(this.connectTimer);
+    // 建连或认证无响应也必须受限，避免半开连接阻止后续重试。
+    if (resume)
+      this.connectTimer = setTimeout(() => {
+        if (this.socket === socket) this.connectionLost();
+      }, 12000);
+  }
+
+  connectionLost() {
+    if (this.closed || !this.paired) return;
+    clearTimeout(this.checkTimer);
+    clearTimeout(this.connectTimer);
+    const socket = this.socket;
+    this.socket = null;
+    socket?.close();
+    if (!this.reconnecting) {
+      this.reconnectUntil = Math.min(
+        this.paused ? this.reconnectUntil : Infinity,
+        Date.now() + reconnectWindow,
+        this.expiresAt,
+      );
+      this.reconnecting = true;
+      this.pauseTransfers();
+      this.onEvent({
+        type: "reconnecting",
+        reconnect_until: new Date(this.reconnectUntil).toISOString(),
+      });
+      this.armReconnectExpiry();
+    }
+    clearTimeout(this.reconnectTimer);
+    if (Date.now() >= this.reconnectUntil) {
+      this.fail("超过 5 分钟未恢复连接，请重新配对");
+      return;
+    }
+    if (globalThis.document?.visibilityState !== "hidden") {
+      const delay = Math.min(
+        10000,
+        1000 * 2 ** Math.min(this.reconnectAttempt++, 4),
+      );
+      this.reconnectTimer = setTimeout(() => this.connectSocket(true), delay);
+    }
+  }
+
+  armReconnectExpiry() {
+    clearTimeout(this.expiryTimer);
+    this.expiryTimer = setTimeout(
+      () => this.fail("连接恢复超时，请重新配对"),
+      Math.max(0, this.reconnectUntil - Date.now()),
+    );
+  }
+
+  pauseTransfers() {
+    if (this.paused) return;
+    this.paused = true;
+    const peer = this.peer,
+      channel = this.channel;
+    this.peer = this.channel = null;
+    this.peerSettings = null;
+    this.directReady = false;
+    this.directEndpoints = null;
+    this.peerGeneration++;
+    this.candidates = [];
+    this.signalChain = Promise.resolve();
+    this.folderDirect.close();
+    channel?.close();
+    peer?.close();
+    this.onEvent({ type: "direct", ready: false });
+    // 取消实际传输和写盘，不缓存后台文件；普通 File 引用保留供用户手动重发。
+    for (const folder of this.folders.values())
+      if (["active", "offered"].includes(folder.state))
+        this.handle({
+          type: "folder-state",
+          id: folder.id,
+          state: "failed",
+          mode: folder.mode,
+        });
+    for (const file of [...this.files.values()])
+      if (["active", "offered"].includes(file.state))
+        this.handle({
+          type: "state",
+          id: file.id,
+          state: "failed",
+          mode: file.mode,
+        });
+    for (const id of this.pendingOffers) this.sources.delete(id);
+    this.pendingOffers.clear();
+    this.folderOfferOwners.clear();
+    this.folderConcurrencyUpdates.clear();
   }
 
   send(message) {
+    if (this.paused && !["check", "leave"].includes(message.type))
+      throw new Error("连接暂时中断，请等待恢复后再发送");
     if (this.socket?.readyState !== WebSocket.OPEN)
       throw new Error("连接尚未就绪");
     this.socket.send(JSON.stringify(message));
   }
 
   handle(message) {
+    if (message.type === "checked") {
+      clearTimeout(this.checkTimer);
+      return;
+    }
+    if (message.type === "ready" && message.paired) {
+      clearTimeout(this.connectTimer);
+      return;
+    }
+    if (message.type === "sync") {
+      for (const state of [...message.folders, ...message.files])
+        this.handle(state);
+      return;
+    }
+    if (message.type === "peer-offline") {
+      clearTimeout(this.connectTimer);
+      this.reconnecting = false;
+      clearTimeout(this.reconnectTimer);
+      this.pauseTransfers();
+      this.reconnectUntil = Math.min(
+        Date.parse(message.reconnect_until),
+        this.expiresAt,
+      );
+      this.armReconnectExpiry();
+      this.onEvent(message);
+      return;
+    }
+    if (message.type === "paired") {
+      if (
+        this.paired &&
+        !this.paused &&
+        this.connectionGeneration === (message.generation ?? 0)
+      )
+        return;
+      clearTimeout(this.reconnectTimer);
+      clearTimeout(this.connectTimer);
+      clearTimeout(this.checkTimer);
+      clearTimeout(this.expiryTimer);
+      this.paired = true;
+      this.paused = this.reconnecting = false;
+      this.reconnectAttempt = 0;
+      this.connectionGeneration = message.generation ?? 0;
+      this.peerGeneration = this.connectionGeneration * 1000000;
+    }
     if (message.type === "relay-ready") {
       // 上传实际接入后才放行下一对，避免同一浏览器的下载占满共享连接池。
       if (this.folderRelayStarting?.id === message.id) {
@@ -293,7 +479,7 @@ export class TransferClient {
     )
       return;
     if (message.type === "paired") this.startPeer(message);
-    if (message.type === "signal") {
+    if (message.type === "signal" && !this.paused) {
       this.signalChain = this.signalChain
         .then(() => this.signal(message.data))
         .catch((error) => {
@@ -857,6 +1043,7 @@ export class TransferClient {
   receiveNextAutoFile() {
     if (
       this.closed ||
+      this.paused ||
       this.autoAccepting ||
       this.accepting ||
       this.receiving ||
@@ -1056,7 +1243,7 @@ export class TransferClient {
   }
 
   restartPeer() {
-    if (this.closed || !this.peerSettings) return;
+    if (this.closed || this.paused || !this.peerSettings) return;
     this.debug("重建 WebRTC 连接");
     this.folderDirect.close();
     this.directReady = false;
@@ -1513,8 +1700,26 @@ export class TransferClient {
 
   close() {
     if (this.closed) return;
+    // 主动离开立即销毁房间，不把用户退出当成可恢复的网络故障。
+    try {
+      if (this.socket?.readyState === WebSocket.OPEN)
+        this.send({ type: "leave" });
+    } catch {}
     this.debug("关闭连接并释放资源");
     this.closed = true;
+    this.resumeToken = null;
+    for (const timer of [
+      this.reconnectTimer,
+      this.connectTimer,
+      this.checkTimer,
+      this.expiryTimer,
+    ])
+      clearTimeout(timer);
+    globalThis.document?.removeEventListener(
+      "visibilitychange",
+      this.foreground,
+    );
+    globalThis.window?.removeEventListener?.("online", this.foreground);
     this.autoReceive = false;
     for (const source of this.folderSources.values()) source.controller.abort();
     this.folderDirect.close();

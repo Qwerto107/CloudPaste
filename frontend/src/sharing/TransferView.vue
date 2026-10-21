@@ -127,6 +127,10 @@ const active = computed(
     folders.value.some((folder) => folder.state === "active"),
 );
 const connected = computed(() => status.value === "paired");
+const hasPair = computed(() =>
+  ["paired", "reconnecting", "peer-offline"].includes(status.value),
+);
+const reconnectDeadline = ref("");
 const canDirect = computed(() => direct.value && canSaveDirectly());
 const peerAddress = computed(() => {
   if (!direct.value) return peerRelayOnly.value ? "已禁用" : "未建立";
@@ -382,6 +386,14 @@ function event(message) {
     myMember.value = message.member;
     maxFile.value = message.max_file_size;
     status.value = "connecting";
+  } else if (["reconnecting", "peer-offline"].includes(message.type)) {
+    status.value = message.type;
+    reconnectDeadline.value = new Date(
+      message.reconnect_until,
+    ).toLocaleTimeString("zh-CN", { hour12: false });
+    direct.value = false;
+    peerEndpoint.value = null;
+    folderScan?.abort();
   } else if (message.type === "ready") status.value = "waiting";
   else if (message.type === "joining") {
     joining.value = message.name;
@@ -389,7 +401,10 @@ function event(message) {
     joiningDevice.value = message.device || null;
     joiningLocation.value = message.location || null;
   } else if (message.type === "paired") {
+    const recovering = hasPair.value && !connected.value;
     status.value = "paired";
+    reconnectDeadline.value = "";
+    if (recovering) notify("success", "连接已恢复，中断的文件请重新发送");
     names.value = message.names;
     peerIPs.value = message.ips || [];
     peerDevices.value = message.devices || [];
@@ -893,7 +908,7 @@ function stateLabel(file) {
   return fileStatus(file).label;
 }
 function beforeUnload(event) {
-  if (connected.value || active.value) {
+  if (hasPair.value || active.value) {
     event.preventDefault();
     event.returnValue = "";
   }
@@ -924,7 +939,7 @@ const speedTimer = setInterval(() => {
 }, 1000);
 onBeforeRouteLeave(() => {
   if (
-    connected.value &&
+    hasPair.value &&
     !window.confirm("离开会断开互传并取消未完成的文件，是否继续？")
   )
     return false;
@@ -949,7 +964,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="transfer-page">
-    <div v-if="!connected" class="page-heading">
+    <div v-if="!hasPair" class="page-heading">
       <div>
         <p class="eyebrow">文字与文件，即时互传</p>
         <h1>设备互传</h1>
@@ -1046,7 +1061,7 @@ onBeforeUnmount(() => {
       </p>
     </section>
 
-    <section v-else-if="!connected" class="panel transfer-waiting">
+    <section v-else-if="!hasPair" class="panel transfer-waiting">
       <h2>
         {{
           status === "connecting"
@@ -1125,11 +1140,19 @@ onBeforeUnmount(() => {
                 "
               />
               <div>
-                <strong>已连接：{{ names[1 - myMember] }}</strong>
+                <strong
+                  >{{ connected ? "已连接" : "等待恢复" }}：{{
+                    names[1 - myMember]
+                  }}</strong
+                >
                 <span class="transfer-peer-state">{{
-                  direct
-                    ? "已授权 · 点对点可用 · 中继可用"
-                    : "已授权 · 中继可用"
+                  !connected
+                    ? status === "reconnecting"
+                      ? "连接中断 · 正在重新连接"
+                      : "对方暂时离线 · 等待重新连接"
+                    : direct
+                      ? "已授权 · 点对点可用 · 中继可用"
+                      : "已授权 · 中继可用"
                 }}</span>
               </div>
             </div>
@@ -1149,6 +1172,10 @@ onBeforeUnmount(() => {
             >
           </div>
         </div>
+        <p v-if="!connected" class="muted" role="status">
+          配对保留 5 分钟，请在
+          {{ reconnectDeadline }} 前返回前台恢复连接。中断的文件需重新发送。
+        </p>
         <dl
           v-show="peerDetailsOpen"
           id="transfer-peer-details"
@@ -1172,7 +1199,7 @@ onBeforeUnmount(() => {
           </div>
         </dl>
       </div>
-      <div class="transfer-workspace">
+      <div class="transfer-workspace" :inert="!connected">
         <section class="panel transfer-chat">
           <div class="transfer-section-heading">
             <h2>消息</h2>
@@ -1886,7 +1913,7 @@ onBeforeUnmount(() => {
     <!-- 常用操作就近提示，详细限制集中折叠，避免传输卡片被说明文字占满。 -->
     <details
       class="panel transfer-help"
-      :class="{ 'transfer-help-connected': connected }"
+      :class="{ 'transfer-help-connected': hasPair }"
     >
       <summary>使用说明</summary>
       <dl class="transfer-help-content">
@@ -1912,7 +1939,8 @@ onBeforeUnmount(() => {
         </dd>
         <dt>连接与隐私</dt>
         <dd>
-          每次连接仅限两台设备，双方请保持页面在线。刷新或离开会断开连接，并取消未完成的传输。本站不保存中继文件，但服务端可接触内容；直连可能让对方得知网络地址。
+          每次连接仅限两台设备。意外断线后保留配对 5
+          分钟，返回前台自动重连，中断的文件需重新发送。切到后台可能暂停传输；刷新、主动离开或超过恢复期限需重新配对。本站不保存中继文件，但服务端可接触内容；直连可能让对方得知网络地址。
         </dd>
         <dt>下载工具</dt>
         <dd>

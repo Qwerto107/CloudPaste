@@ -25,10 +25,11 @@ const (
 	transferConnections = 40
 	transferFiles       = 32
 	// 覆盖一批文件夹任务的通知与状态消息，并保留控制消息空间。
-	transferQueue    = 3*transferFolderMaxConcurrency + transferFiles
-	transferFrame    = 16 << 10
-	transferLifetime = 2 * time.Hour
-	transferIdle     = time.Minute
+	transferQueue     = 3*transferFolderMaxConcurrency + transferFiles
+	transferFrame     = 16 << 10
+	transferLifetime  = 2 * time.Hour
+	transferIdle      = time.Minute
+	transferReconnect = 5 * time.Minute
 )
 
 // 房间、成员和文件状态只在 mu 下修改；网络读写从不持有这把锁。
@@ -59,6 +60,7 @@ type transferRoom struct {
 	created, expires  time.Time
 	members           [2]*transferMember
 	paired, relayOnly bool
+	generation        uint64
 	files             map[string]*transferFile
 	folders           map[string]*transferFolder
 	offeredBytes      int64
@@ -68,21 +70,25 @@ type transferRoom struct {
 }
 
 type transferMember struct {
-	audit       auditEvent // 仅保存操作人摘要，不保留其登录凭据。
-	room        *transferRoom
-	index       int
-	name, token string
-	ip          string // WebSocket 建立时由可信代理规则解析，不能由设备名称或客户端消息指定。
-	device      *transferDevice
-	location    *ipLocation
-	created     time.Time
-	connected   bool
-	out         chan any
+	audit          auditEvent // 仅保存操作人摘要，不保留其登录凭据。
+	room           *transferRoom
+	index          int
+	name, token    string
+	ip             string // WebSocket 建立时由可信代理规则解析，不能由设备名称或客户端消息指定。
+	device         *transferDevice
+	location       *ipLocation
+	created        time.Time
+	connected      bool
+	disconnectedAt time.Time
+	socket         *websocket.Conn
+	socketCancel   context.CancelFunc
+	out            chan any
 }
 
 type transferMessage struct {
 	Type        string               `json:"type"`
 	Token       string               `json:"token,omitempty"`
+	Resume      bool                 `json:"resume,omitempty"`
 	ID          string               `json:"id,omitempty"`
 	ClientID    string               `json:"client_id,omitempty"`
 	Name        string               `json:"name,omitempty"`
@@ -173,7 +179,7 @@ func (h *transferHub) sweep() {
 			h.mu.Lock()
 			var owners []*transferRoom
 			for _, room := range h.rooms {
-				if room.ctx.Err() != nil || now.After(room.expires) || (!room.paired && now.Sub(room.created) > 5*time.Minute) || (!room.members[0].connected && now.Sub(room.created) > 15*time.Second) {
+				if room.ctx.Err() != nil || now.After(room.expires) || h.reconnectExpiredLocked(room, now) || (!room.paired && (now.Sub(room.created) > 5*time.Minute || (!room.members[0].connected && now.Sub(room.created) > 15*time.Second))) {
 					h.removeLocked(room)
 					continue
 				}
@@ -444,7 +450,7 @@ func (a *App) joinTransfer(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *transferHub) sendLocked(member *transferMember, value any) {
-	if member == nil {
+	if member == nil || !member.disconnectedAt.IsZero() {
 		return
 	}
 	select {
@@ -507,24 +513,39 @@ func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		for _, m := range room.members {
-			if m != nil && m.token == secretHash(auth.Token) && !m.connected {
+			if m != nil && m.token == secretHash(auth.Token) && (!m.connected || (auth.Resume && room.paired)) {
 				member = m
 				break
 			}
 		}
 	}
-	if member == nil {
+	if member == nil || h.reconnectExpiredLocked(member.room, time.Now()) || !time.Now().Before(member.room.expires) {
 		h.mu.Unlock()
+		_ = c.Close(websocket.StatusPolicyViolation, "连接已失效")
 		return
 	}
 	// 只查询已认证成员；文件读取放在房间锁外，避免阻塞其他设备的消息转发。
 	h.mu.Unlock()
-	location := a.locateIP(ip)
-	h.mu.Lock()
-	if member.connected || member.room.ctx.Err() != nil || h.rooms[member.room.id] != member.room {
-		h.mu.Unlock()
+	if auth.Resume && !h.ownerValid(member.room.owner) {
+		_ = c.Close(websocket.StatusPolicyViolation, "连接已失效")
 		return
 	}
+	location := a.locateIP(ip)
+	h.mu.Lock()
+	if (member.connected && !auth.Resume) || member.room.ctx.Err() != nil || h.rooms[member.room.id] != member.room || h.reconnectExpiredLocked(member.room, time.Now()) || !time.Now().Before(member.room.expires) {
+		h.mu.Unlock()
+		_ = c.Close(websocket.StatusPolicyViolation, "连接已失效")
+		return
+	}
+	if member.connected {
+		// 前台恢复时旧 TCP 可能尚未被判死；同一凭证替换旧套接字，始终只保留一个有效成员连接。
+		h.disconnectMemberLocked(member, member.socket)
+	}
+	socketCtx, socketCancel := context.WithCancel(member.room.ctx)
+	member.socket, member.socketCancel = c, socketCancel
+	member.disconnectedAt = time.Time{}
+	member.out = make(chan any, transferQueue)
+	out := member.out
 	member.connected = true
 	member.ip = ip
 	// 数据库可能在锁外查询期间被卸载或更换，不能发布旧库返回的结果。
@@ -535,31 +556,48 @@ func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
 	member.location = location
 	a.ipLocationMu.RUnlock()
 	member.audit.IP = ip
-	h.sendLocked(member, map[string]any{"type": "ready", "member": member.index})
-	if member.index == 1 {
+	h.sendLocked(member, map[string]any{"type": "ready", "member": member.index, "paired": member.room.paired})
+	if member.room.paired {
+		h.syncTransferLocked(member)
+		if member.room.members[0].connected && member.room.members[1].connected {
+			h.pairedLocked(member.room)
+		} else {
+			h.sendLocked(member, h.peerOfflineLocked(member.room))
+		}
+	} else if member.index == 1 {
 		h.sendLocked(member.room.members[0], map[string]any{"type": "joining", "name": member.name, "ip": member.ip, "device": member.device, "location": member.location})
 	}
 	h.mu.Unlock()
-	defer func() { h.mu.Lock(); h.removeLocked(member.room); h.mu.Unlock() }()
+	defer func() { h.mu.Lock(); h.disconnectMemberLocked(member, c); h.mu.Unlock() }()
 	// 读循环处理 pong；写循环负责有界队列和心跳，两者随房间一起取消。
 	done := make(chan struct{})
-	go func() { defer close(done); h.writeSocket(c, member) }()
-	defer func() { member.room.cancel(); <-done }()
+	go func() { defer close(done); h.writeSocket(socketCtx, socketCancel, c, out) }()
+	defer func() { socketCancel(); <-done }()
 	for {
-		typ, raw, err = c.Read(member.room.ctx)
+		typ, raw, err = c.Read(socketCtx)
 		if err != nil {
 			return
 		}
 		var message transferMessage
 		if typ != websocket.MessageText || json.Unmarshal(raw, &message) != nil {
+			h.mu.Lock()
+			if member.socket == c {
+				h.removeLocked(member.room)
+			}
+			h.mu.Unlock()
 			return
 		}
 		h.mu.Lock()
+		if member.socket != c {
+			h.mu.Unlock()
+			return
+		}
 		key, limit := "message:"+member.token, a.runtimeLimits().RateLimits.TransferMessagesPerMember
 		if h.isFolderMessageLocked(member, message) {
 			key, limit = "folder-message:"+rateLimitIP(member.ip), a.runtimeLimits().RateLimits.TransferFolderMessagesPerIP
 		}
 		if !h.allowLocked(key, limit) {
+			h.removeLocked(member.room)
 			h.mu.Unlock()
 			return
 		}
@@ -571,27 +609,27 @@ func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *transferHub) writeSocket(c *websocket.Conn, m *transferMember) {
+func (h *transferHub) writeSocket(socketCtx context.Context, cancelSocket context.CancelFunc, c *websocket.Conn, out <-chan any) {
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
-	defer m.room.cancel()
+	defer cancelSocket()
 	for {
 		select {
-		case <-m.room.ctx.Done():
+		case <-socketCtx.Done():
 			return
-		case value := <-m.out:
+		case value := <-out:
 			raw, err := json.Marshal(value)
 			if err != nil {
 				return
 			}
-			ctx, cancel := context.WithTimeout(m.room.ctx, 10*time.Second)
+			ctx, cancel := context.WithTimeout(socketCtx, 10*time.Second)
 			err = c.Write(ctx, websocket.MessageText, raw)
 			cancel()
 			if err != nil {
 				return
 			}
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(m.room.ctx, 8*time.Second)
+			ctx, cancel := context.WithTimeout(socketCtx, 8*time.Second)
 			err := c.Ping(ctx)
 			cancel()
 			if err != nil {
@@ -610,6 +648,10 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		h.removeLocked(r)
 		return nil
 	}
+	if msg.Type == "check" {
+		h.sendLocked(m, map[string]any{"type": "checked"})
+		return nil
+	}
 	if msg.Type == "confirm" {
 		if m.index != 0 || r.paired || r.members[1] == nil || !r.members[1].connected {
 			return forbidden()
@@ -619,17 +661,14 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		// 仅在创建者确认、双方配对成功后记录加入；申请本身由 HTTP 日志单独记录。
 		h.auditTransfer(r.members[1], "加入互传", r.id, "success", r.members[1].created, h.joinAuditDetailsLocked(r, time.Now()))
 		// 来源地址只向本房间设备披露，创建者地址须在授权配对后才发送给加入者。
-		h.broadcastLocked(r, map[string]any{
-			"type": "paired", "names": []string{r.members[0].name, r.members[1].name},
-			"ips":        []string{r.members[0].ip, r.members[1].ip},
-			"devices":    []*transferDevice{r.members[0].device, r.members[1].device},
-			"locations":  []*ipLocation{r.members[0].location, r.members[1].location},
-			"relay_only": r.relayOnly, "stun": h.stun, "audit_enabled": h.app.audit.allows("transfer"),
-		})
+		h.pairedLocked(r)
 		return nil
 	}
 	if !r.paired {
 		return forbidden()
+	}
+	if !r.members[0].disconnectedAt.IsZero() || !r.members[1].disconnectedAt.IsZero() {
+		return badRequest("对方暂时离线，请等待重新连接")
 	}
 	switch msg.Type {
 	case "folder-offer", "accept-folder", "cancel-folder", "folder-progress", "folder-concurrency", "folder-ready":
