@@ -281,7 +281,7 @@ socket.addEventListener("open", () => {
 | --------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `ready`         | `member`                                                                    | 当前成员，首帧认证成功                                                 |
 | `joining`       | `name`、`ip`、`device`、`location`                                          | 仅创建者，加入者已经连接，等待确认；`ip` 为服务端识别的 WebSocket 来源 IP |
-| `paired`        | `names`、`ips`、`devices`、`locations`、`relay_only`、`stun`                  | 双方；名称、IP、设备摘要、归属地均按创建者、加入者顺序排列；缺失设备摘要为 `null`，空 `stun` 表示未配置 STUN |
+| `paired`        | `names`、`ips`、`devices`、`locations`、`relay_only`、`stun`、`stun_servers`                  | 双方；名称、IP、设备摘要、归属地均按创建者、加入者顺序排列；缺失设备摘要为 `null`；`stun_servers` 为最多 5 个地址的数组，旧字段 `stun` 保留首个地址 |
 | `locations`     | `locations` 或 `joining_location` | 管理员手动加载、更新或卸载数据库时刷新位置；不改变授权状态，不向未授权加入者披露创建者信息 |
 | `text`          | `text`、`from`、`sent_at`                                                   | 双方，包括发送者；`from` 为发送成员编号                                |
 | `signal`        | `data`                                                                      | 仅对端，原样转发协商数据                                               |
@@ -306,7 +306,9 @@ socket.addEventListener("open", () => {
 3. 创建者发送 `{"type":"confirm"}`，双方收到 `paired`，配对码随即失效。
 4. 此后双方可发送文字、协商直连、申请文件或主动离开。
 
-`paired.stun` 来自管理员保存的 `transfer_stun` 设置；仅在配对确认后下发，不在公开设置中返回。管理员通过 `PUT /api/admin/settings/group/3` 保存字符串，格式为 `stun:主机:端口`，端口 1–65535，最长 256 字节；IPv6 使用方括号。不支持凭据、路径、查询参数或多个服务器。空字符串停用，默认为空，原 `TRANSFER_STUN` 环境变量不再生效。保存后新配对使用新值，已有连接不重新协商，重启保留。
+`paired.stun_servers` 来自管理员保存的 `transfer_stun` 设置；仅在配对确认后下发，不在公开设置中返回。管理员通过 `PUT /api/admin/settings/group/3` 保存每行一个地址的字符串，最多 5 个、总长最多 1284 字节；逐行去除首尾空白、忽略空行、忽略大小写去重后按原顺序保存。每个地址格式为 `stun:主机:端口`，端口 1–65535，最长 256 字节，IPv6 使用方括号。不支持凭据、路径、查询参数或 TURN 地址。空字符串停用。未保存配置时默认使用 miwifi、hitv、Cloudflare、Google、Nextcloud 五个 STUN 地址，具体端口见[部署文档](deployment.md#互传参数)；已保存的列表或空值均优先，不被默认值覆盖。原 `TRANSFER_STUN` 环境变量不再生效。保存后新配对使用新值，已有连接不重新协商，重启保留。兼容旧客户端的 `paired.stun` 字段只返回首个地址，无配置时为空。
+
+前端将多个地址交给浏览器 ICE 收集和验证候选链路，不按列表顺序轮询测速。高级设置可临时覆盖本机列表或禁用 STUN，不向服务端上报地址，也不修改对端配置；本机覆盖在重连时保留，离开页面后丢弃。强制中继优先，不创建 WebRTC 连接或查询 STUN。
 
 成功配对通知示例：
 

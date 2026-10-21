@@ -127,7 +127,7 @@ func transferSecret() string {
 
 func newTransferHub(a *App) *transferHub {
 	ctx, cancel := context.WithCancel(context.Background())
-	h := &transferHub{app: a, ctx: ctx, cancel: cancel, rooms: map[string]*transferRoom{}, limits: newRateLimitTable(1024), probes: newRateLimitTable(256), connections: map[string]int{}, maxFile: a.cfg.TransferMaxFileBytes, bytesPerSecond: a.cfg.TransferBytesPerSecond}
+	h := &transferHub{app: a, ctx: ctx, cancel: cancel, rooms: map[string]*transferRoom{}, limits: newRateLimitTable(1024), probes: newRateLimitTable(256), connections: map[string]int{}, maxFile: a.cfg.TransferMaxFileBytes, bytesPerSecond: a.cfg.TransferBytesPerSecond, stun: defaultTransferSTUN}
 	if h.maxFile <= 0 {
 		h.maxFile = 10 << 30
 	}

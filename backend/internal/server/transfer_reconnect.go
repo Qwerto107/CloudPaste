@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -54,12 +55,17 @@ func (h *transferHub) disconnectMemberLocked(member *transferMember, socket *web
 }
 
 func (h *transferHub) pairedLocked(room *transferRoom) {
+	servers, first := []string{}, ""
+	if h.stun != "" {
+		servers = strings.Split(h.stun, "\n")
+		first = servers[0]
+	}
 	h.broadcastLocked(room, map[string]any{
 		"type": "paired", "names": []string{room.members[0].name, room.members[1].name},
 		"ips":        []string{room.members[0].ip, room.members[1].ip},
 		"devices":    []*transferDevice{room.members[0].device, room.members[1].device},
 		"locations":  []*ipLocation{room.members[0].location, room.members[1].location},
-		"relay_only": room.relayOnly, "stun": h.stun, "audit_enabled": h.app.audit.allows("transfer"),
+		"relay_only": room.relayOnly, "stun": first, "stun_servers": servers, "audit_enabled": h.app.audit.allows("transfer"),
 		"generation": room.generation,
 	})
 }

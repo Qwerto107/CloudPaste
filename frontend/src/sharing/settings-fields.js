@@ -123,9 +123,12 @@ export const fields = {
     help: "关闭后不能创建或加入新连接，已有连接仍可继续传输。",
   },
   transfer_stun: {
-    label: "STUN 服务器",
-    help: "用于跨网络点对点连接，留空停用。保存后新配对生效，已有连接不受影响；浏览器会向此服务器查询网络地址。",
-    placeholder: "stun:主机:3478",
+    label: "STUN 服务器列表",
+    help: "每行一个，最多 5 个，留空停用。浏览器自动收集和验证候选链路，不保证直连成功；新配对生效，用户可在本机临时覆盖。",
+    placeholder:
+      "stun:stun.example.com:3478\nstun:stun-backup.example.com:3478",
+    multiline: true,
+    rows: 3,
   },
   transfer_debug_logs: {
     label: "点对点调试日志",

@@ -7,6 +7,40 @@ import (
 	"time"
 )
 
+const defaultTransferSTUN = "stun:stun.miwifi.com:3478\n" +
+	"stun:stun.hitv.com:3478\n" +
+	"stun:stun.cloudflare.com:3478\n" +
+	"stun:stun.l.google.com:19302\n" +
+	"stun:stun.nextcloud.com:3478"
+
+// 地址列表保持原有文本设置兼容性；限制数量，避免浏览器同时向过多服务器探测。
+func normalizeTransferSTUN(value string) (string, bool) {
+	if len(value) > 1284 {
+		return "", false
+	}
+	servers := []string{}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !validTransferSTUN(line) {
+			return "", false
+		}
+		key := strings.ToLower(line)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		servers = append(servers, line)
+		if len(servers) > 5 {
+			return "", false
+		}
+	}
+	return strings.Join(servers, "\n"), true
+}
+
 func validTransferSTUN(value string) bool {
 	if value == "" {
 		return true
@@ -84,8 +118,8 @@ func (a *App) applyTransferSettings(values map[string]string) {
 		}
 		if key == "transfer_stun" {
 			// 仅在新配对消息中下发，保存设置不触发已有连接重新协商。
-			if validTransferSTUN(raw) {
-				h.stun = raw
+			if normalized, valid := normalizeTransferSTUN(raw); valid {
+				h.stun = normalized
 			}
 			continue
 		}

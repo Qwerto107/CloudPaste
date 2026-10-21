@@ -2,6 +2,7 @@ import { FolderDirectTransfers } from "./transfer-folder-direct.js";
 import { apiURL, backendBase, request } from "./api.js";
 import { chatImageLimit, validateChatImage } from "./transfer-images.js";
 import { collectTransferDevice } from "./transfer-device.js";
+import { parseSTUNServers } from "./transfer-stun.js";
 import {
   canSaveFolders,
   folderMaxConcurrency,
@@ -191,8 +192,11 @@ export class TransferClient {
     if (message.mode === "p2p") void this.logConnectionDetails();
   }
 
-  async open(kind, fields) {
+  async open(kind, fields, stunOverride = null) {
     if (this.closed) return;
+    // 临时配置只保存在本机页面，不上报或改变对方的 ICE 服务器。
+    this.stunOverride =
+      stunOverride === null ? null : parseSTUNServers(stunOverride);
     this.debug("申请连接", { action: kind });
     const device = await collectTransferDevice();
     if (this.closed) return;
@@ -1271,10 +1275,20 @@ export class TransferClient {
       });
       return;
     }
-    this.debug("开始 WebRTC 协商", { stunEnabled: Boolean(message.stun) });
+    const stunServers =
+      this.stunOverride ??
+      parseSTUNServers(
+        message.stun_servers
+          ? message.stun_servers.join("\n")
+          : message.stun || "",
+      );
+    this.debug("开始 WebRTC 协商", {
+      stunEnabled: stunServers.length > 0,
+      stunServerCount: stunServers.length,
+    });
     const generation = this.peerGeneration;
     const peer = new RTCPeerConnection({
-      iceServers: message.stun ? [{ urls: message.stun }] : [],
+      iceServers: stunServers.map((url) => ({ urls: url })),
     });
     this.peer = peer;
     this.peerStartedAt = performance.now();
@@ -1708,6 +1722,7 @@ export class TransferClient {
     this.debug("关闭连接并释放资源");
     this.closed = true;
     this.resumeToken = null;
+    this.stunOverride = null;
     for (const timer of [
       this.reconnectTimer,
       this.connectTimer,

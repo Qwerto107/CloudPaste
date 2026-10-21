@@ -52,7 +52,7 @@ var defaultSettings = []setting{
 	{"transfer_max_relays", "64", "number", 3, 0, "中继总并发请求数（0 表示不限，分段下载各占一路）"},
 	{"transfer_folder_concurrency", "16", "number", 3, 0, "文件夹默认并发数"},
 	{"transfer_max_file_mb", "10240", "number", 3, 0, "互传单文件上限（MiB，最大 10 GiB）"},
-	{"transfer_stun", "", "text", 3, 0, "STUN 服务器（留空停用，仅用于新配对）"},
+	{"transfer_stun", defaultTransferSTUN, "textarea", 3, 0, "STUN 服务器（每行一个，最多 5 个，留空停用）"},
 	{"transfer_debug_logs", "false", "bool", 3, 0, "点对点调试日志（浏览器控制台，默认关闭）"},
 	{"site_title", "CloudPaste", "text", 4, 0, "站点标题"},
 	{"site_favicon_url", "", "text", 4, 0, "站点图标 URL"},
@@ -235,10 +235,11 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 			return badRequest("设置值过长")
 		}
 		if key == "transfer_stun" {
-			value = strings.TrimSpace(value)
-			if !validTransferSTUN(value) {
-				return badRequest("STUN 地址必须为 stun:主机:端口，端口范围 1–65535；留空停用")
+			normalized, valid := normalizeTransferSTUN(value)
+			if !valid {
+				return badRequest("STUN 地址每行一个，最多 5 个；格式为 stun:主机:端口，端口范围 1–65535；留空停用")
 			}
+			value = normalized
 		}
 		if definition.Type == "bool" && value != "true" && value != "false" {
 			return badRequest("布尔值必须为 true 或 false")

@@ -120,7 +120,7 @@ test("调试开关控制详细链路日志，包含地址但不记录凭证、�
     client.socket.onopen();
     assert.equal(sent[0].token, "secret-token", "认证流程仍发送票据");
     client.socket.onmessage({
-      data: JSON.stringify({ type: "paired", stun: "stun:secret-host" }),
+      data: JSON.stringify({ type: "paired", stun: "stun:secret-host:3478" }),
     });
     const peer = client.peer;
     peer.oniceconnectionstatechange();

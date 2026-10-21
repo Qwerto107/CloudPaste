@@ -41,6 +41,8 @@ const autoApproveDevice = ref(false);
 const pastingCode = ref(false);
 const pairingCode = ref("");
 const relayOnly = ref(false);
+const stunMode = ref("site");
+const customSTUN = ref("");
 const autoReceive = ref(false);
 const error = ref("");
 const notification = useNotification();
@@ -601,11 +603,25 @@ async function open(kind) {
   try {
     // 每次配对读取最新开关，其他标签页保存的设置也能用于新连接。
     await loadSettings(true);
-    await client.open(kind, {
-      name: name.value,
-      relay_only: relayOnly.value,
-      ...(kind === "join" ? { code: normalizePairingCode(code.value) } : {}),
-    });
+    if (
+      !relayOnly.value &&
+      stunMode.value === "custom" &&
+      !customSTUN.value.trim()
+    )
+      throw new Error("请填写自定义 STUN 地址，或选择不使用 STUN");
+    await client.open(
+      kind,
+      {
+        name: name.value,
+        relay_only: relayOnly.value,
+        ...(kind === "join" ? { code: normalizePairingCode(code.value) } : {}),
+      },
+      relayOnly.value || stunMode.value === "disabled"
+        ? ""
+        : stunMode.value === "custom"
+          ? customSTUN.value
+          : null,
+    );
   } catch (reason) {
     client.debug("连接申请失败", { error: reason.name }, true);
     error.value = reason.message;
@@ -990,6 +1006,50 @@ onBeforeUnmount(() => {
           v-model="relayOnly"
         />仅使用中继，不向对方交换直连网络地址</label
       >
+      <details class="transfer-connection-settings">
+        <summary>高级连接设置</summary>
+        <div class="transfer-connection-fields">
+          <label
+            >STUN 服务器
+            <UiSelect
+              v-model="stunMode"
+              aria-label="STUN 模式"
+              :disabled="busy || relayOnly"
+            >
+              <option value="site">使用站点配置（推荐）</option>
+              <option value="custom">自定义服务器</option>
+              <option value="disabled">不使用 STUN</option>
+            </UiSelect>
+          </label>
+          <template v-if="stunMode === 'custom'">
+            <label
+              >自定义 STUN 地址
+              <UiInput
+                v-model="customSTUN"
+                type="textarea"
+                aria-label="自定义 STUN 地址"
+                :rows="3"
+                maxlength="1284"
+                :disabled="busy || relayOnly"
+                spellcheck="false"
+                placeholder="stun:stun.example.com:3478"
+                aria-describedby="transfer-stun-help"
+              />
+            </label>
+          </template>
+          <p id="transfer-stun-help" class="muted small">
+            {{
+              relayOnly
+                ? "仅使用中继时不查询 STUN 服务器。"
+                : stunMode === "custom"
+                  ? "每行一个，最多 5 个。仅用于本机本次配对，浏览器会向这些服务器查询网络地址。"
+                  : stunMode === "disabled"
+                    ? "不查询 STUN 服务器，仍可尝试直连；无法直连时可使用中继。"
+                    : "使用站点提供的服务器，由浏览器收集候选地址并验证可用链路。"
+            }}
+          </p>
+        </div>
+      </details>
       <div class="transfer-entry-grid">
         <div class="transfer-entry-card">
           <h2>创建连接</h2>
@@ -2084,6 +2144,30 @@ onBeforeUnmount(() => {
   font-size: 12px;
   line-height: 1.7;
   margin-top: 18px;
+}
+.transfer-connection-settings {
+  margin: 16px 0 20px;
+  min-width: 0;
+}
+.transfer-connection-settings > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.transfer-connection-settings > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.transfer-connection-fields {
+  display: grid;
+  gap: 12px;
+  max-width: 560px;
+  padding-top: 16px;
+}
+.transfer-connection-fields > label,
+.transfer-connection-fields > p {
+  margin: 0;
 }
 .transfer-waiting {
   text-align: center;

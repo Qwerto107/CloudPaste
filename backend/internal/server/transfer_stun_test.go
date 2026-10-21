@@ -12,8 +12,11 @@ import (
 func TestTransferSTUNSettings(t *testing.T) {
 	f := newFixture(t)
 	const key = "transfer_stun"
-	if f.app.transferSettingValues()[key] != "" {
-		t.Fatal("STUN must default to disabled")
+	if f.app.transferSettingValues()[key] != defaultTransferSTUN {
+		t.Fatal("default STUN pool missing")
+	}
+	if normalized, valid := normalizeTransferSTUN(defaultTransferSTUN); !valid || normalized != defaultTransferSTUN || len(strings.Split(normalized, "\n")) != 5 {
+		t.Fatal("default STUN pool is invalid")
 	}
 	userKey, _ := f.key(t, "transfer-user", "/", TextShare|FileShare)
 	f.request(t, "PUT", "/api/admin/settings/group/3", userKey, map[string]any{key: "stun:example.com:3478"}, nil, 403)
@@ -74,7 +77,13 @@ func TestTransferSTUNSettings(t *testing.T) {
 			select {
 			case raw := <-member.out:
 				message := raw.(map[string]any)
-				if message["type"] != "paired" || message["stun"] != want {
+				first, servers := "", []string{}
+				if want != "" {
+					servers = strings.Split(want, "\n")
+					first = servers[0]
+				}
+				actual := message["stun_servers"].([]string)
+				if message["type"] != "paired" || message["stun"] != first || strings.Join(actual, "\n") != strings.Join(servers, "\n") {
 					t.Fatal("pairing used wrong STUN address", message)
 				}
 			default:
@@ -84,7 +93,7 @@ func TestTransferSTUNSettings(t *testing.T) {
 		return room
 	}
 	room := pair(first)
-	const second = "stun:second.example.com:3478"
+	const second = "stun:second.example.com:3478\nstun:third.example.com:3478"
 	f.request(t, "PUT", "/api/admin/settings/group/3", f.admin, map[string]any{key: second}, nil, 200)
 	for _, member := range room.members {
 		if !member.connected || len(member.out) != 0 {
@@ -109,6 +118,46 @@ func TestTransferSTUNSettings(t *testing.T) {
 	if err := restarted.restoreTransferSettings(); err != nil || restarted.transferSettingValues()[key] != "" {
 		t.Fatal("disabled STUN setting was not persisted", err)
 	}
+	if err := restarted.Close(); err != nil {
+		t.Fatal(err)
+	}
+	disabled, err := New(restarted.cfg, restarted.logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = disabled.Close() })
+	if disabled.transferSettingValues()[key] != "" {
+		t.Fatal("restart replaced explicitly disabled STUN with defaults")
+	}
+}
+
+func TestTransferSTUNServerPool(t *testing.T) {
+	const want = "stun:first.example.com:3478\nstun:[2001:db8::1]:3478"
+	if actual, valid := normalizeTransferSTUN(" \r\n stun:first.example.com:3478 \r\nSTUN:first.example.com:3478"); valid || actual != "" {
+		t.Fatal("invalid scheme accepted")
+	}
+	actual, valid := normalizeTransferSTUN(" \r\n stun:first.example.com:3478 \r\nstun:FIRST.example.com:3478\n\n stun:[2001:db8::1]:3478 \n")
+	if !valid || actual != want {
+		t.Fatal("server pool was not normalized", actual)
+	}
+	servers := []string{}
+	for i := 0; i < 5; i++ {
+		servers = append(servers, "stun:server"+string(rune('a'+i))+".example.com:3478")
+	}
+	if _, valid := normalizeTransferSTUN(strings.Join(servers, "\n")); !valid {
+		t.Fatal("five servers rejected")
+	}
+	for _, invalid := range []string{strings.Join(append(servers, "stun:six.example.com:3478"), "\n"), want + "\nturn:example.com:3478", want + "\nstun:user@example.com:3478", strings.Repeat(" ", 1285)} {
+		if _, valid := normalizeTransferSTUN(invalid); valid {
+			t.Fatal("unsafe pool accepted", invalid)
+		}
+	}
+	f := newFixture(t)
+	f.request(t, "PUT", "/api/admin/settings/group/3", f.admin, map[string]any{"transfer_stun": "\n" + want + "\n"}, nil, 200)
+	f.request(t, "PUT", "/api/admin/settings/group/3", f.admin, map[string]any{"transfer_stun": want + "\nturn:example.com:3478"}, nil, 400)
+	if f.app.transferSettingValues()["transfer_stun"] != want {
+		t.Fatal("invalid pool changed stored configuration")
+	}
 }
 
 func TestTransferSTUNEnvironmentRemoved(t *testing.T) {
@@ -123,8 +172,8 @@ func TestTransferSTUNEnvironmentRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, item := range items {
-		if item.Key == "transfer_stun" && item.Value != "" {
-			t.Fatal("removed environment variable supplied a STUN address")
+		if item.Key == "transfer_stun" && item.Value != defaultTransferSTUN {
+			t.Fatal("removed environment variable replaced default STUN pool")
 		}
 	}
 }
