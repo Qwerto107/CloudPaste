@@ -1,7 +1,7 @@
 {
   "name": "cloudpaste-frontend",
   "private": true,
-  "version": "0.8.8",
+  "version": "0.8.9",
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {
@@ -11,7 +11,7 @@
     "test:go-upload": "node --test tests/sharing-client.test.mjs",
     "test:security": "node --test tests/sharing-security.test.mjs tests/sharing-images.test.mjs tests/share-text.test.mjs",
     "test:e2e": "node tests/browser-smoke.mjs",
-    "test:transfer": "node --test tests/transfer-flow.test.mjs tests/transfer-code.test.mjs tests/transfer-device.test.mjs tests/transfer-folders.test.mjs tests/transfer-folder-direct.test.mjs && node tests/transfer-smoke.mjs"
+    "test:transfer": "node --test tests/transfer-flow.test.mjs tests/transfer-code.test.mjs tests/transfer-device.test.mjs tests/transfer-folders.test.mjs tests/transfer-folder-direct.test.mjs tests/transfer-reconnect.test.mjs && node tests/transfer-smoke.mjs"
   },
   "dependencies": {
     "@codemirror/view": "6.43.14",
