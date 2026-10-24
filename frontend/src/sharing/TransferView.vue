@@ -848,6 +848,13 @@ async function copyCode() {
     error.value = "复制失败，请手动选择配对码复制";
   }
 }
+async function clearCode() {
+  if (busy.value || pastingCode.value || !canJoin.value) return;
+  code.value = "";
+  // 等五个输入框同步清空后，再将焦点移回第一格，清空不会触发自动加入。
+  await nextTick();
+  pairCodeInput.value?.focus();
+}
 async function pasteCode() {
   if (busy.value || pastingCode.value) return;
   const previous = code.value;
@@ -1099,13 +1106,22 @@ onBeforeUnmount(() => {
                 :disabled="busy || !canJoin"
                 @complete="open('join')"
               />
-              <UiButton
-                type="button"
-                aria-label="粘贴配对码"
-                :disabled="busy || !canJoin || pastingCode"
-                @click="pasteCode"
-                >{{ pastingCode ? "读取中" : "粘贴" }}</UiButton
-              >
+              <div class="transfer-code-actions">
+                <UiButton
+                  type="button"
+                  aria-label="粘贴配对码"
+                  :disabled="busy || !canJoin || pastingCode"
+                  @click="pasteCode"
+                  >{{ pastingCode ? "读取中" : "粘贴" }}</UiButton
+                >
+                <UiButton
+                  type="button"
+                  aria-label="清空配对码"
+                  :disabled="busy || !canJoin || pastingCode || !code"
+                  @click="clearCode"
+                  >清空</UiButton
+                >
+              </div>
             </div>
           </div>
           <UiButton
@@ -2133,16 +2149,22 @@ onBeforeUnmount(() => {
 }
 .transfer-code-input {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 .transfer-code-input .pair-code {
-  flex: 1;
+  flex: 1 1 220px;
   min-width: 0;
 }
 .transfer-code-input .ui-button {
   flex-shrink: 0;
+}
+.transfer-code-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }
 .transfer-note {
   font-size: 12px;
