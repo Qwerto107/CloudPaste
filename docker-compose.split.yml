@@ -2,7 +2,7 @@ name: cloudpaste
 
 services:
   backend:
-    image: ghcr.io/qwerto107/cloudpaste-backend:0.8.11
+    image: ghcr.io/qwerto107/cloudpaste-backend:0.8.12
     # 应用参数统一从文件读取，下面仅覆盖容器路径、代理与启动约束。
     env_file: .env
     environment:
@@ -40,7 +40,7 @@ services:
         max-file: "2"
 
   frontend:
-    image: ghcr.io/qwerto107/cloudpaste-frontend:0.8.11
+    image: ghcr.io/qwerto107/cloudpaste-frontend:0.8.12
     ports:
       - "127.0.0.1:8081:8080"
     depends_on:
