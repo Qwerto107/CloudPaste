@@ -1184,7 +1184,7 @@ onBeforeUnmount(() => {
           </div>
         </dl>
         <p class="muted">请求加入，请确认这是你要连接的设备。</p>
-        <div class="actions">
+        <div class="transfer-confirm-actions">
           <UiButton class="primary" @click="send({ type: 'confirm' })"
             >确认连接</UiButton
           ><UiButton class="danger" @click="send({ type: 'reject' })"
@@ -2219,6 +2219,15 @@ onBeforeUnmount(() => {
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 12px;
+}
+/* 确认与拒绝共用独立布局，不受通用 actions 仅拉伸主按钮的规则影响。 */
+.transfer-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 1.2rem;
 }
 .transfer-peer-bar,
 .transfer-file-title,
