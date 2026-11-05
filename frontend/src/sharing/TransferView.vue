@@ -37,7 +37,21 @@ import {
 const name = ref(`我的设备-${transferID().slice(0, 6)}`);
 const code = ref("");
 const pairCodeInput = ref(null);
+const autoApproveStorageKey = "cloudpaste-transfer-auto-approve";
 const autoApproveDevice = ref(false);
+try {
+  autoApproveDevice.value =
+    localStorage.getItem(autoApproveStorageKey) === "true";
+} catch {
+  // 浏览器禁用存储时保持默认关闭，仍允许在当前页面手动切换。
+}
+watch(autoApproveDevice, (enabled) => {
+  try {
+    localStorage.setItem(autoApproveStorageKey, String(enabled));
+  } catch {
+    // 存储失败不影响本次连接的开关。
+  }
+});
 const pastingCode = ref(false);
 const pairingCode = ref("");
 const relayOnly = ref(false);

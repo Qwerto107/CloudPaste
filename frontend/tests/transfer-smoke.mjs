@@ -123,6 +123,19 @@ try {
       .isChecked(),
     false,
   );
+  const approveDevice = a.getByRole("checkbox", {
+    name: "自动同意设备加入",
+    exact: true,
+  });
+  await approveDevice.check();
+  await a.reload();
+  assert.equal(await approveDevice.isChecked(), true);
+  await approveDevice.uncheck();
+  await a.reload();
+  assert.equal(await approveDevice.isChecked(), false);
+  await a
+    .getByRole("textbox", { name: "设备名称", exact: true })
+    .fill("发送设备");
   await a
     .getByRole("checkbox", {
       name: "仅使用中继，不向对方交换直连网络地址",
