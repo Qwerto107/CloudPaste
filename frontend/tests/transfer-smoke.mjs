@@ -827,10 +827,73 @@ try {
     path: resolve(root, "backend/bin/transfer-screenshots/compact.png"),
     fullPage: true,
   });
+  const history = await Promise.all(
+    [a, b].map((page) =>
+      page.evaluate(() => ({
+        messages: document.querySelectorAll(".transfer-message").length,
+        files: document.querySelectorAll(".transfer-file").length,
+        images: [...document.querySelectorAll(".transfer-chat-image")].map(
+          (image) => image.src,
+        ),
+        peerDetails: [
+          ...document.querySelectorAll(".transfer-peer-details dd"),
+        ].map((field) => field.textContent),
+      })),
+    ),
+  );
   await b.getByRole("button", { name: "断开连接", exact: true }).click();
-  await a
-    .getByText("连接已结束。未完成的文件需要重新发送。", { exact: true })
-    .waitFor();
+  await a.getByRole("button", { name: "重新连接", exact: true }).waitFor();
+  // 两端退出后仍可查看已有内容，但不能继续发送或使用旧下载链接。
+  for (const [index, page] of [a, b].entries()) {
+    await page.getByRole("button", { name: "重新连接", exact: true }).waitFor();
+    assert.equal(
+      await page.locator(".transfer-message").count(),
+      history[index].messages,
+    );
+    assert.equal(
+      await page.locator(".transfer-file").count(),
+      history[index].files,
+    );
+    assert.deepEqual(
+      await page
+        .locator(".transfer-chat-image")
+        .evaluateAll((images) => images.map((image) => image.src)),
+      history[index].images,
+    );
+    assert.deepEqual(
+      await page.locator(".transfer-peer-details dd").allTextContents(),
+      history[index].peerDetails,
+    );
+    assert.equal(await page.locator(".transfer-peer-disconnected").count(), 1);
+    assert.equal(
+      await page.getByRole("button", { name: "断开连接", exact: true }).count(),
+      0,
+    );
+    assert.equal(
+      await page
+        .getByRole("button", { name: "重新连接", exact: true })
+        .evaluate((button) => button.classList.contains("primary")),
+      true,
+    );
+    assert.equal(
+      await page.locator(".transfer-workspace").getAttribute("inert"),
+      null,
+    );
+    assert.equal(
+      await page
+        .getByRole("textbox", { name: "发送文字", exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(await page.locator(".transfer-tool-link").count(), 0);
+    await page
+      .getByRole("button", { name: /^查看图片 / })
+      .first()
+      .click();
+    await page.getByRole("dialog", { name: "图片预览", exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "重新连接", exact: true }).click();
+  }
 
   // 只替换系统保存对话框；真实 WebRTC、背压确认与浏览器文件写入保持不变。
   // OPFS 是自动化测试的磁盘落点，生产界面仍使用用户选择的普通文件。
@@ -902,6 +965,8 @@ try {
     .check();
   await a.getByRole("button", { name: "创建配对码", exact: true }).click();
   await a.getByRole("heading", { name: "等待另一台设备" }).waitFor();
+  assert.equal(await a.locator(".transfer-message").count(), 0);
+  assert.equal(await a.locator(".transfer-file").count(), 0);
   const directCode = (await a.locator(".transfer-code").textContent())
     .replaceAll(" ", "")
     .trim();
@@ -1049,10 +1114,21 @@ try {
     0,
     "direct transfer unexpectedly used HTTP relay",
   );
+  // 结束真实点对点连接后，显示最后一次地址快照，不再标记为可用链路。
+  const peerDetails = await Promise.all(
+    [a, b].map((page) =>
+      page.locator(".transfer-peer-details dd").allTextContents(),
+    ),
+  );
   await b.getByRole("button", { name: "断开连接", exact: true }).click();
-  await a
-    .getByText("连接已结束。未完成的文件需要重新发送。", { exact: true })
-    .waitFor();
+  await a.getByRole("button", { name: "重新连接", exact: true }).waitFor();
+  for (const [index, page] of [a, b].entries()) {
+    assert.deepEqual(
+      await page.locator(".transfer-peer-details dd").allTextContents(),
+      peerDetails[index],
+    );
+    await page.getByText("最后点对点地址", { exact: true }).waitFor();
+  }
   assert.deepEqual(errors, []);
   await a.goto(base + "/admin/settings/transfer");
   await a.getByLabel("中继总速率上限", { exact: true }).fill("0");

@@ -86,6 +86,7 @@ const peerIPs = ref([]);
 const peerDevices = ref([]);
 const peerLocations = ref([]);
 const peerEndpoint = ref(null);
+const lastPeerEndpoint = ref(null);
 const peerDetailsOpen = ref(true);
 const peerRelayOnly = ref(false);
 const messages = ref([]);
@@ -132,10 +133,19 @@ const connected = computed(() => status.value === "paired");
 const hasPair = computed(() =>
   ["paired", "reconnecting", "peer-offline"].includes(status.value),
 );
+const hasHistory = computed(
+  () =>
+    status.value === "closed" &&
+    (names.value.length === 2 ||
+      messages.value.length > 0 ||
+      files.value.length > 0 ||
+      folders.value.length > 0),
+);
 const reconnectDeadline = ref("");
 const canDirect = computed(() => direct.value && canSaveDirectly());
 const peerAddress = computed(() => {
-  if (!direct.value) return peerRelayOnly.value ? "已禁用" : "未建立";
+  if (!direct.value && !(hasHistory.value && peerEndpoint.value))
+    return peerRelayOnly.value ? "已禁用" : "未建立";
   const endpoint = peerEndpoint.value;
   if (!endpoint) return "正在获取链路信息";
   const port =
@@ -205,6 +215,15 @@ const fileGroups = computed(() => {
   ].filter((group) => group.files.length || group.folders.length);
 });
 let client;
+
+function resetPeerDetails() {
+  names.value = [];
+  peerIPs.value = [];
+  peerDevices.value = [];
+  peerLocations.value = [];
+  peerEndpoint.value = null;
+  lastPeerEndpoint.value = null;
+}
 
 function resetPreview() {
   previewScale.value = 1;
@@ -379,11 +398,7 @@ function event(message) {
     joiningIP.value = "";
     joiningDevice.value = null;
     joiningLocation.value = null;
-    names.value = [];
-    peerIPs.value = [];
-    peerDevices.value = [];
-    peerLocations.value = [];
-    peerEndpoint.value = null;
+    resetPeerDetails();
     pairingCode.value = message.code || "";
     myMember.value = message.member;
     maxFile.value = message.max_file_size;
@@ -422,7 +437,11 @@ function event(message) {
     // 重建、降级时立即清除旧地址，避免把上一次链路当作当前链路。
     peerEndpoint.value = null;
   } else if (message.type === "connection-info") {
-    if (direct.value) peerEndpoint.value = message.remote;
+    if (direct.value) {
+      peerEndpoint.value = message.remote;
+      // 只保留当前配对的最后一次链路快照，断开后明确作为历史信息展示。
+      lastPeerEndpoint.value = message.remote;
+    }
   } else if (message.type === "locations") {
     if (Array.isArray(message.locations))
       peerLocations.value = message.locations;
@@ -560,7 +579,10 @@ function event(message) {
       if (["active", "offered"].includes(folder.state))
         folder.state = "cancelled";
     autoReceive.value = false;
-    clearImages();
+    // 断开只释放待发送内容，已接收的预览随历史保留；新配对或离开页面时再清理。
+    while (pastedImages.value.length) removePasted(0);
+    selected.value = [];
+    text.value = "";
     status.value = "closed";
     direct.value = false;
     pairingCode.value = "";
@@ -568,10 +590,7 @@ function event(message) {
     joiningIP.value = "";
     joiningDevice.value = null;
     joiningLocation.value = null;
-    peerIPs.value = [];
-    peerDevices.value = [];
-    peerLocations.value = [];
-    peerEndpoint.value = null;
+    peerEndpoint.value = lastPeerEndpoint.value;
     for (const file of files.value) {
       file.url = "";
       if (["active", "offered"].includes(file.state)) file.state = "cancelled";
@@ -594,6 +613,7 @@ async function open(kind) {
   offeredCount.value = 0;
   selected.value = [];
   messages.value = [];
+  resetPeerDetails();
   followMessages = true;
   pairingCode.value = "";
   client = new TransferClient(
@@ -987,7 +1007,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="transfer-page">
-    <div v-if="!hasPair" class="page-heading">
+    <div v-if="!hasPair && !hasHistory" class="page-heading">
       <div>
         <p class="eyebrow">文字与文件，即时互传</p>
         <h1>设备互传</h1>
@@ -995,7 +1015,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <section
-      v-if="['idle', 'closed'].includes(status)"
+      v-if="['idle', 'closed'].includes(status) && !hasHistory"
       class="panel transfer-entry"
     >
       <p v-if="status === 'closed'" role="status">
@@ -1137,7 +1157,7 @@ onBeforeUnmount(() => {
       </p>
     </section>
 
-    <section v-else-if="!hasPair" class="panel transfer-waiting">
+    <section v-else-if="!hasPair && !hasHistory" class="panel transfer-waiting">
       <h2>
         {{
           status === "connecting"
@@ -1195,8 +1215,11 @@ onBeforeUnmount(() => {
       <UiButton class="quiet" @click="leave">取消连接</UiButton>
     </section>
 
-    <template v-else>
-      <div class="panel transfer-peer">
+    <template v-if="hasPair || hasHistory">
+      <div
+        class="panel transfer-peer"
+        :class="{ 'transfer-peer-disconnected': hasHistory }"
+      >
         <div class="transfer-peer-bar">
           <div class="transfer-peer-info">
             <div class="transfer-peer-device">
@@ -1217,18 +1240,24 @@ onBeforeUnmount(() => {
               />
               <div>
                 <strong
-                  >{{ connected ? "已连接" : "等待恢复" }}：{{
-                    names[1 - myMember]
-                  }}</strong
+                  >{{
+                    hasHistory
+                      ? "连接已断开"
+                      : connected
+                        ? "已连接"
+                        : "等待恢复"
+                  }}：{{ names[1 - myMember] }}</strong
                 >
-                <span class="transfer-peer-state">{{
-                  !connected
-                    ? status === "reconnecting"
-                      ? "连接中断 · 正在重新连接"
-                      : "对方暂时离线 · 等待重新连接"
-                    : direct
-                      ? "已授权 · 点对点可用 · 中继可用"
-                      : "已授权 · 中继可用"
+                <span class="transfer-peer-state" role="status">{{
+                  hasHistory
+                    ? "需重新配对后连接"
+                    : !connected
+                      ? status === "reconnecting"
+                        ? "连接中断 · 正在重新连接"
+                        : "对方暂时离线 · 等待重新连接"
+                      : direct
+                        ? "已授权 · 点对点可用 · 中继可用"
+                        : "已授权 · 中继可用"
                 }}</span>
               </div>
             </div>
@@ -1244,6 +1273,16 @@ onBeforeUnmount(() => {
               >连接详情</UiButton
             >
             <UiButton
+              v-if="hasHistory"
+              type="button"
+              class="primary"
+              size="small"
+              icon="retry"
+              @click="status = 'idle'"
+              >重新连接</UiButton
+            >
+            <UiButton
+              v-else
               type="button"
               :class="connected ? 'quiet' : 'danger'"
               size="small"
@@ -1252,7 +1291,10 @@ onBeforeUnmount(() => {
             >
           </div>
         </div>
-        <p v-if="!connected" class="muted" role="status">
+        <p v-if="hasHistory" class="muted small">
+          历史记录仅保留在当前页面；重新配对、刷新或离开页面时清空。未完成的文件需重新发送。
+        </p>
+        <p v-else-if="!connected" class="muted" role="status">
           配对保留 5 分钟，请在
           {{ reconnectDeadline }} 前返回前台恢复连接。中断的文件需重新发送。
         </p>
@@ -1274,12 +1316,12 @@ onBeforeUnmount(() => {
             <dd>{{ peerDevices[1 - myMember]?.summary || "未提供" }}</dd>
           </div>
           <div>
-            <dt>点对点地址</dt>
+            <dt>{{ hasHistory ? "最后点对点地址" : "点对点地址" }}</dt>
             <dd>{{ peerAddress }}</dd>
           </div>
         </dl>
       </div>
-      <div class="transfer-workspace" :inert="!connected">
+      <div class="transfer-workspace" :inert="hasPair && !connected">
         <section class="panel transfer-chat">
           <div class="transfer-section-heading">
             <h2>消息</h2>
@@ -1295,7 +1337,8 @@ onBeforeUnmount(() => {
           >
             <div v-if="!messages.length" class="transfer-chat-empty muted">
               <Icon name="message" />
-              <p>还没有消息<br />发送文字或粘贴图片开始对话</p>
+              <p v-if="hasHistory">本次连接没有消息。</p>
+              <p v-else>还没有消息<br />发送文字或粘贴图片开始对话</p>
             </div>
             <div
               v-for="message in messages"
@@ -1380,6 +1423,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <form
+            v-if="!hasHistory"
             class="transfer-message-composer"
             @submit.prevent="sendText"
             @paste="pasteImage"
@@ -1421,7 +1465,7 @@ onBeforeUnmount(() => {
               }}</span></UiButton
             >
           </form>
-          <p class="muted transfer-hint">
+          <p v-if="!hasHistory" class="muted transfer-hint">
             可粘贴 PNG / JPEG 图片，单张最多 4 MiB。
           </p>
         </section>
@@ -1430,6 +1474,7 @@ onBeforeUnmount(() => {
           <div class="transfer-section-heading">
             <h2>文件互传</h2>
             <label
+              v-if="!hasHistory"
               class="check transfer-auto-receive"
               title="仅本次连接有效，按顺序中继下载"
               ><UiCheckbox
@@ -1439,6 +1484,7 @@ onBeforeUnmount(() => {
             >
           </div>
           <div
+            v-if="!hasHistory"
             class="transfer-drop"
             :class="{ dragging: dragDepth > 0 }"
             @dragenter.prevent="dragDepth++"
@@ -1556,7 +1602,11 @@ onBeforeUnmount(() => {
             v-if="!ordinaryFiles.length && !folders.length"
             class="muted transfer-empty"
           >
-            暂无文件，发送或接收后将在这里显示。
+            {{
+              hasHistory
+                ? "本次连接没有文件传输记录。"
+                : "暂无文件，发送或接收后将在这里显示。"
+            }}
           </p>
           <!-- 历史默认展开，原生 details 保留手动收起状态；有效的中继仍属于当前任务。 -->
           <component
@@ -1993,7 +2043,7 @@ onBeforeUnmount(() => {
     <!-- 常用操作就近提示，详细限制集中折叠，避免传输卡片被说明文字占满。 -->
     <details
       class="panel transfer-help"
-      :class="{ 'transfer-help-connected': hasPair }"
+      :class="{ 'transfer-help-connected': hasPair || hasHistory }"
     >
       <summary>使用说明</summary>
       <dl class="transfer-help-content">
@@ -2001,7 +2051,7 @@ onBeforeUnmount(() => {
         <dd>
           图片通过中继发送，支持 PNG / JPEG，单张最多 4 MiB、419
           万像素，长边不超过 4096。最近 4 张图片可预览，保留最近 100
-          条消息，关闭后清除；较早的图片请及时保存，大图可作为文件发送。
+          条消息。断开后可查看历史，重新配对、刷新或离开页面时清除；较早的图片请及时保存，大图可作为文件发送。
         </dd>
         <dt>文件接收</dt>
         <dd>
@@ -2309,6 +2359,21 @@ onBeforeUnmount(() => {
 .transfer-peer-state {
   color: var(--accent);
   font-size: 12px;
+}
+.transfer-peer-disconnected .transfer-peer-device:last-child > .icon {
+  color: var(--error);
+  background: var(--error-bg);
+  border-color: var(--error-bg);
+}
+.transfer-peer-disconnected .transfer-peer-state {
+  color: var(--error);
+}
+.transfer-peer-disconnected .transfer-peer-wire {
+  background: var(--line);
+}
+.transfer-peer-disconnected .transfer-peer-wire::after {
+  background: var(--muted);
+  box-shadow: none;
 }
 .transfer-peer > .transfer-peer-details {
   border-top: 1px solid var(--line);
