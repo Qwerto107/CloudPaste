@@ -1232,7 +1232,10 @@ onBeforeUnmount(() => {
     <template v-if="hasPair || hasHistory">
       <div
         class="panel transfer-peer"
-        :class="{ 'transfer-peer-disconnected': hasHistory }"
+        :class="{
+          'transfer-peer-disconnected': hasHistory,
+          'transfer-peer-waiting': !connected && !hasHistory,
+        }"
       >
         <div class="transfer-peer-bar">
           <div class="transfer-peer-info">
@@ -1243,7 +1246,22 @@ onBeforeUnmount(() => {
                 ><small class="muted">这台设备</small>
               </div>
             </div>
-            <span class="transfer-peer-wire" aria-hidden="true"></span>
+            <span
+              class="transfer-peer-wire"
+              :data-state="
+                hasHistory
+                  ? 'disconnected'
+                  : connected
+                    ? 'connected'
+                    : 'waiting'
+              "
+              aria-hidden="true"
+            >
+              <span class="transfer-peer-wire-line"></span>
+              <span v-if="connected" class="transfer-peer-wire-dot"></span>
+              <Icon v-else :name="hasHistory ? 'unlink' : 'clock'" />
+              <span class="transfer-peer-wire-line"></span>
+            </span>
             <div class="transfer-peer-device">
               <Icon
                 :name="
@@ -2172,6 +2190,7 @@ onBeforeUnmount(() => {
   --transfer-teal-bg: #e5f5f2;
   --transfer-neutral: #52635b;
   --transfer-neutral-bg: #f0f2f3;
+  --transfer-waiting: #9c5300;
 }
 /* 标签的文字和背景一起切换，暗色界面仍保留足够对比度。 */
 :global(html[data-theme="dark"] .transfer-page) {
@@ -2181,6 +2200,7 @@ onBeforeUnmount(() => {
   --transfer-teal-bg: #203b38;
   --transfer-neutral: #b4c4ba;
   --transfer-neutral-bg: #29322e;
+  --transfer-waiting: #f1b56a;
 }
 .transfer-entry-grid,
 .transfer-workspace {
@@ -2349,26 +2369,37 @@ onBeforeUnmount(() => {
   margin-top: 2px;
 }
 .transfer-peer-wire {
-  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 90px;
-  height: 2px;
+  height: 24px;
   flex-shrink: 0;
+  color: var(--accent);
+}
+.transfer-peer-wire-line {
+  flex: 1;
+  height: 2px;
   background: repeating-linear-gradient(
     90deg,
-    var(--accent) 0 6px,
+    currentColor 0 6px,
     transparent 6px 11px
   );
 }
-.transfer-peer-wire::after {
-  content: "";
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  top: -4px;
-  left: calc(50% - 5px);
+.transfer-peer-wire-dot {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 5px var(--soft);
+  background: currentColor;
+}
+.transfer-peer-wire > .icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.transfer-peer-waiting .transfer-peer-wire,
+.transfer-peer-waiting .transfer-peer-state {
+  color: var(--transfer-waiting);
 }
 .transfer-peer-state {
   color: var(--accent);
@@ -2383,11 +2414,11 @@ onBeforeUnmount(() => {
   color: var(--error);
 }
 .transfer-peer-disconnected .transfer-peer-wire {
-  background: var(--line);
+  gap: 10px;
+  color: var(--error);
 }
-.transfer-peer-disconnected .transfer-peer-wire::after {
+.transfer-peer-disconnected .transfer-peer-wire-line {
   background: var(--muted);
-  box-shadow: none;
 }
 .transfer-peer > .transfer-peer-details {
   border-top: 1px solid var(--line);
