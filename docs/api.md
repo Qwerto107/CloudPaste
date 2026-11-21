@@ -237,7 +237,11 @@ CloudPaste uses the IP2Location LITE database for [IP geolocation](https://www.i
 
 页面实际离开时通过 Beacon（失败时尝试 keepalive POST）向 `/api/transfer/leave` 发送 `{"token":"原成员凭证"}`，不使用登录凭据。接口要求同源或允许的 Origin，严格限制请求体及每来源频率，沿用 WebSocket 建连限频值的独立额度；已结束或未知票据均返回 204。刷新、关闭或离开页面时尽力结束配对，切后台不发送退出通知；浏览器未送达通知时仍按意外断线保留 5 分钟。
 
-恢复认证后收到 `ready`（`paired:true`）、`sync`（`files` 为普通文件的终态 `state` 消息，`folders` 为文件夹的终态 `folder-state` 消息）。双方都在线时广播新的 `paired`，其 `generation` 标识连接代次；对端仍离线时返回 `peer-offline`，包含 `reconnect_until` 和 `generation`。该通知也发送给仍在线的另一端。等待恢复时不能发送业务消息；`check` / `checked` 可检查旧连接是否仍可用，仍计入普通消息限频。服务端不补发离线期间的文字或信令，不提供文件断点续传；中断文件需重新发送，生成新任务及票据。
+恢复认证后收到 `ready`（`paired:true`）、`sync`（`files` 为普通文件的终态 `state` 消息，`folders` 为文件夹的终态 `folder-state` 消息，`recalled_texts` 和 `recalled_images` 分别为已撤回的文字和图片编号）。双方都在线时广播新的 `paired`，其 `generation` 标识连接代次；对端仍离线时返回 `peer-offline`，包含 `reconnect_until` 和 `generation`。该通知也发送给仍在线的另一端。等待恢复时不能发送业务消息；`check` / `checked` 可检查旧连接是否仍可用，仍计入普通消息限频。服务端不补发离线期间的文字或信令，不提供文件断点续传；中断文件需重新发送，生成新任务及票据。
+
+服务端广播的 `text` 带有服务端分配的 `id`。双方在线时，发送方可以发 `{"type":"recall-text","id":"消息编号"}` 撤回自己的文字，服务端向两端广播 `{"type":"text-recalled","id":"消息编号"}`。服务端仅在当前房间内存中保留最近 100 条文字的编号、发送者和撤回状态，供权限校验和重连同步。
+
+`paired.image_recall` 为 `true` 时，发送方可以发 `{"type":"recall-image","id":"图片任务编号"}` 撤回自己的聊天图片。服务端取消未完成的图片传输、向两端广播 `image-recalled`，并保留已用任务额度。普通文件不接受此操作。
 
 前端连接示例，`data` 为创建或加入接口返回的 `data` 对象，`backendBase` 为后端 HTTP 地址：
 

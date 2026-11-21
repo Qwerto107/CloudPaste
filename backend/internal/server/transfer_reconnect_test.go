@@ -25,6 +25,68 @@ func reconnectSocket(t *testing.T, server *httptest.Server, token string) transf
 	return peer
 }
 
+func TestTransferTextRecallSharedState(t *testing.T) {
+	_, server, sender, receiver := transferPair(t)
+	sender.send(map[string]any{"type": "text", "text": "要撤回的文字", "id": "client-id"})
+	sent, received := sender.next("text"), receiver.next("text")
+	id, ok := sent["id"].(string)
+	if !ok || id == "" || id == "client-id" || received["id"] != id {
+		t.Fatalf("双方未收到一致的服务端消息编号: %v / %v", sent, received)
+	}
+	recall := map[string]any{"type": "recall-text", "id": id}
+	receiver.send(recall)
+	receiver.next("error")
+	sender.send(recall)
+	for _, peer := range []transferTestPeer{sender, receiver} {
+		event := peer.next("text-recalled")
+		if event["id"] != id || event["text"] != nil {
+			t.Fatalf("撤回通知应只包含对应消息编号: %v", event)
+		}
+	}
+	_ = receiver.conn.CloseNow()
+	sender.next("peer-offline")
+	resumed := reconnectSocket(t, server, receiver.token)
+	resumed.next("ready")
+	state := resumed.next("sync")
+	recalled, ok := state["recalled_texts"].([]any)
+	if !ok || len(recalled) != 1 || recalled[0] != id {
+		t.Fatalf("重连未同步撤回状态: %v", state)
+	}
+}
+
+func TestTransferImageRecallCancelsRelay(t *testing.T) {
+	f, server, sender, receiver := transferPair(t)
+	sender.send(map[string]any{"type": "offer", "client_id": randomID(), "name": "图片.png", "size": 100, "image_type": "image/png"})
+	id := sender.next("file")["id"]
+	receiver.next("file")
+	recall := map[string]any{"type": "recall-image", "id": id}
+	receiver.send(recall)
+	receiver.next("error")
+	receiver.send(map[string]any{"type": "accept", "id": id, "mode": "relay"})
+	download := receiver.next("download")["url"].(string)
+	sender.next("state")
+	receiver.next("state")
+	sender.send(recall)
+	for _, peer := range []transferTestPeer{sender, receiver} {
+		if state := peer.next("state"); state["id"] != id || state["state"] != "cancelled" {
+			t.Fatalf("图片中继未取消: %v", state)
+		}
+		if event := peer.next("image-recalled"); event["id"] != id {
+			t.Fatalf("图片撤回通知不匹配: %v", event)
+		}
+	}
+	f.request(t, "GET", download, "", nil, nil, 404)
+	_ = receiver.conn.CloseNow()
+	sender.next("peer-offline")
+	resumed := reconnectSocket(t, server, receiver.token)
+	resumed.next("ready")
+	state := resumed.next("sync")
+	recalled, ok := state["recalled_images"].([]any)
+	if !ok || len(recalled) != 1 || recalled[0] != id {
+		t.Fatalf("重连未同步图片撤回状态: %v", state)
+	}
+}
+
 func TestTransferReconnectRestoresPairAndRevokesOldDownload(t *testing.T) {
 	f, server, a, b := transferPair(t)
 	id, download := offerRelay(t, a, b, 10)

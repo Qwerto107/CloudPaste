@@ -2,6 +2,26 @@
 export const chatImageLimit = 4 * 1024 * 1024;
 export const chatImageHistory = 4;
 
+export async function chatImageClipboardPNG(blob) {
+  if (blob.type === "image/png") return blob;
+  const image = await createImageBitmap(blob);
+  try {
+    // 剪贴板统一使用 PNG；保存原图仍使用原本的 Blob，不转码。
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    canvas.getContext("2d").drawImage(image, 0, 0);
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob((png) => {
+        if (png) resolve(png);
+        else reject(new Error("无法转换图片"));
+      }, "image/png");
+    });
+  } finally {
+    image.close();
+  }
+}
+
 export async function validateChatImage(file, type = file.type) {
   if (!file.size || file.size > chatImageLimit)
     throw new Error("聊天图片单张不能超过 4 MiB");

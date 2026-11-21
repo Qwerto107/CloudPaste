@@ -104,20 +104,34 @@ func (h *transferHub) pairedLocked(room *transferRoom) {
 		"devices":    []*transferDevice{room.members[0].device, room.members[1].device},
 		"locations":  []*ipLocation{room.members[0].location, room.members[1].location},
 		"relay_only": room.relayOnly, "stun": first, "stun_servers": servers, "audit_enabled": h.app.audit.allows("transfer"),
-		"generation": room.generation,
+		"generation": room.generation, "image_recall": true,
 	})
 }
 
 func (h *transferHub) syncTransferLocked(member *transferMember) {
 	files := []map[string]any{}
+	recalledImages := []string{}
 	for _, file := range member.room.files {
 		if file.folder == nil {
 			files = append(files, map[string]any{"type": "state", "id": file.id, "state": file.state, "mode": file.mode, "bytes": file.bytes})
+		}
+		if file.imageRecalled {
+			recalledImages = append(recalledImages, file.id)
 		}
 	}
 	folders := []map[string]any{}
 	for _, folder := range member.room.folders {
 		folders = append(folders, map[string]any{"type": "folder-state", "id": folder.id, "state": folder.state, "mode": folder.mode, "bytes": folder.bytes, "completed": folder.completed, "concurrency": folder.concurrency})
 	}
-	h.sendLocked(member, map[string]any{"type": "sync", "files": files, "folders": folders})
+	// 断线前可能已撤回但通知尚未送达，重连只补发编号，不重放文字。
+	recalledTexts := []string{}
+	for _, text := range member.room.recentTexts {
+		if text.recalled {
+			recalledTexts = append(recalledTexts, text.id)
+		}
+	}
+	h.sendLocked(member, map[string]any{
+		"type": "sync", "files": files, "folders": folders,
+		"recalled_texts": recalledTexts, "recalled_images": recalledImages,
+	})
 }

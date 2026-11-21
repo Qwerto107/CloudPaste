@@ -24,6 +24,7 @@ const (
 	transferRooms       = 16
 	transferConnections = 40
 	transferFiles       = 32
+	transferTextHistory = 100
 	// 覆盖一批文件夹任务的通知与状态消息，并保留控制消息空间。
 	transferQueue     = 3*transferFolderMaxConcurrency + transferFiles
 	transferFrame     = 16 << 10
@@ -33,7 +34,7 @@ const (
 )
 
 // 房间、成员和文件状态只在 mu 下修改；网络读写从不持有这把锁。
-// 不保存消息历史或文件内容，固定队列满时主动断开慢客户端。
+// 不保存聊天正文或文件内容，固定队列满时主动断开慢客户端。
 type transferHub struct {
 	mu                                    sync.Mutex
 	app                                   *App
@@ -63,10 +64,18 @@ type transferRoom struct {
 	generation        uint64
 	files             map[string]*transferFile
 	folders           map[string]*transferFolder
+	recentTexts       []transferText
 	offeredBytes      int64
 	maxFile           int64
 	ctx               context.Context
 	cancel            context.CancelFunc
+}
+
+// 只保留撤回授权和重连同步所需的元数据，不保留文字内容。
+type transferText struct {
+	id       string
+	sender   int
+	recalled bool
 }
 
 type transferMember struct {
@@ -680,9 +689,38 @@ func (h *transferHub) messageLocked(m *transferMember, msg transferMessage) erro
 		}
 		// 服务端统一记录发送时间，双方看到同一个时间值，不接受客户端伪造时间。
 		sent := time.Now()
-		h.broadcastLocked(r, map[string]any{"type": "text", "text": msg.Text, "from": m.index, "sent_at": sent.UTC().Format(time.RFC3339Nano)})
+		id := randomID()
+		r.recentTexts = append(r.recentTexts, transferText{id: id, sender: m.index})
+		if len(r.recentTexts) > transferTextHistory {
+			r.recentTexts = r.recentTexts[1:]
+		}
+		h.broadcastLocked(r, map[string]any{"type": "text", "id": id, "text": msg.Text, "from": m.index, "sent_at": sent.UTC().Format(time.RFC3339Nano)})
 		// 用户选择保存互传文字正文；仅在日志开启时进入有界异步队列。
 		h.auditTransfer(m, "发送文本", r.id, "success", sent, map[string]any{"text": msg.Text, "bytes": len(msg.Text)})
+	case "recall-text":
+		for i := range r.recentTexts {
+			text := &r.recentTexts[i]
+			if text.id != msg.ID || text.sender != m.index {
+				continue
+			}
+			if !text.recalled {
+				text.recalled = true
+				h.broadcastLocked(r, map[string]any{"type": "text-recalled", "id": text.id})
+			}
+			return nil
+		}
+		return forbidden()
+	case "recall-image":
+		file := r.files[msg.ID]
+		if file == nil || file.imageType == "" || file.sender != m.index {
+			return forbidden()
+		}
+		if !file.imageRecalled {
+			file.imageRecalled = true
+			// 未完成的图片沿用取消流程释放中继和票据；保留任务以维持会话额度。
+			h.finishLocked(file, "cancelled")
+			h.broadcastLocked(r, map[string]any{"type": "image-recalled", "id": file.id})
+		}
 	case "signal":
 		if r.relayOnly || len(msg.Data) > 12000 || !json.Valid(msg.Data) {
 			return badRequest("连接协商信息无效")

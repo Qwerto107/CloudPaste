@@ -383,6 +383,10 @@ export class TransferClient {
     if (message.type === "sync") {
       for (const state of [...message.folders, ...message.files])
         this.handle(state);
+      for (const id of message.recalled_texts || [])
+        this.onEvent({ type: "text-recalled", id });
+      for (const id of message.recalled_images || [])
+        this.handle({ type: "image-recalled", id });
       return;
     }
     if (message.type === "peer-offline") {
@@ -527,6 +531,21 @@ export class TransferClient {
           });
       }
     }
+    if (message.type === "image-recalled") {
+      const file = this.files.get(message.id);
+      if (file?.image_type) {
+        file.recalled = true;
+        // 已下载但还在解码的图片也要停用，避免撤回后重新显示预览。
+        this.imageDownloads.get(file.id)?.abort();
+        this.sources.delete(file.client_id);
+      }
+    }
+    if (
+      message.type === "error" &&
+      message.action === "accept" &&
+      this.files.get(message.id)?.recalled
+    )
+      return;
     if (message.type === "error") {
       this.debug("服务端拒绝互传请求", {}, true);
       this.abortDirect(message.id);

@@ -8,7 +8,7 @@ import {
   ref,
   watch,
 } from "vue";
-import { NModal, useNotification } from "naive-ui";
+import { NDropdown, NModal, useNotification } from "naive-ui";
 import { onBeforeRouteLeave } from "vue-router";
 import { session, canTransfer } from "./session.js";
 import { settings, loadSettings } from "./settings.js";
@@ -21,7 +21,11 @@ import {
   folderFromFiles,
   folderMaxConcurrency,
 } from "./transfer-folders.js";
-import { chatImageHistory, validateChatImage } from "./transfer-images.js";
+import {
+  chatImageClipboardPNG,
+  chatImageHistory,
+  validateChatImage,
+} from "./transfer-images.js";
 import {
   normalizePairingCode,
   validPairingCode,
@@ -105,6 +109,8 @@ const peerDetailsOpen = ref(true);
 const peerRelayOnly = ref(false);
 const messages = ref([]);
 const messageList = ref(null);
+const messageMenu = ref(null);
+const imageRecallSupported = ref(false);
 let followMessages = true;
 const text = ref("");
 const files = ref([]);
@@ -149,6 +155,19 @@ const active = computed(
     folders.value.some((folder) => folder.state === "active"),
 );
 const connected = computed(() => status.value === "paired");
+const messageMenuOptions = computed(() => {
+  const message = messageMenu.value?.message;
+  const options = [];
+  if (message?.file?.previewURL) {
+    options.push({ label: "复制图片", key: "copy-image" });
+    options.push({ label: "保存原图", key: "save-image" });
+  } else if (message?.text) {
+    options.push({ label: "复制文字", key: "copy" });
+  }
+  if (canRecallMessage(message))
+    options.push({ label: "撤回消息", key: "recall" });
+  return options;
+});
 const hasPair = computed(() =>
   ["paired", "reconnecting", "peer-offline"].includes(status.value),
 );
@@ -312,7 +331,10 @@ function releasePreview(file) {
   // 预览被移除或超出保留数量时一起关闭大图，不保留已经释放的图片地址。
   if (previewImage.value?.id === file?.id) previewImage.value = null;
   if (file?.previewURL) URL.revokeObjectURL(file.previewURL);
-  if (file) file.previewURL = "";
+  if (file) {
+    file.previewURL = "";
+    file.previewBlob = null;
+  }
 }
 function appendMessage(message) {
   const sent = new Date(message.sent_at);
@@ -444,6 +466,7 @@ function event(message) {
     reconnectDeadline.value = "";
     if (recovering) notify("success", "连接已恢复，中断的文件请重新发送");
     names.value = message.names;
+    imageRecallSupported.value = message.image_recall === true;
     peerIPs.value = message.ips || [];
     peerDevices.value = message.devices || [];
     peerLocations.value = message.locations || [];
@@ -469,7 +492,27 @@ function event(message) {
     if (Object.hasOwn(message, "joining_location"))
       joiningLocation.value = message.joining_location;
   } else if (message.type === "text") {
-    appendMessage({ ...message, id: transferID() });
+    // 兼容未给文字分配编号的旧后端；旧连接仍可以正常收发和复制。
+    appendMessage({
+      ...message,
+      id: message.id || transferID(),
+      recallable: Boolean(message.id),
+    });
+  } else if (["text-recalled", "image-recalled"].includes(message.type)) {
+    if (message.type === "image-recalled") {
+      const file = files.value.find((file) => file.id === message.id);
+      if (file) {
+        releasePreview(file);
+        files.value = files.value.filter((item) => item !== file);
+      }
+    }
+    const item = messages.value.find((item) => item.id === message.id);
+    if (item) {
+      item.text = "";
+      item.file = null;
+      item.recalled = true;
+      if (messageMenu.value?.message === item) closeMessageMenu();
+    }
   } else if (message.type === "file") {
     if (!message.folder) offeredCount.value++;
     // 双方使用服务端的发送时间；只在收到任务时格式化，进度更新不重复计算。
@@ -502,6 +545,7 @@ function event(message) {
     if (message.type === "image-error") file.imageError = message.message;
     else {
       releasePreview(file);
+      file.previewBlob = message.blob;
       file.previewURL = URL.createObjectURL(message.blob);
       // 浏览器只保留最近四张图片的本地预览和下载数据，文字记录仍保留。
       const previews = files.value.filter((item) => item.previewURL);
@@ -637,6 +681,7 @@ async function open(kind) {
   selected.value = [];
   chatFiles.value = [];
   messages.value = [];
+  closeMessageMenu();
   resetPeerDetails();
   followMessages = true;
   pairingCode.value = "";
@@ -915,6 +960,79 @@ async function copyDownloadLink(file) {
   } catch {
     file.linkExpanded = true;
     error.value = "复制失败，请选择下方下载链接手动复制";
+  }
+}
+function canRecallMessage(message) {
+  return (
+    connected.value &&
+    (message?.file ? imageRecallSupported.value : message?.recallable) &&
+    message.from === myMember.value &&
+    !message.recalled
+  );
+}
+function closeMessageMenu() {
+  messageMenu.value = null;
+}
+function openMessageMenu(event, message) {
+  if (message.recalled) return;
+  if (message.file) {
+    if (!message.file.previewURL && !canRecallMessage(message)) return;
+  } else {
+    if (!message.text) return;
+    const selection = window.getSelection();
+    // 已选中的文字继续使用浏览器的右键菜单，避免把选区替换成整条消息。
+    if (
+      selection?.toString() &&
+      event.currentTarget.contains(selection.anchorNode)
+    ) {
+      closeMessageMenu();
+      return;
+    }
+  }
+  event.preventDefault();
+  messageMenu.value = { message, x: event.clientX, y: event.clientY };
+}
+async function selectMessageAction(action) {
+  const message = messageMenu.value?.message;
+  closeMessageMenu();
+  if (!message || message.recalled) return;
+  if (action === "recall") {
+    if (canRecallMessage(message))
+      send({
+        type: message.file ? "recall-image" : "recall-text",
+        id: message.id,
+      });
+    return;
+  }
+  if (message.file) {
+    const { previewURL, previewBlob, name } = message.file;
+    if (!previewURL) return;
+    if (action === "save-image") {
+      const link = document.createElement("a");
+      link.href = previewURL;
+      link.download = name;
+      link.click();
+      return;
+    }
+    try {
+      if (!navigator.clipboard?.write || typeof ClipboardItem !== "function")
+        throw new Error("当前浏览器无法复制图片");
+      // 在点击时立即写入，图片转换通过 Promise 交给浏览器等待。
+      const item = new ClipboardItem({
+        "image/png": chatImageClipboardPNG(previewBlob),
+      });
+      await navigator.clipboard.write([item]);
+      notify("success", "图片已复制");
+    } catch {
+      error.value = "复制失败，可打开大图使用浏览器菜单，或选择保存原图";
+    }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(message.text);
+    notify("success", "文字已复制");
+  } catch {
+    error.value = "复制失败，请手动选择文字复制";
   }
 }
 async function copyCode() {
@@ -1430,6 +1548,7 @@ onBeforeUnmount(() => {
               :key="message.id"
               class="transfer-message"
               :class="{ mine: message.from === myMember }"
+              @contextmenu="openMessageMenu($event, message)"
             >
               <div class="transfer-message-header">
                 <div class="transfer-message-meta">
@@ -1505,9 +1624,23 @@ onBeforeUnmount(() => {
                   >
                 </div>
               </template>
+              <p v-else-if="message.recalled" class="muted">消息已撤回</p>
               <p v-else>{{ message.text }}</p>
             </div>
           </div>
+          <NDropdown
+            trigger="manual"
+            placement="bottom-start"
+            :show="Boolean(messageMenu)"
+            :x="messageMenu?.x"
+            :y="messageMenu?.y"
+            :options="messageMenuOptions"
+            :on-clickoutside="closeMessageMenu"
+            @update:show="closeMessageMenu"
+            @select="selectMessageAction"
+          >
+            <span hidden aria-hidden="true" />
+          </NDropdown>
           <form
             v-if="!hasHistory"
             class="transfer-message-composer"

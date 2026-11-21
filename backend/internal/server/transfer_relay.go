@@ -18,6 +18,7 @@ type transferFile struct {
 	reservedRelay                     bool
 	id, clientID, name, state, mode   string
 	imageType                         string
+	imageRecalled                     bool
 	size, bytes                       int64
 	sender                            int
 	room                              *transferRoom
