@@ -719,6 +719,12 @@ function sendMessage() {
     error.value = reason.message;
   }
 }
+function handleMessageEnter(event) {
+  // 某些输入法在确认候选词时仍会触发 Enter，不能把尚未提交的正文发出。
+  if (event.shiftKey || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  if (!event.repeat) sendMessage();
+}
 function addFiles(items, queue = selected.value) {
   if (!connected.value) return;
   const remaining = Math.max(
@@ -1517,6 +1523,7 @@ onBeforeUnmount(() => {
               :rows="1"
               :autosize="{ minRows: 1, maxRows: 4 }"
               maxlength="4096"
+              @keydown.enter="handleMessageEnter"
             />
             <UiButton
               class="primary transfer-send"
