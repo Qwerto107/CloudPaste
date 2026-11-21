@@ -147,6 +147,7 @@ const connected = computed(() => status.value === "paired");
 const hasPair = computed(() =>
   ["paired", "reconnecting", "peer-offline"].includes(status.value),
 );
+const waitingToReconnect = computed(() => hasPair.value && !connected.value);
 const hasHistory = computed(
   () =>
     status.value === "closed" &&
@@ -432,7 +433,7 @@ function event(message) {
     joiningDevice.value = message.device || null;
     joiningLocation.value = message.location || null;
   } else if (message.type === "paired") {
-    const recovering = hasPair.value && !connected.value;
+    const recovering = waitingToReconnect.value;
     status.value = "paired";
     reconnectDeadline.value = "";
     if (recovering) notify("success", "连接已恢复，中断的文件请重新发送");
@@ -1353,7 +1354,8 @@ onBeforeUnmount(() => {
           </div>
         </dl>
       </div>
-      <div class="transfer-workspace" :inert="hasPair && !connected">
+      <!-- 等待重连时暂停发送和文件操作，已收到的消息仍可选择文字和预览图片。 -->
+      <div class="transfer-workspace">
         <section class="panel transfer-chat">
           <div class="transfer-section-heading">
             <h2>消息</h2>
@@ -1401,6 +1403,7 @@ onBeforeUnmount(() => {
                   class="quiet transfer-message-remove"
                   size="small"
                   icon="close"
+                  :disabled="waitingToReconnect"
                   :aria-label="`移除图片 ${message.file.name}`"
                   @click="removeTask(message.file)"
                 />
@@ -1457,6 +1460,7 @@ onBeforeUnmount(() => {
           <form
             v-if="!hasHistory"
             class="transfer-message-composer"
+            :inert="waitingToReconnect"
             @submit.prevent="sendText"
             @paste="pasteImage"
           >
@@ -1502,7 +1506,7 @@ onBeforeUnmount(() => {
           </p>
         </section>
 
-        <section class="panel transfer-file-panel">
+        <section class="panel transfer-file-panel" :inert="waitingToReconnect">
           <div class="transfer-section-heading">
             <h2>文件互传</h2>
             <label
