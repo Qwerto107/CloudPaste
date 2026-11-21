@@ -84,7 +84,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build -
 docker compose -f docker-compose.split.yml -f docker-compose.split.build.yml up -d --build --pull never
 ```
 
-构建配置只用于开发和 CI，将镜像标签覆盖为本地 `:dev`，不会覆盖发布镜像。`--pull never` 使用本机构建的镜像；上面的命令也适用于 PowerShell。
+构建配置用于本地开发和验证，将镜像标签覆盖为本地 `:dev`，不会覆盖发布镜像。`--pull never` 使用本机构建的镜像；上面的命令也适用于 PowerShell。
 
 ## 检查
 
@@ -105,7 +105,7 @@ Windows 可构建 `backend/bin/sharing-backend.exe`，测试默认使用这个�
 
 端到端检查启动独立临时服务与数据库，覆盖登录、分享、上传、媒体预览、设置、权限、主题和屏宽。设置 `SHARING_TEST_STANDALONE=1` 并将 `SHARING_TEST_BINARY` 指向带 `with_frontend` 的程序，可运行相同回归直接验证 Go 提供的页面。
 
-日常 CI 只运行单元测试、构建、核心并发竞态、静态与依赖漏洞检查。发版或手动运行时增加内嵌模式浏览器回归、设备互传浏览器回归及两套真实 Docker 集成测试，不再重复运行分离模式的完整浏览器回归。全量 `go test -race ./... -count=1 -timeout=600s` 保留在手动运行中。详见[构建与发布](releasing.md)。
+推送版本标签时会运行单元测试、静态检查、前端构建、内嵌页面安全检查和漏洞扫描。可在本地运行浏览器回归，或在 `backend` 下执行 `go test -race ./... -count=1 -timeout=600s` 做完整竞态检查。验证 Docker 部署时，用上文的本地构建配置和独立数据目录启动测试实例，在当前终端设置 `SMOKE_BASE_URL` 和测试实例的 `ADMIN_PASSWORD`，再从仓库根目录运行 `python backend/scripts/docker_smoke.py`。详见[构建与发布](releasing.md)。
 
 ## 设备互传测试
 
