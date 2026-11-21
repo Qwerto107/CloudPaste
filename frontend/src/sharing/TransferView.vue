@@ -116,6 +116,11 @@ const folderInput = ref(null);
 const folderSavingSupported = canSaveFolders();
 let folderScan;
 const pastedImages = ref([]);
+const chatFiles = ref([]);
+const chatDragDepth = ref(0);
+const hasAttachments = computed(
+  () => pastedImages.value.length > 0 || chatFiles.value.length > 0,
+);
 const previewImage = ref(null);
 const previewViewport = ref(null);
 const previewScale = ref(1);
@@ -420,6 +425,7 @@ function event(message) {
     status.value = "connecting";
   } else if (["reconnecting", "peer-offline"].includes(message.type)) {
     status.value = message.type;
+    chatDragDepth.value = 0;
     reconnectDeadline.value = new Date(
       message.reconnect_until,
     ).toLocaleTimeString("zh-CN", { hour12: false });
@@ -597,6 +603,8 @@ function event(message) {
     // 断开只释放待发送内容，已接收的预览随历史保留；新配对或离开页面时再清理。
     while (pastedImages.value.length) removePasted(0);
     selected.value = [];
+    chatFiles.value = [];
+    chatDragDepth.value = 0;
     text.value = "";
     status.value = "closed";
     direct.value = false;
@@ -627,6 +635,7 @@ async function open(kind) {
   selectedFolder.value = null;
   offeredCount.value = 0;
   selected.value = [];
+  chatFiles.value = [];
   messages.value = [];
   resetPeerDetails();
   followMessages = true;
@@ -683,14 +692,20 @@ watch([autoApproveDevice, joining], ([enabled, device]) => {
   if (enabled && myMember.value === 0 && status.value === "waiting" && device)
     send({ type: "confirm" });
 });
-function sendText() {
-  if (!text.value.trim() && !pastedImages.value.length) return;
+function sendMessage() {
+  if (!connected.value || pasting.value) return;
+  if (!text.value.trim() && !hasAttachments.value) return;
   if (new TextEncoder().encode(text.value).length > 4096) {
     error.value = "文字最多 4096 字节";
     return;
   }
   error.value = "";
   try {
+    // 普通附件沿用文件互传流程；已发送的部分立即移出草稿，避免重试时重复发送。
+    if (chatFiles.value.length) {
+      client.offer(chatFiles.value);
+      chatFiles.value = [];
+    }
     if (pastedImages.value.length) {
       client.offer(
         pastedImages.value.map((item) => item.file),
@@ -704,13 +719,14 @@ function sendText() {
     error.value = reason.message;
   }
 }
-function addFiles(items) {
+function addFiles(items, queue = selected.value) {
+  if (!connected.value) return;
   const remaining = Math.max(
     0,
-    32 - offeredCount.value - selected.value.length,
+    32 - offeredCount.value - selected.value.length - chatFiles.value.length,
   );
   const incoming = Array.from(items || []);
-  selected.value.push(...incoming.slice(0, remaining));
+  queue.push(...incoming.slice(0, remaining));
   if (incoming.length > remaining) error.value = "每次连接最多发送 32 个文件";
 }
 function choose(event) {
@@ -719,15 +735,37 @@ function choose(event) {
 }
 function dropFiles(event) {
   dragDepth.value = 0;
+  addDroppedFiles(event.dataTransfer);
+}
+function isFileDrag(event) {
+  return event.dataTransfer?.types.includes("Files");
+}
+function trackChatDrag(event, change) {
+  // 进入或离开聊天区内的子元素时也会收到事件，用计数保持提示稳定。
+  if (connected.value && isFileDrag(event))
+    chatDragDepth.value = Math.max(0, chatDragDepth.value + change);
+}
+function allowChatDrop(event) {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = connected.value ? "copy" : "none";
+}
+function dropChatFiles(event) {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  chatDragDepth.value = 0;
+  if (connected.value) addDroppedFiles(event.dataTransfer, chatFiles.value);
+}
+function addDroppedFiles(transfer, queue) {
   if (
-    Array.from(event.dataTransfer.items || []).some(
+    Array.from(transfer.items || []).some(
       (item) => item.webkitGetAsEntry?.()?.isDirectory,
     )
   ) {
     error.value = "发送文件夹请使用“选择文件夹”，以保留目录结构";
     return;
   }
-  addFiles(event.dataTransfer.files);
+  addFiles(transfer.files, queue);
 }
 async function selectFolder(inputFiles = null) {
   if (folderSelecting.value || selectedFolder.value) return;
@@ -1356,7 +1394,14 @@ onBeforeUnmount(() => {
       </div>
       <!-- 等待重连时暂停发送和文件操作，已收到的消息仍可选择文字和预览图片。 -->
       <div class="transfer-workspace">
-        <section class="panel transfer-chat">
+        <section
+          class="panel transfer-chat"
+          :class="{ 'transfer-chat-dragging': chatDragDepth > 0 }"
+          @dragenter="trackChatDrag($event, 1)"
+          @dragleave="trackChatDrag($event, -1)"
+          @dragover="allowChatDrop"
+          @drop="dropChatFiles"
+        >
           <div class="transfer-section-heading">
             <h2>消息</h2>
             <span class="muted">文字 / 图片</span>
@@ -1461,7 +1506,7 @@ onBeforeUnmount(() => {
             v-if="!hasHistory"
             class="transfer-message-composer"
             :inert="waitingToReconnect"
-            @submit.prevent="sendText"
+            @submit.prevent="sendMessage"
             @paste="pasteImage"
           >
             <UiInput
@@ -1473,6 +1518,16 @@ onBeforeUnmount(() => {
               :autosize="{ minRows: 1, maxRows: 4 }"
               maxlength="4096"
             />
+            <UiButton
+              class="primary transfer-send"
+              icon="send"
+              :aria-label="hasAttachments ? '发送消息' : '发送文字'"
+              :title="hasAttachments ? '发送消息' : '发送文字'"
+              :disabled="pasting || (!text.trim() && !hasAttachments)"
+              ><span class="transfer-send-label">{{
+                hasAttachments ? "发送消息" : "发送文字"
+              }}</span></UiButton
+            >
             <div
               v-if="pastedImages.length"
               class="transfer-pasted-images"
@@ -1490,19 +1545,28 @@ onBeforeUnmount(() => {
                 />
               </div>
             </div>
-            <UiButton
-              class="primary transfer-send"
-              icon="send"
-              :aria-label="pastedImages.length ? '发送消息' : '发送文字'"
-              :title="pastedImages.length ? '发送消息' : '发送文字'"
-              :disabled="pasting || (!text.trim() && !pastedImages.length)"
-              ><span class="transfer-send-label">{{
-                pastedImages.length ? "发送消息" : "发送文字"
-              }}</span></UiButton
+            <ul
+              v-if="chatFiles.length"
+              class="transfer-selected transfer-chat-files"
+              aria-label="待发送附件"
             >
+              <li v-for="(file, index) in chatFiles" :key="index">
+                <Icon name="file" />
+                <span class="transfer-selected-name">{{ file.name }}</span>
+                <span class="transfer-selected-size">{{ size(file.size) }}</span>
+                <UiButton
+                  type="button"
+                  class="quiet"
+                  size="small"
+                  icon="close"
+                  :aria-label="`移除附件 ${file.name}`"
+                  @click="chatFiles.splice(index, 1)"
+                />
+              </li>
+            </ul>
           </form>
           <p v-if="!hasHistory" class="muted transfer-hint">
-            可粘贴 PNG / JPEG 图片，单张最多 4 MiB。
+            可拖入文件，或粘贴 PNG / JPEG 图片（单张最多 4 MiB）。
           </p>
         </section>
 
@@ -2558,6 +2622,10 @@ onBeforeUnmount(() => {
   height: 600px;
   overflow: hidden;
 }
+.transfer-chat-dragging {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .transfer-chat .transfer-section-heading {
   padding: 14px 18px;
   border-bottom: 1px solid var(--line);
@@ -2740,13 +2808,16 @@ onBeforeUnmount(() => {
   margin: 0;
   border-top: 1px solid var(--line);
 }
-.transfer-message-composer .transfer-pasted-images {
+.transfer-message-composer .transfer-pasted-images,
+.transfer-message-composer .transfer-chat-files {
   grid-column: 1 / -1;
-  grid-row: 2;
+}
+.transfer-message-composer .transfer-chat-files {
+  max-height: 100px;
+  margin: 0;
+  overflow: auto;
 }
 .transfer-send {
-  grid-column: 2;
-  grid-row: 1;
   width: 44px;
   height: 44px;
   padding: 0;
