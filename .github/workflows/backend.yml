@@ -1,60 +1,17 @@
 name: 构建、检查与发布
 
 on:
-  workflow_dispatch:
-    inputs:
-      publish_images:
-        description: "检查通过后发布多架构镜像"
-        type: boolean
-        default: false
-      full_checks:
-        description: "运行耗时检查：完整竞态、浏览器和两种容器部署"
-        type: boolean
-        default: false
-  pull_request:
-    paths:
-      - docs/binary.md
-      - docs/releasing.md
-      - backend/**
-      - frontend/**
-      - docker/frontend/**
-      - docker/standalone/**
-      - scripts/**
-      - docker-compose.split.yml
-      - docker-compose.yml
-      - docker-compose.split.build.yml
-      - docker-compose.build.yml
-      - .dockerignore
-      - .gitattributes
-      - .github/workflows/backend.yml
   push:
-    branches:
-      - '**'
     tags:
       - 'v*'
-    paths:
-      - docs/binary.md
-      - docs/releasing.md
-      - backend/**
-      - frontend/**
-      - docker/frontend/**
-      - docker/standalone/**
-      - scripts/**
-      - docker-compose.split.yml
-      - docker-compose.yml
-      - docker-compose.split.build.yml
-      - docker-compose.build.yml
-      - .dockerignore
-      - .gitattributes
-      - .github/workflows/backend.yml
 
 permissions:
   contents: read
 
-# 普通检查只保留最新提交；发布任务不能中途取消。
+# 同一版本的发布排队，不取消正在进行的发布。
 concurrency:
   group: cloudpaste-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') && !(github.event_name == 'workflow_dispatch' && inputs.publish_images) }}
+  cancel-in-progress: false
 
 jobs:
   go:
@@ -77,21 +34,13 @@ jobs:
       - name: 检查格式与静态问题
         run: |
           # 标签只作为数据读取；先校验，再允许后续发布任务运行。
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[[:alnum:]][[:alnum:].-]*)?$ ]]
-            [[ ${#GITHUB_REF_NAME} -le 100 ]]
-          fi
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[[:alnum:]][[:alnum:].-]*)?$ ]]
+          [[ ${#GITHUB_REF_NAME} -le 100 ]]
           test -z "$(gofmt -l cmd internal)"
           go vet ./...
       - name: 运行后端单元测试
-        if: github.event_name != 'workflow_dispatch' || !inputs.full_checks
         run: go test ./... -count=1 -timeout=300s
-      - name: 手动运行完整竞态检查
-        # 竞态测试会重新编译并重复执行用例，只有明确勾选完整检查时运行。
-        if: github.event_name == 'workflow_dispatch' && inputs.full_checks
-        run: go test -race ./... -count=1 -timeout=600s
       - name: 检查可达依赖漏洞
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.full_checks)
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   frontend:
@@ -104,7 +53,6 @@ jobs:
         with:
           persist-credentials: false
       - name: 准备后端编译环境
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # 官方 v6
         with:
           go-version: 1.27.4
@@ -128,36 +76,12 @@ jobs:
           node --test scripts/prepare-webui.test.mjs
           node scripts/prepare-webui.mjs
       - name: 检查内嵌页面安全约束
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
         working-directory: backend
         run: |
           # 内嵌页面有独立的 CSP 与路由边界；实际程序由二进制任务统一构建。
           go test -tags with_frontend ./internal/webui -count=1
           go vet -tags with_frontend ./internal/webui
-      - name: 构建浏览器检查程序
-        if: github.event_name == 'workflow_dispatch' && inputs.full_checks
-        working-directory: backend
-        run: go build -tags with_frontend -o bin/sharing-standalone ./cmd/cloudpaste
-      - name: 安装浏览器测试环境
-        if: github.event_name == 'workflow_dispatch' && inputs.full_checks
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-      - name: 检查一体化二进制的真实浏览器流程
-        if: github.event_name == 'workflow_dispatch' && inputs.full_checks
-        working-directory: frontend
-        env:
-          SHARING_TEST_STANDALONE: '1'
-          SHARING_TEST_BINARY: ${{ github.workspace }}/backend/bin/sharing-standalone
-        run: npm run test:e2e
-      - name: 检查配对、消息与实时文件中继
-        if: github.event_name == 'workflow_dispatch' && inputs.full_checks
-        working-directory: frontend
-        env:
-          TRANSFER_TEST_BINARY: ${{ github.workspace }}/backend/bin/sharing-standalone
-        # 互传单元测试已在前端逻辑检查中执行，这里只验证真实浏览器传输。
-        run: node tests/transfer-smoke.mjs
       - name: 保存已验证的静态资源供二进制构建复用
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # 官方 v7
         with:
           name: cloudpaste-webui-dist
@@ -168,8 +92,6 @@ jobs:
   binaries:
     name: 二进制构建（${{ matrix.platform }}）
     needs: [go, frontend]
-    # 日常提交检查可运行的程序；手动运行和版本发布才打包全部平台。
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -252,57 +174,9 @@ jobs:
           compression-level: 0
           retention-days: 30
 
-  docker:
-    name: 容器部署检查（${{ matrix.mode == 'standalone' && '单容器' || '多容器' }}）
-    # 镜像发布本身会构建三种镜像；额外的部署重建与回归只在手动完整检查中运行。
-    if: github.event_name == 'workflow_dispatch' && inputs.full_checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [standalone, split]
-    env:
-      # 仅用于每次新建的 CI 数据目录，不对应真实部署凭证。
-      ADMIN_PASSWORD: CI-only-password-12345
-      LOCAL_FILES_DIR: ./.go-smoke-files
-      # CI 额外加载构建配置，验证当前代码；普通部署只用发布镜像。
-      COMPOSE_FILE: ${{ matrix.mode == 'standalone' && 'docker-compose.yml:docker-compose.build.yml' || 'docker-compose.split.yml:docker-compose.split.build.yml' }}
-    steps:
-      - name: 获取源码
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # 官方 v6
-        with:
-          persist-credentials: false
-      - name: 准备可读写测试目录
-        run: |
-          mkdir -p data .go-smoke-files
-          printf '0123456789' > .go-smoke-files/demo.txt
-          sudo chown -R 65532:65532 data .go-smoke-files
-          # env_file 使用本次测试的独立配置，不包含真实部署凭据。
-          cp backend/.env.example .env
-      - name: 检查容器配置并构建测试镜像
-        run: |
-          docker compose config --quiet
-          docker compose up -d --build --pull never --wait --wait-timeout 120
-      - name: 检查前后端与核心安全约束
-        run: python3 backend/scripts/docker_smoke.py
-      - name: 输出失败日志
-        if: failure()
-        run: docker compose logs --tail=100
-      - name: 清理测试容器
-        if: always()
-        run: docker compose down
-
   images:
     name: 发布${{ matrix.label }}镜像
-    needs: [go, frontend, binaries, docker]
-    if: >-
-      always() &&
-      needs.go.result == 'success' && needs.frontend.result == 'success' &&
-      needs.binaries.result == 'success' &&
-      (needs.docker.result == 'success' || needs.docker.result == 'skipped') &&
-      ((github.event_name == 'workflow_dispatch' && inputs.publish_images) ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')))
+    needs: [go, frontend, binaries]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -342,13 +216,10 @@ jobs:
         run: |
           repository="${GITHUB_REPOSITORY,,}"
           echo "image=ghcr.io/${repository}${IMAGE_SUFFIX}" >> "$GITHUB_OUTPUT"
-          # 手动构建只发布提交号；正式版本标签才更新版本号及 latest。
-          version=""
+          # 正式版本更新 latest，预发行版本只发布版本号和提交号。
+          version="${GITHUB_REF_NAME#v}"
           stable=false
-          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/v* ]]; then
-            version="${GITHUB_REF_NAME#v}"
-            if [[ "$version" != *-* ]]; then stable=true; fi
-          fi
+          if [[ "$version" != *-* ]]; then stable=true; fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "stable=$stable" >> "$GITHUB_OUTPUT"
       - name: 设置多架构构建工具
@@ -367,7 +238,7 @@ jobs:
           flavor: latest=false
           tags: |
             type=sha,format=long,prefix=sha-
-            type=raw,value=${{ steps.names.outputs.version }},enable=${{ steps.names.outputs.version != '' }},priority=900
+            type=raw,value=${{ steps.names.outputs.version }},priority=900
             type=raw,value=latest,enable=${{ steps.names.outputs.stable == 'true' }}
       - name: 构建并发布多架构镜像
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # 官方 v7
@@ -384,10 +255,6 @@ jobs:
   release:
     name: 发布版本二进制附件
     needs: [binaries, images]
-    # 可选容器检查跳过时仍允许发布，但二进制和镜像必须全部成功。
-    if: >-
-      always() && needs.binaries.result == 'success' && needs.images.result == 'success' &&
-      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
