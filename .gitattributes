@@ -2,3 +2,10 @@
 *.go text eol=lf
 go.mod text eol=lf
 go.sum text eol=lf
+# 文档、脚本与配置统一使用 LF，复制到 Linux 终端执行的命令不带 \r。
+*.md text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Dockerfile text eol=lf
+.env* text eol=lf
