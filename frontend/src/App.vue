@@ -543,9 +543,21 @@ async function logout() {
         <MarkdownPreview
           v-if="settings.site_footer_markdown"
           :content="settings.site_footer_markdown"
-        /><span v-else
-          >Copyright © 2026 Qwerto107 · CloudPaste. All rights reserved.</span
-        >
+        />
+        <span v-else class="site-copyright">
+          Copyright © 2026
+          <a
+            href="https://github.com/Qwerto107"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Qwerto107</a
+          > · <a
+            href="https://github.com/Qwerto107/CloudPaste"
+            target="_blank"
+            rel="noopener noreferrer"
+            >CloudPaste</a
+          >. All rights reserved.
+        </span>
       </footer>
     </NDialogProvider>
   </NConfigProvider>
