@@ -7,7 +7,8 @@ function buildInfo() {
   const now = new Date();
   const pad = (value) => String(value).padStart(2, "0");
   const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-  let commit = (process.env.GITHUB_SHA || "").slice(0, 7);
+  // Docker 构建上下文不含 .git，由工作流通过 APP_COMMIT 传入提交号。
+  let commit = (process.env.APP_COMMIT || process.env.GITHUB_SHA || "").slice(0, 7);
   if (!commit)
     try {
       commit = execSync("git rev-parse --short=7 HEAD", { stdio: ["ignore", "pipe", "ignore"] })

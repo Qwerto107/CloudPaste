@@ -4,7 +4,9 @@ WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json frontend/.npmrc ./
 RUN npm ci --cache /tmp/npm-cache --no-audit --no-fund
 COPY frontend/ ./
-ENV VITE_BACKEND_URL="" VITE_IS_DOCKER=true
+# 构建上下文排除了 .git，提交号由工作流传入，用于控制台版本标识。
+ARG APP_COMMIT=""
+ENV VITE_BACKEND_URL="" VITE_IS_DOCKER=true APP_COMMIT=${APP_COMMIT}
 RUN npm run test:go-upload && npm run test:security && npm run build
 WORKDIR /src
 COPY scripts/ ./scripts/
