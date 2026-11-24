@@ -2109,9 +2109,6 @@ html[data-theme="dark"] #app .audit-table th {
 }
 
 /* ========== 后台：操作日志 ========== */
-#app .audit-heading > .ui-button.n-button--quaternary {
-  color: var(--muted);
-}
 #app .audit-categories {
   display: flex;
   gap: 4px;
@@ -2381,7 +2378,7 @@ body .n-base-select-option {
   margin-left: auto;
 }
 
-/* 标题区的幽灵按钮（如“日志设置”）：无边框、灰字 */
+/* 标题区的幽灵按钮：无边框、灰字 */
 #app .management-heading > .ui-button.n-button--quaternary {
   border: 0 !important;
   background: none !important;

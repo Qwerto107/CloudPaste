@@ -2,14 +2,13 @@
 import IPLocation from "./IPLocation.vue";
 import PageIllustration from "./PageIllustration.vue";
 import { computed, ref, reactive, watch, onBeforeUnmount } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute } from "vue-router";
 import { request } from "./api.js";
 import { auditModules } from "./audit-modules.js";
 import { fields } from "./settings-fields.js";
 import { auditDateBoundary } from "./audit-date.js";
 
 const route = useRoute();
-const router = useRouter();
 const modules = Object.fromEntries(
   auditModules.map(({ key, label }) => [key, label]),
 );
@@ -209,13 +208,6 @@ onBeforeUnmount(() => controller?.abort());
         }}；保留 {{ days }} 天。{{ enabled ? "新记录可能稍有延迟。" : "" }}
       </p>
     </div>
-    <!-- 日志开关和清理统一放到系统设置，列表页只保留查看与查询。 -->
-    <UiButton
-      type="button"
-      class="quiet"
-      @click="router.push('/admin/settings/logs')"
-      >日志设置</UiButton
-    >
     <PageIllustration section="admin" />
   </header>
   <!-- 分类放在内容区，避免侧栏因展开多个模块而变得过长。 -->
@@ -482,9 +474,6 @@ onBeforeUnmount(() => controller?.abort());
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-}
-.audit-heading > .ui-button {
-  flex: none;
 }
 .audit-categories {
   display: flex;
