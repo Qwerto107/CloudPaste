@@ -100,7 +100,7 @@ test("两端各用本站或本机配置，重建时保留覆盖，强制中继�
   ]) {
     const client = new TransferClient(() => {});
     clients.push(client);
-    await client.open("join", { code: "A1234", name: "device" }, override);
+    await client.open("join", { code: "1234", name: "device" }, override);
     client.startPeer(message);
     assert.deepEqual(
       configurations.at(-1).iceServers,

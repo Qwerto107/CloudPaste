@@ -60,7 +60,7 @@ async function setup(t) {
   const events = [];
   document.visibilityState = "visible";
   const client = new TransferClient((event) => events.push(event));
-  await client.open("join", { code: "A1234", name: "phone" });
+  await client.open("join", { code: "1234", name: "phone" });
   client.socket.onopen();
   client.handle(paired);
   t.after(() => client.close());

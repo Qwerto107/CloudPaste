@@ -1,15 +1,13 @@
-// 横杠只用于展示；复制、输入及请求都使用统一的大写紧凑形式。
+// 配对码为四位数字。展示时不加分隔；输入、粘贴时去掉空白和横杠后统一校验。
 export function normalizePairingCode(value) {
-  return String(value || "")
-    .replace(/[\s-]/g, "")
-    .toUpperCase();
+  return String(value || "").replace(/[\s-]/g, "");
 }
 
 export function validPairingCode(value) {
-  return /^[A-Z][0-9]{4}$/.test(normalizePairingCode(value));
+  return /^[0-9]{4}$/.test(normalizePairingCode(value));
 }
 
 export function displayPairingCode(value) {
   const code = normalizePairingCode(value);
-  return validPairingCode(code) ? `${code[0]}-${code.slice(1)}` : "";
+  return validPairingCode(code) ? code : "";
 }

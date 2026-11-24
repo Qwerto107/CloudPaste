@@ -1,5 +1,6 @@
 <script setup>
 import IPLocation from "./IPLocation.vue";
+import PageIllustration from "./PageIllustration.vue";
 import { computed, ref, reactive, watch, onBeforeUnmount } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { request } from "./api.js";
@@ -199,7 +200,7 @@ onBeforeUnmount(() => controller?.abort());
 </script>
 
 <template>
-  <div class="settings-heading audit-heading">
+  <header class="management-heading settings-heading audit-heading">
     <div>
       <h1>{{ pageTitle }}</h1>
       <p class="muted">
@@ -215,7 +216,8 @@ onBeforeUnmount(() => controller?.abort());
       @click="router.push('/admin/settings/logs')"
       >日志设置</UiButton
     >
-  </div>
+    <PageIllustration section="admin" />
+  </header>
   <!-- 分类放在内容区，避免侧栏因展开多个模块而变得过长。 -->
   <nav class="audit-categories" aria-label="日志分类">
     <RouterLink to="/admin/operation-logs">全部日志</RouterLink>
@@ -339,78 +341,97 @@ onBeforeUnmount(() => controller?.abort());
                 </button>
               </td>
             </tr>
-            <tr v-if="expandedId === item.id" :id="`audit-detail-${item.id}`">
-              <td colspan="7" class="audit-detail">
-                <div class="audit-detail-meta">
-                  <span class="audit-detail-tag">{{
-                    identities[item.actor_type] || item.actor_type
-                  }}</span>
-                  <strong>{{ item.actor_name || "—" }}</strong>
-                  <span class="audit-detail-tag">{{ item.method }}</span>
-                  <span class="audit-detail-endpoint">{{ item.endpoint }}</span>
-                  <span v-if="item.status" class="audit-detail-tag"
-                    >HTTP {{ item.status }}</span
-                  >
-                  <span class="audit-detail-duration"
-                    >耗时 {{ item.duration_ms }} ms</span
-                  >
-                </div>
-                <div
-                  v-if="item.actor_id || item.target"
-                  class="audit-detail-ids"
-                >
-                  <div v-if="item.actor_id">
-                    <span>操作人 ID</span><code>{{ item.actor_id }}</code>
+            <Transition name="audit-fold">
+              <tr
+                v-if="expandedId === item.id"
+                :id="`audit-detail-${item.id}`"
+                class="audit-detail-row"
+              >
+                <td colspan="7" class="audit-detail">
+                  <div class="audit-detail-fold">
+                    <div>
+                      <div class="audit-detail-meta">
+                        <span class="audit-detail-tag">{{
+                          identities[item.actor_type] || item.actor_type
+                        }}</span>
+                        <strong>{{ item.actor_name || "—" }}</strong>
+                        <span class="audit-detail-tag">{{ item.method }}</span>
+                        <span class="audit-detail-endpoint">{{
+                          item.endpoint
+                        }}</span>
+                        <span v-if="item.status" class="audit-detail-tag"
+                          >HTTP {{ item.status }}</span
+                        >
+                        <span class="audit-detail-duration"
+                          >耗时 {{ item.duration_ms }} ms</span
+                        >
+                      </div>
+                      <div
+                        v-if="item.actor_id || item.target"
+                        class="audit-detail-ids"
+                      >
+                        <div v-if="item.actor_id">
+                          <span>操作人 ID</span><code>{{ item.actor_id }}</code>
+                        </div>
+                        <div v-if="item.target">
+                          <span>对象</span><code>{{ item.target }}</code>
+                        </div>
+                      </div>
+                      <!-- 日志包含外部输入，始终按纯文本展示，禁止渲染为 HTML 或 Markdown。 -->
+                      <dl
+                        v-if="changes(item).length"
+                        class="audit-detail-fields"
+                      >
+                        <div
+                          v-for="[key, value] in changes(item)"
+                          :key="key"
+                          :class="{
+                            'audit-detail-wide': [
+                              'text',
+                              'name',
+                              'download_ips',
+                              'p2p_local',
+                              'p2p_remote',
+                              'device',
+                              'peer_device',
+                              'location',
+                              'peer_location',
+                            ].includes(key),
+                          }"
+                        >
+                          <dt>{{ detailName(key) }}</dt>
+                          <dd
+                            v-if="
+                              value &&
+                              typeof value === 'object' &&
+                              'before' in value
+                            "
+                          >
+                            {{ value.before }} → {{ value.after }}
+                          </dd>
+                          <dd
+                            v-else-if="
+                              !['location', 'peer_location'].includes(key)
+                            "
+                            :class="{
+                              'audit-message': key === 'text',
+                              'audit-detail-value-tag': [
+                                'state',
+                                'mode',
+                                'join_state',
+                              ].includes(key),
+                            }"
+                          >
+                            {{ detailValue(key, value) }}
+                          </dd>
+                          <dd v-else><IPLocation :location="value" /></dd>
+                        </div>
+                      </dl>
+                    </div>
                   </div>
-                  <div v-if="item.target">
-                    <span>对象</span><code>{{ item.target }}</code>
-                  </div>
-                </div>
-                <!-- 日志包含外部输入，始终按纯文本展示，禁止渲染为 HTML 或 Markdown。 -->
-                <dl v-if="changes(item).length" class="audit-detail-fields">
-                  <div
-                    v-for="[key, value] in changes(item)"
-                    :key="key"
-                    :class="{
-                      'audit-detail-wide': [
-                        'text',
-                        'name',
-                        'download_ips',
-                        'p2p_local',
-                        'p2p_remote',
-                        'device',
-                        'peer_device',
-                        'location',
-                        'peer_location',
-                      ].includes(key),
-                    }"
-                  >
-                    <dt>{{ detailName(key) }}</dt>
-                    <dd
-                      v-if="
-                        value && typeof value === 'object' && 'before' in value
-                      "
-                    >
-                      {{ value.before }} → {{ value.after }}
-                    </dd>
-                    <dd
-                      v-else-if="!['location', 'peer_location'].includes(key)"
-                      :class="{
-                        'audit-message': key === 'text',
-                        'audit-detail-value-tag': [
-                          'state',
-                          'mode',
-                          'join_state',
-                        ].includes(key),
-                      }"
-                    >
-                      {{ detailValue(key, value) }}
-                    </dd>
-                    <dd v-else><IPLocation :location="value" /></dd>
-                  </div>
-                </dl>
-              </td>
-            </tr>
+                </td>
+              </tr>
+            </Transition>
           </template>
         </tbody>
       </table>
@@ -430,9 +451,15 @@ onBeforeUnmount(() => controller?.abort());
         </option>
       </UiSelect>
     </label>
-    <UiButton :disabled="busy || page === 1" @click="turn(-1)">上一页</UiButton
+    <UiButton
+      size="small"
+      :disabled="busy || page === 1"
+      @click="turn(-1)"
+      >上一页</UiButton
     ><span>第 {{ page }} 页</span
-    ><UiButton :disabled="busy || !hasMore" @click="turn(1)">下一页</UiButton>
+    ><UiButton size="small" :disabled="busy || !hasMore" @click="turn(1)"
+      >下一页</UiButton
+    >
   </div>
 </template>
 

@@ -1,7 +1,7 @@
 {
   "name": "cloudpaste-frontend",
   "private": true,
-  "version": "0.8.13",
+  "version": "1.0.0",
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {
@@ -19,6 +19,7 @@
     "md-editor-v3": "7.1.0",
     "medium-zoom": "1.1.0",
     "naive-ui": "2.45.3",
+    "qrcode-generator": "2.0.4",
     "screenfull": "6.0.2",
     "vue": "3.5.43",
     "vue-router": "4.6.4"

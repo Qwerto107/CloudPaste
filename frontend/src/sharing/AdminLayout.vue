@@ -1,9 +1,10 @@
 <script setup>
-import { computed } from "vue";
+import { computed, useTemplateRef, watchPostEffect } from "vue";
 import { session, hasPermission } from "./session.js";
 import Icon from "./Icon.vue";
 import { useRoute } from "vue-router";
 const route = useRoute();
+const navigation = useTemplateRef("navigation");
 const base = computed(() =>
   session.type === "admin" ? "/admin/" : "/manage/",
 );
@@ -33,10 +34,27 @@ const systemLinks = computed(() => [
     ? [{ path: "operation-logs", label: "操作日志" }]
     : []),
 ]);
+const settingsActive = computed(() =>
+  route.path.startsWith("/admin/settings/"),
+);
+const settingsLinks = [
+  ["global", "常规设置"],
+  ["preview", "文件预览"],
+  ["transfer", "设备互传"],
+  ["security", "安全与限频"],
+  ["ip-location", "IP 归属地"],
+  ["site", "站点外观"],
+  ["logs", "日志设置"],
+];
+watchPostEffect(() => {
+  if (!route.path || !window.matchMedia("(max-width: 650px)").matches) return;
+  const active = navigation.value?.querySelector('[aria-current="page"]');
+  if (active) navigation.value.scrollLeft = Math.max(0, active.offsetLeft - 12);
+});
 </script>
 <template>
   <div class="admin-layout">
-    <nav class="admin-nav" aria-label="管理导航">
+    <nav ref="navigation" class="admin-nav" aria-label="管理导航">
       <span v-if="shareLinks.length" class="nav-caption">分享管理</span>
       <RouterLink
         v-for="item in shareLinks"
@@ -47,19 +65,30 @@ const systemLinks = computed(() => [
       <span class="nav-caption">{{
         session.type === "admin" ? "系统管理" : "我的账号"
       }}</span>
-      <RouterLink
-        v-for="item in systemLinks"
-        :key="item.path"
-        :to="base + item.path"
-        :class="{
-          'nav-selected':
-            (item.path.startsWith('settings/') &&
-              route.path.startsWith('/admin/settings/')) ||
-            (item.path === 'operation-logs' &&
-              route.path.startsWith('/admin/operation-logs/')),
-        }"
-        ><Icon :name="iconFor(item.path)" />{{ item.label }}</RouterLink
-      >
+      <template v-for="item in systemLinks" :key="item.path">
+        <RouterLink
+          :to="base + item.path"
+          :class="{
+            'nav-settings': item.path.startsWith('settings/'),
+            'nav-selected':
+              item.path === 'operation-logs' &&
+              route.path.startsWith('/admin/operation-logs/'),
+          }"
+        >
+          <Icon :name="iconFor(item.path)" />{{ item.label }}
+        </RouterLink>
+        <div
+          v-if="settingsActive && item.path.startsWith('settings/')"
+          class="admin-settings-nav"
+        >
+          <RouterLink
+            v-for="[key, label] in settingsLinks"
+            :key="key"
+            :to="base + 'settings/' + key"
+            >{{ label }}</RouterLink
+          >
+        </div>
+      </template>
     </nav>
     <div class="admin-content"><RouterView /></div>
   </div>

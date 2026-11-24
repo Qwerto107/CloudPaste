@@ -152,7 +152,12 @@ export class TransferClient {
         };
         // 连接建立时只取一次界面快照，不要求开启日志，也不新增统计轮询。
         if (display && this.directReady)
-          this.onEvent({ type: "connection-info", remote: details.remote });
+          this.onEvent({
+            type: "connection-info",
+            local: details.local,
+            remote: details.remote,
+            roundTripMs: details.roundTripMs,
+          });
         if (this.debugEnabled()) this.debug("直连链路详情", details);
       } else if (!this.closed && this.peer === peer) {
         if (display && this.directReady)

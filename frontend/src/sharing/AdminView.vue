@@ -9,9 +9,13 @@ import {
   watch,
 } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { NModal } from "naive-ui";
 import { request, shareURL } from "./api.js";
 import { session, clearSession } from "./session.js";
 import { useConfirmation, useFileDeletionConfirmation } from "./ui/confirm.js";
+import Icon from "./Icon.vue";
+import PageIllustration from "./PageIllustration.vue";
+import StatValue from "./StatValue.vue";
 const confirmAction = useConfirmation();
 const confirmFileDeletion = useFileDeletionConfirmation();
 const MarkdownPreview = defineAsyncComponent(
@@ -41,6 +45,7 @@ let statusTimer;
 const busy = ref(false);
 const error = ref("");
 const success = ref("");
+const savedID = ref("");
 const filter = ref("");
 const editing = ref(false);
 const editID = ref("");
@@ -99,6 +104,89 @@ const visible = computed(() =>
       .includes(filter.value.toLowerCase()),
   ),
 );
+// 统计卡只使用列表接口已返回的数据：总数来自分页信息，其余按当前页计算。
+const stats = computed(() => {
+  const list = items.value;
+  const count = (test) => list.filter(test).length;
+  if (panel.value === "texts" || panel.value === "files") {
+    const paged = total.value > list.length;
+    const scope = paged ? "本页" : "";
+    return [
+      {
+        label: panel.value === "texts" ? "全部文本" : "全部文件",
+        value: total.value,
+        icon: panel.value === "texts" ? "text" : "file",
+        tone: "a",
+      },
+      {
+        label: scope + "有效",
+        value: count((item) => shareState(item).kind === "valid"),
+        icon: "link",
+        tone: "b",
+      },
+      {
+        label: scope + "已失效",
+        value: count((item) => shareState(item).kind === "invalid"),
+        icon: "clock",
+        tone: "c",
+      },
+      {
+        label: scope + "查看次数",
+        value: list.reduce((sum, item) => sum + (Number(item.views) || 0), 0),
+        icon: "user",
+        tone: "d",
+      },
+    ];
+  }
+  if (panel.value === "storage")
+    return [
+      { label: "存储", value: list.length, icon: "storage", tone: "a" },
+      {
+        label: "已启用",
+        value: count((item) => item.status === "ENABLED"),
+        icon: "link",
+        tone: "b",
+      },
+      {
+        label: "只读",
+        value: count((item) => item.readonly),
+        icon: "clock",
+        tone: "c",
+      },
+      {
+        label: "默认存储",
+        value: list.find((item) => item.is_default)?.name || "未设置",
+        icon: "settings",
+        tone: "d",
+      },
+    ];
+  if (panel.value === "keys")
+    return [
+      { label: "密钥", value: list.length, icon: "key", tone: "a" },
+      {
+        label: "已启用",
+        value: count((item) => item.is_enable),
+        icon: "link",
+        tone: "b",
+      },
+      {
+        label: "已停用",
+        value: count((item) => !item.is_enable),
+        icon: "clock",
+        tone: "c",
+      },
+      {
+        label: "已过期",
+        value: count(
+          (item) =>
+            item.expires_at && Date.parse(item.expires_at) <= statusTime.value,
+        ),
+        icon: "trash",
+        tone: "d",
+      },
+    ];
+  return [];
+});
 const endpoint = computed(
   () =>
     ({
@@ -273,6 +361,7 @@ async function save() {
       }
     }
     const result = await request(target, { method, body });
+    savedID.value = result?.id || editID.value;
     if (panel.value === "keys" && !editID.value) {
       newlyCreatedKey.value = result.key;
       values.custom_key = "";
@@ -426,18 +515,38 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <div class="management-heading">
+  <header class="management-heading">
     <div>
       <p class="eyebrow">管理你的分享空间</p>
       <h1>{{ title }}</h1>
     </div>
-    <UiButton v-if="endpoint" @click="load" :disabled="busy">刷新</UiButton>
+    <PageIllustration section="admin" />
+  </header>
+  <div v-if="stats.length" class="admin-stats" aria-label="统计">
+    <div
+      v-for="stat in stats"
+      :key="stat.label"
+      class="admin-stat"
+      :data-tone="stat.tone"
+    >
+      <span class="admin-stat-icon" aria-hidden="true"
+        ><Icon :name="stat.icon"
+      /></span>
+      <small>{{ stat.label }}</small>
+      <StatValue :value="stat.value" />
+    </div>
   </div>
-  <p v-if="error" class="error" role="alert">{{ error }}</p>
+  <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
   <p v-if="success" class="success" role="status">{{ success }}</p>
-  <section v-if="newlyCreatedKey" class="panel result">
-    <h2>保存新密钥</h2>
-    <p class="muted">请妥善保存密钥，也可在下方列表中切换显示。</p>
+  <section v-if="newlyCreatedKey" class="panel result management-editor new-key-panel">
+    <div class="editor-heading">
+      <h2>保存新密钥</h2>
+      <UiButton class="quiet" size="small" @click="newlyCreatedKey = ''"
+        >关闭</UiButton
+      >
+    </div>
+    <div class="management-panel-body">
+    <p class="muted small">请妥善保存密钥，也可在下方列表中切换显示。</p>
     <div class="copy-row">
       <UiInput
         :value="newlyCreatedKey"
@@ -452,17 +561,19 @@ onBeforeUnmount(() => {
         <span v-if="newKeyVisible">隐藏密钥</span>
         <span v-else>显示密钥</span>
       </UiButton>
-      <UiButton @click="copyKey">复制</UiButton>
+      <UiButton class="primary" @click="copyKey">复制</UiButton>
     </div>
-    <UiButton class="quiet" @click="newlyCreatedKey = ''">关闭</UiButton>
+    </div>
   </section>
-  <section v-if="panel === 'account'" class="panel">
-    <h2>{{ session.name || "当前账号" }}</h2>
-    <p class="muted">
-      {{ session.type === "admin" ? "管理员" : "API Key 用户" }}
-    </p>
+  <section v-if="panel === 'account'" class="panel management-editor account-panel">
+    <div class="editor-heading">
+      <h2>{{ session.name || "当前账号" }}</h2>
+      <span class="muted small">{{
+        session.type === "admin" ? "管理员" : "API Key 用户"
+      }}</span>
+    </div>
     <template v-if="session.type === 'admin'"
-      ><form @submit.prevent="changePassword">
+      ><form class="account-form" @submit.prevent="changePassword">
         <label
           >账号<UiInput
             v-model="newUsername"
@@ -481,12 +592,17 @@ onBeforeUnmount(() => {
             minlength="6"
             maxlength="72"
             required
+            aria-label="新密码"
             autocomplete="new-password" /></label
-        ><UiButton class="primary" :disabled="busy"
-          >更新账号并重新登录</UiButton
-        >
+        ><small class="muted account-password-hint"
+          >至少 6 个字符，最多 72 字节</small
+        ><div>
+          <UiButton class="primary" :disabled="busy"
+            >更新账号并重新登录</UiButton
+          >
+        </div>
       </form></template
-    ><template v-else
+    ><div v-else class="management-panel-body"
       ><p>当前权限：</p>
       <ul>
         <li
@@ -497,24 +613,34 @@ onBeforeUnmount(() => {
         >
           {{ entry.label }}
         </li>
-      </ul></template
+      </ul></div
     >
   </section>
   <template v-else>
-    <section v-if="editing" class="panel">
-      <div class="editor-heading">
-        <h2>{{ editID ? "编辑" : "新增" }}{{ title }}</h2>
-        <UiButton
-          class="quiet"
-          @click="
+    <NModal
+      :show="editing"
+      preset="card"
+      class="management-dialog"
+      :title="
+        (editID ? '编辑' : '新增') +
+        title.replace('密钥与权限', '密钥').replace('管理', '')
+      "
+      :mask-closable="!busy"
+      :closable="false"
+      :auto-focus="false"
+      role="dialog"
+      :style="{ width: 'min(560px, calc(100vw - 32px))' }"
+      @update:show="
+        (show) => {
+          if (!show && !busy) {
             editing = false;
             values.custom_key = '';
-          "
-        >
-          取消
-        </UiButton>
-      </div>
-      <form @submit.prevent="save">
+          }
+        }
+      "
+    >
+      <form class="management-dialog-form" @submit.prevent="save">
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
         <template v-if="panel === 'storage'"
           ><div class="form-row">
             <label
@@ -748,19 +874,41 @@ onBeforeUnmount(() => {
             </p>
           </div>
         </template>
-        <UiButton class="primary" :disabled="busy">
-          {{ busy ? "正在保存…" : "保存" }}
-        </UiButton>
+        <div class="management-dialog-actions">
+          <UiButton
+            type="button"
+            :disabled="busy"
+            @click="
+              editing = false;
+              values.custom_key = '';
+            "
+            >取消</UiButton
+          >
+          <UiButton class="primary" :disabled="busy">
+            {{ busy ? "正在保存…" : "保存" }}
+          </UiButton>
+        </div>
       </form>
-    </section>
-    <section v-if="previewText !== null" class="panel">
-      <div class="editor-heading">
-        <h2>文本预览</h2>
-        <UiButton @click="previewText = null">关闭</UiButton>
+    </NModal>
+    <NModal
+      :show="previewText !== null"
+      preset="card"
+      title="文本预览"
+      class="management-dialog"
+      role="dialog"
+      :style="{ width: 'min(760px, calc(100vw - 32px))' }"
+      @update:show="(show) => !show && (previewText = null)"
+    >
+      <div class="management-dialog-preview">
+        <MarkdownPreview :content="previewText || ''" />
       </div>
-      <MarkdownPreview :content="previewText" />
-    </section>
-    <section class="panel">
+      <template #footer>
+        <div class="management-dialog-actions">
+          <UiButton type="button" @click="previewText = null">关闭</UiButton>
+        </div>
+      </template>
+    </NModal>
+    <section class="panel management-list" :aria-busy="busy">
       <div class="management-toolbar">
         <UiInput
           v-model="filter"
@@ -768,18 +916,29 @@ onBeforeUnmount(() => {
           aria-label="筛选列表"
         /><UiButton
           v-if="panel === 'storage' || panel === 'keys'"
-          class="primary"
+          class="primary management-create"
+          :aria-label="panel === 'storage' ? '新增存储' : '新增密钥'"
           @click="openEditor()"
         >
-          新增{{ panel === "storage" ? "存储" : "密钥" }}</UiButton
+          <Icon name="plus" /><span
+            >新增{{ panel === "storage" ? "存储" : "密钥" }}</span
+          ></UiButton
         ><RouterLink
           v-else
-          class="button primary"
+          class="button primary management-create"
+          aria-label="创建分享"
           :to="panel === 'texts' ? '/' : '/upload'"
-          >创建分享</RouterLink
+          ><Icon name="plus" /><span>创建分享</span></RouterLink
         >
       </div>
-      <p v-if="busy && !items.length" class="empty">正在读取…</p>
+      <div
+        v-if="busy && !items.length"
+        class="management-skeleton"
+        role="status"
+        aria-label="正在读取"
+      >
+        <span v-for="row in 4" :key="row"></span>
+      </div>
       <p v-else-if="!visible.length" class="empty muted">这里还没有记录。</p>
       <div v-else class="table-scroll">
         <table>
@@ -800,8 +959,12 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in visible" :key="item.id">
-              <td>
+            <tr
+              v-for="item in visible"
+              :key="item.id"
+              :class="{ 'management-row-saved': item.id === savedID }"
+            >
+              <td class="management-name">
                 <strong>{{
                   item.title || item.filename || item.name || item.slug
                 }}</strong
@@ -855,7 +1018,7 @@ onBeforeUnmount(() => {
                     : "不过期"
                 }}</small>
               </td>
-              <td>
+              <td class="management-row-actions">
                 <div class="row-actions">
                   <UiButton
                     v-if="panel === 'keys'"
@@ -923,6 +1086,7 @@ onBeforeUnmount(() => {
         class="pagination"
       >
         <UiButton
+          size="small"
           :disabled="page <= 1 || busy"
           @click="
             page--;
@@ -932,6 +1096,7 @@ onBeforeUnmount(() => {
           上一页</UiButton
         ><span>第 {{ page }} 页，共 {{ total }} 条</span
         ><UiButton
+          size="small"
           :disabled="page * 30 >= total || busy"
           @click="
             page++;

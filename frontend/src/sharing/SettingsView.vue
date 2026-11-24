@@ -35,15 +35,6 @@ const groups = {
   logs: 5,
   security: 6,
 };
-const tabs = [
-  { key: "global", label: "常规", icon: "settings" },
-  { key: "preview", label: "文件预览", icon: "file" },
-  { key: "transfer", label: "设备互传", icon: "transfer" },
-  { key: "security", label: "安全与限频", icon: "key" },
-  { key: "ip-location", label: "IP 归属地", icon: "globe" },
-  { key: "site", label: "站点外观", icon: "cloud" },
-  { key: "logs", label: "日志设置", icon: "file" },
-];
 const definitions = ref([]);
 const values = reactive({});
 const saved = ref({});
@@ -196,21 +187,15 @@ onBeforeUnmount(() => {
   window.removeEventListener("beforeunload", beforeUnload);
 });
 watch(panel, load, { immediate: true });
+// 站点公告与页脚使用 Markdown 编辑器，整行显示并可拖动调整高度。
+const markdownKeys = ["site_announcement_content", "site_footer_markdown"];
 </script>
 <template>
-  <div class="settings-heading">
-    <h1>系统设置</h1>
-    <p class="muted">管理分享规则、文件预览、站点外观与操作日志。</p>
-  </div>
-  <nav class="settings-tabs" aria-label="设置分类">
-    <RouterLink
-      v-for="tab in tabs"
-      :key="tab.key"
-      :to="'/admin/settings/' + tab.key"
-      ><Icon :name="tab.icon" />{{ tab.label }}</RouterLink
-    >
-  </nav>
+  <header class="settings-title">
+    <h1>{{ route.meta.title || "系统设置" }}</h1>
+  </header>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
+  <p v-if="success && !dirty" class="success" role="status">{{ success }}</p>
   <div v-if="loading" class="panel empty" role="status">正在加载设置…</div>
   <UiButton
     v-else-if="panel !== 'ip-location' && !definitions.length"
@@ -249,7 +234,10 @@ watch(panel, load, { immediate: true });
             class="setting-row"
             :class="{
               'setting-row-wide':
-                item.type === 'textarea' || field(item).multiline,
+                item.type === 'textarea' ||
+                field(item).multiline ||
+                markdownKeys.includes(item.key),
+              'setting-row-markdown': markdownKeys.includes(item.key),
             }"
           >
             <div class="setting-description">
@@ -262,16 +250,41 @@ watch(panel, load, { immediate: true });
               <p :id="'help-' + item.key">{{ field(item).help }}</p>
             </div>
             <div class="setting-control">
-              <span v-if="item.flags === 2" class="setting-readonly"
-                >{{
-                  item.type === "bool"
-                    ? values[item.key]
-                      ? "已开启"
-                      : "已关闭"
-                    : values[item.key]
-                }}
-                {{ field(item).unit }}</span
+              <!-- 固定策略用禁用控件展示当前值，不进入可编辑表单与提交体。 -->
+              <label
+                v-if="item.flags === 2 && item.type === 'bool'"
+                class="setting-toggle"
+                :for="'setting-' + item.key"
               >
+                <span class="switch-state" aria-hidden="true">{{
+                  values[item.key] ? "已开启" : "已关闭"
+                }}</span>
+                <UiCheckbox
+                  :id="'setting-' + item.key"
+                  :model-value="values[item.key]"
+                  class="setting-switch"
+                  type="checkbox"
+                  role="switch"
+                  disabled
+                  :aria-describedby="'help-' + item.key"
+                />
+              </label>
+              <div
+                v-else-if="item.flags === 2"
+                class="setting-input setting-fixed"
+                :class="{ 'with-unit': field(item).unit }"
+              >
+                <UiInput
+                  :id="'setting-' + item.key"
+                  :model-value="values[item.key]"
+                  disabled
+                  readonly
+                  :aria-describedby="'help-' + item.key"
+                />
+                <span v-if="field(item).unit" class="input-unit">{{
+                  field(item).unit
+                }}</span>
+              </div>
               <label
                 v-else-if="item.type === 'bool'"
                 class="setting-toggle"
@@ -291,14 +304,10 @@ watch(panel, load, { immediate: true });
                 />
               </label>
               <MarkdownEditor
-                v-else-if="
-                  [
-                    'site_announcement_content',
-                    'site_footer_markdown',
-                  ].includes(item.key)
-                "
+                v-else-if="markdownKeys.includes(item.key)"
                 v-model="values[item.key]"
                 :disabled="saving || loading"
+                resizable
               />
               <UiInput
                 type="textarea"
@@ -338,7 +347,7 @@ watch(panel, load, { immediate: true });
         </div>
       </component>
     </UiFieldset>
-    <div class="settings-savebar">
+    <div v-if="dirty || saving" class="settings-savebar">
       <span role="status" :class="dirty ? 'unsaved-state' : 'muted'">{{
         saving
           ? "正在保存…"
@@ -352,7 +361,7 @@ watch(panel, load, { immediate: true });
           :disabled="!dirty || saving || confirming"
           @click="reset"
         >
-          撤销修改</UiButton
+          撤销</UiButton
         ><UiButton class="primary" :disabled="!dirty || saving || confirming">
           {{ saving ? "正在保存…" : "保存设置" }}
         </UiButton>

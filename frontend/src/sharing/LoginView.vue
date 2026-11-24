@@ -85,6 +85,14 @@ async function login() {
 </script>
 <template>
   <section class="panel login-panel">
+    <nav class="page-segment login-modes" aria-label="登录方式">
+      <RouterLink :to="{ path: '/login', query: route.query }"
+        >API Key 登录</RouterLink
+      >
+      <RouterLink :to="{ path: '/admin/login', query: route.query }"
+        >管理员登录</RouterLink
+      >
+    </nav>
     <h1>{{ mode === "admin" ? "管理员登录" : "API Key 登录" }}</h1>
     <p class="muted">
       {{
@@ -110,6 +118,8 @@ async function login() {
         >API Key<UiInput
           v-model="apiKey"
           type="password"
+          aria-label="API Key"
+          placeholder="粘贴密钥"
           autocomplete="off"
           required
       /></label>
@@ -118,11 +128,5 @@ async function login() {
         {{ busy ? "正在登录…" : "登录" }}
       </UiButton>
     </form>
-    <p class="login-alternative">
-      <RouterLink v-if="mode === 'apikey'" to="/admin/login"
-        >管理员登录 →</RouterLink
-      >
-      <RouterLink v-else to="/login">使用 API Key 登录 →</RouterLink>
-    </p>
   </section>
 </template>

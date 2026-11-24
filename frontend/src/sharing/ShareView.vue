@@ -1,30 +1,25 @@
 <script setup>
-import {
-  computed,
-  defineAsyncComponent,
-  onMounted,
-  ref,
-  watch,
-  onBeforeUnmount,
-} from "vue";
+import Icon from "./Icon.vue";
+import { computed, onMounted, ref, watch, onBeforeUnmount } from "vue";
 import { useRoute } from "vue-router";
 import { request, contentURL } from "./api.js";
 import { settings } from "./settings.js";
 import { session } from "./session.js";
+import { fileDisplay, formatFileSize } from "./file-display.js";
+import SharePreviewContent from "./SharePreviewContent.vue";
 import {
   readShareAccess,
   saveShareAccess,
   clearShareAccess,
 } from "./share-access.js";
-const MarkdownPreview = defineAsyncComponent(
-  () => import("./MarkdownPreview.vue"),
-);
 const route = useRoute();
 const record = ref(null);
 const password = ref("");
 const needsPassword = ref(false);
 const busy = ref(false);
 const error = ref("");
+const copied = ref(false);
+const lockedTitle = ref("");
 const unavailableMessage = "分享已失效或不存在";
 const text = ref("");
 const truncated = ref(false);
@@ -34,6 +29,26 @@ const previewLoading = ref(false);
 let controller;
 const isFile = computed(() => route.meta.fileShare === true);
 const isCollection = computed(() => Boolean(record.value?.files?.length));
+const shareTitle = computed(
+  () => record.value?.filename || record.value?.title || "一份临时分享",
+);
+const expiresAt = computed(() =>
+  record.value?.expires_at ? new Date(record.value.expires_at) : null,
+);
+const shareExpired = computed(() =>
+  Boolean(
+    record.value?.expiry_reason ||
+    (expiresAt.value && expiresAt.value.getTime() <= Date.now()),
+  ),
+);
+const expiryLabel = computed(() => {
+  if (!expiresAt.value) return "长期保留";
+  const minutes = Math.ceil((expiresAt.value.getTime() - Date.now()) / 60000);
+  if (minutes <= 0) return "已过期";
+  if (minutes >= 1440) return `剩余 ${Math.ceil(minutes / 1440)} 天`;
+  if (minutes >= 60) return `剩余 ${Math.ceil(minutes / 60)} 小时`;
+  return `剩余 ${minutes} 分钟`;
+});
 const previewRecord = computed(() => selectedFile.value || record.value);
 const url = computed(() =>
   previewRecord.value?.contentUrl
@@ -120,6 +135,7 @@ async function load(verify = false) {
   controller = new AbortController();
   busy.value = true;
   error.value = "";
+  copied.value = false;
   record.value = null;
   selectedFile.value = null;
   previewLoading.value = false;
@@ -128,7 +144,10 @@ async function load(verify = false) {
   const active = controller;
   const accessType = isFile.value ? "file" : "text";
   const accessSlug = String(route.params.slug);
-  if (!verify) needsPassword.value = false;
+  if (!verify) {
+    needsPassword.value = false;
+    lockedTitle.value = "";
+  }
   try {
     const slug = encodeURIComponent(route.params.slug);
     // 管理员查看使用认证入口，普通用户和访客继续使用公开分享协议。
@@ -158,6 +177,7 @@ async function load(verify = false) {
       data.requires_password || data.requiresPassword,
     );
     if (needsPassword.value) {
+      lockedTitle.value = data.filename || data.title || "";
       clearShareAccess(accessType, accessSlug);
       return;
     }
@@ -188,6 +208,7 @@ async function openFile(file) {
   text.value = "";
   truncated.value = false;
   error.value = "";
+  copied.value = false;
   markdown.value = ["md", "markdown"].includes(extension.value);
   previewLoading.value = true;
   try {
@@ -211,9 +232,20 @@ function closePreview() {
 async function copy() {
   try {
     await navigator.clipboard.writeText(text.value);
+    copied.value = true;
   } catch {
     error.value = "复制失败，请手动选择文本";
   }
+}
+function downloadMarkdown() {
+  const url = URL.createObjectURL(
+    new Blob([text.value], { type: "text/markdown;charset=utf-8" }),
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${shareTitle.value.replace(/[\\/:*?"<>|]/g, "_").replace(/\.md$/i, "") || "分享"}.md`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 onMounted(() => load());
 watch(
@@ -223,149 +255,223 @@ watch(
 onBeforeUnmount(() => controller?.abort());
 </script>
 <template>
-  <section v-if="busy" class="panel empty">正在读取分享…</section>
-  <section v-else-if="needsPassword" class="panel login-panel">
+  <section v-if="busy && !needsPassword" class="panel empty">
+    正在读取分享…
+  </section>
+  <section
+    v-else-if="needsPassword"
+    class="panel login-panel share-lock"
+    :class="{ 'share-lock-error': error }"
+  >
+    <span class="share-lock-icon" aria-hidden="true"><Icon name="lock" /></span>
     <h1>这个分享需要密码</h1>
-    <form @submit.prevent="load(true)">
-      <label
-        >访问密码<UiInput
-          v-model="password"
-          type="password"
-          required
-          autocomplete="off"
-      /></label>
-      <p v-if="error" class="error">{{ error }}</p>
-      <UiButton class="primary">打开分享</UiButton>
+    <p class="muted">输入分享者提供的访问密码</p>
+    <div v-if="lockedTitle" class="share-lock-meta">
+      <strong>{{ lockedTitle }}</strong
+      ><span>{{ isFile ? "文件分享" : "文本分享" }}</span>
+    </div>
+    <form @submit.prevent="!busy && load(true)">
+      <UiInput
+        v-model="password"
+        type="password"
+        aria-label="访问密码"
+        placeholder="访问密码"
+        required
+        autocomplete="off"
+      />
+      <UiButton class="primary" :disabled="busy">{{
+        busy ? "正在打开…" : "打开分享"
+      }}</UiButton>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
     </form>
   </section>
-  <template v-else-if="record"
-    ><div class="page-heading">
-      <p class="eyebrow">{{ isFile ? "文件分享" : "文本分享" }}</p>
-      <h1>{{ record.filename || record.title || "一份临时分享" }}</h1>
-      <p class="muted">
-        {{
-          record.expires_at
-            ? "有效期至 " + new Date(record.expires_at).toLocaleString()
-            : "长期保留"
-        }}<span v-if="isFile">
-          · {{ (record.size / 1048576).toFixed(2) }} MiB</span
-        >
-      </p>
-    </div>
-    <section class="panel">
-      <p
-        v-if="record.admin_preview || record.owner_preview"
-        class="notice"
-        role="status"
-      >
-        {{ record.admin_preview ? "管理员查看" : "创建者查看"
-        }}{{
-          record.expiry_reason ? " · 分享已失效：" + record.expiry_reason : ""
-        }}，本次查看不消耗分享次数。
-      </p>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <template v-if="isCollection">
-        <div class="collection-toolbar">
-          <strong>{{ record.files.length }} 个文件</strong>
-          <a
-            class="button primary"
-            :href="contentURL(record.archiveUrl)"
-            referrerpolicy="no-referrer"
-            >打包下载 ZIP</a
-          >
-        </div>
-        <ul class="collection-files">
-          <li
-            v-for="file in record.files"
-            :key="file.id"
-            :class="{ active: selectedFile?.id === file.id }"
-          >
-            <UiButton
-              type="button"
-              class="collection-file-name"
-              @click="openFile(file)"
-              :aria-label="'预览 ' + file.filename"
-            >
-              {{ file.filename }}
-            </UiButton>
-            <small class="muted"
-              >{{ (file.size / 1048576).toFixed(2) }} MiB</small
-            >
-            <a
-              class="button"
-              :href="contentURL(file.downloadUrl)"
-              referrerpolicy="no-referrer"
-              :aria-label="'下载 ' + file.filename"
-              >下载</a
-            >
-          </li>
-        </ul>
-        <div v-if="selectedFile" class="collection-preview-heading">
-          <h2>{{ selectedFile.filename }}</h2>
-          <UiButton type="button" @click="closePreview">收起预览</UiButton>
-        </div>
-      </template>
-      <div v-if="previewLoading" class="empty">正在读取文件…</div>
-      <template v-else-if="!isCollection || selectedFile">
-        <template v-if="kind === 'text'"
-          ><div class="editor-heading">
-            <div class="tabs">
-              <UiButton :class="{ active: markdown }" @click="markdown = true">
-                Markdown</UiButton
-              ><UiButton
-                :class="{ active: !markdown }"
-                @click="markdown = false"
-              >
-                原文
-              </UiButton>
-            </div>
-            <UiButton @click="copy">复制文本</UiButton>
-          </div>
-          <MarkdownPreview v-if="markdown" :content="text" />
-          <pre v-else class="plain-preview">{{ text }}</pre>
-          <p v-if="truncated" class="notice">
-            仅预览前
-            {{ settings.preview_max_text_kb || 512 }} KiB，下载可获取完整文件。
-          </p></template
-        >
-        <img
-          v-else-if="kind === 'image'"
-          :src="url"
-          :alt="previewRecord.filename"
-          class="image-preview"
-          referrerpolicy="no-referrer"
-        />
-        <video
-          v-else-if="kind === 'video'"
-          :src="url"
-          controls
-          playsinline
-          preload="none"
-          class="video-preview"
-        ></video>
-        <audio
-          v-else-if="kind === 'audio'"
-          :src="url"
-          controls
-          preload="none"
-          class="audio-preview"
-        ></audio>
-        <div v-else class="empty">
-          <h2>{{ previewRecord.filename }}</h2>
-          <p class="muted">此文件不提供在线预览，可以直接下载。</p>
-        </div>
-        <div v-if="isFile" class="actions">
-          <span class="muted small">浏览器原生播放，格式支持取决于浏览器。</span
-          ><a
-            class="button primary"
-            :href="contentURL(previewRecord.downloadUrl)"
-            referrerpolicy="no-referrer"
-            >下载文件</a
-          >
-        </div>
-      </template>
-    </section></template
+  <article
+    v-else-if="record"
+    class="panel share-view-card share-view-mobile-actions"
   >
+    <header class="share-view-heading">
+      <div class="share-view-title">
+        <h1>{{ shareTitle }}</h1>
+        <p v-if="isCollection" class="muted">
+          文件合集 · {{ record.files.length }} 个文件 ·
+          {{ formatFileSize(record.size) }}
+        </p>
+        <p v-else-if="isFile" class="muted">
+          文件分享 · {{ formatFileSize(record.size) }}
+        </p>
+      </div>
+      <div class="share-view-tags">
+        <span class="page-tag" :class="shareExpired ? 'failure' : 'success'">{{
+          shareExpired ? "已失效" : "有效"
+        }}</span>
+        <span class="page-tag" :title="expiresAt?.toLocaleString()">{{
+          expiryLabel
+        }}</span>
+        <span
+          v-if="record.max_views > 0 && record.views != null"
+          class="page-tag"
+          >查看 {{ record.views }} / {{ record.max_views }}</span
+        >
+        <span
+          v-if="record.has_password || record.hasPassword"
+          class="page-tag accent"
+          >密码保护</span
+        >
+      </div>
+      <div v-if="isCollection" class="share-archive-actions">
+        <UiButton
+          class="primary"
+          tag="a"
+          icon="download"
+          :href="contentURL(record.archiveUrl)"
+          referrerpolicy="no-referrer"
+          >打包下载 ZIP</UiButton
+        >
+      </div>
+    </header>
+
+    <p
+      v-if="record.admin_preview || record.owner_preview"
+      class="notice share-view-notice"
+      role="status"
+    >
+      {{ record.admin_preview ? "管理员查看" : "创建者查看"
+      }}{{
+        record.expiry_reason ? " · 分享已失效：" + record.expiry_reason : ""
+      }}，本次查看不消耗分享次数。
+    </p>
+    <p v-if="error" class="error share-view-notice" role="alert">{{ error }}</p>
+
+    <ul v-if="isCollection" class="collection-files collection-file-list">
+      <li
+        v-for="file in record.files"
+        :key="file.id"
+        :class="{ active: selectedFile?.id === file.id }"
+      >
+        <div class="collection-file-row">
+          <span
+            class="file-ext"
+            :data-kind="fileDisplay(file.filename).kind"
+            aria-hidden="true"
+            >{{ fileDisplay(file.filename).label }}</span
+          >
+          <strong>{{ file.filename }}</strong>
+          <small class="muted">{{ formatFileSize(file.size) }}</small>
+          <UiButton
+            type="button"
+            size="small"
+            :aria-label="
+              selectedFile?.id === file.id
+                ? '收起预览 ' + file.filename
+                : '预览 ' + file.filename
+            "
+            :aria-expanded="selectedFile?.id === file.id"
+            @click="
+              selectedFile?.id === file.id ? closePreview() : openFile(file)
+            "
+            >{{ selectedFile?.id === file.id ? "收起" : "预览" }}</UiButton
+          >
+          <UiButton
+            tag="a"
+            size="small"
+            :href="contentURL(file.downloadUrl)"
+            referrerpolicy="no-referrer"
+            :aria-label="'下载 ' + file.filename"
+            >下载</UiButton
+          >
+        </div>
+        <div
+          v-if="selectedFile?.id === file.id"
+          class="collection-inline-preview"
+        >
+          <p v-if="previewLoading" class="empty">正在读取文件…</p>
+          <template v-else>
+            <div v-if="kind === 'text'" class="share-preview-toolbar">
+              <div class="page-segment" role="group" aria-label="文本预览方式">
+                <button
+                  type="button"
+                  :aria-pressed="markdown"
+                  @click="markdown = true"
+                >
+                  Markdown
+                </button>
+                <button
+                  type="button"
+                  :aria-pressed="!markdown"
+                  @click="markdown = false"
+                >
+                  原文
+                </button>
+              </div>
+              <UiButton type="button" size="small" @click="copy">{{
+                copied ? "已复制" : "复制全文"
+              }}</UiButton>
+            </div>
+            <SharePreviewContent
+              v-model="markdown"
+              :kind="kind"
+              :text="text"
+              :url="url"
+              :name="file.filename"
+              :truncated="truncated"
+            />
+          </template>
+        </div>
+      </li>
+    </ul>
+    <template v-else>
+      <div
+        v-if="kind === 'text'"
+        class="share-preview-toolbar"
+        :class="{ 'share-text-actions': !isFile }"
+      >
+        <div class="page-segment" role="group" aria-label="文本预览方式">
+          <button
+            type="button"
+            :aria-pressed="markdown"
+            @click="markdown = true"
+          >
+            Markdown
+          </button>
+          <button
+            type="button"
+            :aria-pressed="!markdown"
+            @click="markdown = false"
+          >
+            原文
+          </button>
+        </div>
+        <UiButton type="button" size="small" @click="copy">{{
+          copied ? "已复制" : "复制全文"
+        }}</UiButton>
+        <UiButton
+          v-if="!isFile"
+          type="button"
+          size="small"
+          @click="downloadMarkdown"
+          >下载 .md</UiButton
+        >
+      </div>
+      <SharePreviewContent
+        v-model="markdown"
+        :kind="kind"
+        :text="text"
+        :url="url"
+        :name="previewRecord.filename"
+        :truncated="truncated"
+      />
+      <div v-if="isFile" class="share-single-download">
+        <UiButton
+          class="primary"
+          tag="a"
+          icon="download"
+          :href="contentURL(previewRecord.downloadUrl)"
+          referrerpolicy="no-referrer"
+          >下载文件</UiButton
+        >
+      </div>
+    </template>
+  </article>
   <section v-else class="panel empty">
     <h1>分享暂时无法打开</h1>
     <p class="error" role="alert">{{ error }}</p>

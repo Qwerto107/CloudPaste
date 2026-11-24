@@ -1,5 +1,5 @@
 <script setup>
-import { ref, useId } from "vue";
+import { computed, ref, useId, useTemplateRef } from "vue";
 import { MdEditor, config } from "md-editor-v3";
 import { EditorView } from "@codemirror/view";
 import screenfull from "screenfull";
@@ -13,11 +13,19 @@ import { embeddedImage } from "./images.js";
 const props = defineProps({
   modelValue: { type: String, default: "" },
   disabled: Boolean,
+  compact: Boolean,
+  // 允许拖动右下角调整编辑区高度（用于设置页等嵌入场景）。
+  resizable: Boolean,
 });
 const emit = defineEmits(["update:modelValue"]);
 const disabled = useDisabled(props);
 const dark = useTheme();
 const imageError = ref("");
+const editor = useTemplateRef("editor");
+const split = ref(false);
+const characterCount = computed(
+  () => props.modelValue.replace(/\s/g, "").length,
+);
 // 公告、页脚和编辑区可能同时存在，为每个实例提供独立标识。
 const editorId = `markdown-editor-${useId()}`;
 // 编辑器只启用基础 Markdown；所有预览 HTML 继续经过本站的安全过滤。
@@ -42,20 +50,29 @@ const toolbar = [
   "strikeThrough",
   "title",
   "quote",
+  "-",
   "unorderedList",
   "orderedList",
+  "table",
   "codeRow",
   "code",
+  "-",
   "link",
   "image",
-  "table",
   "-",
   "revoke",
   "next",
-  "=",
-  "preview",
-  "fullscreen",
 ];
+const activeToolbar = computed(() => [
+  ...toolbar,
+  "=",
+  props.compact ? 0 : "preview",
+  "fullscreen",
+]);
+function showPreview(value) {
+  split.value = value;
+  editor.value?.togglePreview(value);
+}
 function clean(html) {
   return sanitizeHTML(html, settings.preview_allow_external_images === "true");
 }
@@ -80,8 +97,10 @@ async function insertImages(files, callback) {
 </script>
 <template>
   <MdEditor
+    ref="editor"
     :id="editorId"
     class="sharing-editor"
+    :class="{ 'compact-editor': compact, 'resizable-editor': resizable }"
     :model-value="modelValue"
     :theme="dark ? 'dark' : 'light'"
     language="zh-CN"
@@ -89,8 +108,8 @@ async function insertImages(files, callback) {
     :preview="false"
     :disabled="disabled"
     :read-only="disabled"
-    :toolbars="toolbar"
-    :footers="['markdownTotal']"
+    :toolbars="activeToolbar"
+    :footers="compact ? [0] : ['markdownTotal']"
     :sanitize="clean"
     no-mermaid
     no-katex
@@ -101,10 +120,48 @@ async function insertImages(files, callback) {
     no-img-zoom-in
     @on-upload-img="insertImages"
     @update:model-value="emit('update:modelValue', $event)"
-  />
-  <p class="muted small">
+  >
+    <template #defToolbars>
+      <div
+        class="page-segment editor-modes"
+        aria-label="编辑器视图"
+        role="group"
+      >
+        <button
+          type="button"
+          :aria-pressed="!split"
+          @click="showPreview(false)"
+        >
+          编辑
+        </button>
+        <button type="button" :aria-pressed="split" @click="showPreview(true)">
+          分栏预览
+        </button>
+      </div>
+    </template>
+    <template #defFooters>
+      <div class="editor-status">
+        <span>{{ characterCount }} 字</span><span>Markdown</span
+        ><span title="嵌入图片每张最多 1 MiB；站外图片需启用站外图片预览。"
+          >支持粘贴图片 · 单张 ≤ 1 MiB</span
+        >
+      </div>
+    </template>
+  </MdEditor>
+  <p v-if="!compact" class="muted small">
     支持粘贴图片或通过工具栏插入图片链接；嵌入图片每张最多 1
     MiB。站外图片需启用站外图片预览。
   </p>
   <p v-if="imageError" class="error" role="alert">{{ imageError }}</p>
 </template>
+
+<style>
+/* 可拖动调整高度：外层容器负责 resize，编辑器内部随之填满。 */
+.sharing-editor.resizable-editor.md-editor:not(.md-editor-fullscreen) {
+  --editor-height: 260px;
+  min-height: 180px;
+  max-height: 80vh;
+  resize: vertical;
+  overflow: hidden;
+}
+</style>

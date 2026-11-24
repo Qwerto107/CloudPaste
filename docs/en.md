@@ -49,7 +49,7 @@ Self-hosted text and file sharing, with custom links, expiration, passwords and 
 | --- | --- |
 | Text sharing | Plain text and Markdown, with editing and preview modes |
 | File sharing | Drag and drop, batch uploads, individual link names and retrying remaining files |
-| Link controls | Custom names, passwords, view limits and expiration from minutes to days |
+| Link controls | Custom names, passwords, view limits and expiration from hours to days, or a custom duration |
 | Previews | Text, images, browser-native video and audio; download other formats |
 | Storage | Local directories and S3, connection tests, defaults and access controls |
 | API Keys | Generated or custom values, separate sharing and management permissions |

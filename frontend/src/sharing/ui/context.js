@@ -1,6 +1,7 @@
 import { computed, inject, markRaw } from "vue";
 
 export const disabledKey = Symbol("表单禁用状态");
+export const selectMountKey = Symbol("下拉菜单挂载位置");
 export function useDisabled(props) {
   const parent = inject(
     disabledKey,

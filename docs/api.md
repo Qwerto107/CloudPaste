@@ -205,7 +205,7 @@ PUT /api/files/{id} 支持 filename、remark、password、clearPassword、expire
 
 CloudPaste uses the IP2Location LITE database for [IP geolocation](https://www.ip2location.com).
 
-`code` 为一个大写字母加四位数字（包含前导零），例如 `A1234`。页面显示 `A-1234`，复制得到 `A1234`；加入接口也接受 `a-1234` 与包含空白的形式，统一解析后再匹配。配对仍需创建者确认，且保留有效期、猜测限流和两人席位限制。
+`code` 为四位数字（包含前导零），例如 `0429`。加入接口也接受包含空白或横杠的形式，统一去掉后再匹配。配对仍需创建者确认，且保留 5 分钟有效期、猜测限流和两人席位限制。
 
 页面「自动同意设备加入」默认为关闭；开启后由创建者客户端在收到 `joining` 时自动发送原有 `confirm` 消息，不增加新的接口字段或绕过服务端配对检查。
 

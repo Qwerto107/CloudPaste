@@ -2,6 +2,22 @@
 defineProps({ name: { type: String, default: "file" } });
 // 只使用本站内置路径，避免为了少量图标加载字体或第三方图标库。
 const paths = {
+  "text-lines": "M4 6h16M4 12h16M4 18h10",
+  clipboard: "M9 5H6a2 2 0 0 0-2 2v13h16V7a2 2 0 0 0-2-2h-3M9 3h6v5H9Z",
+  shield: "M12 22s7-3 7-10V5l-7-3-7 3v7c0 7 7 10 7 10Z",
+  gear: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2",
+  check: "m5 12 5 5L20 7",
+  plus: "M12 5v14M5 12h14",
+  login: "M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3",
+  "chevron-down": "m6 9 6 6 6-6",
+  back: "m15 18-6-6 6-6",
+  info: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM12 11v6m0-10h.01",
+  image:
+    "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Zm0 12 5-5 4 4 3-3 6 6M8 8h.01",
+  lock: "M5 11h14v10H5Zm3 0V7a4 4 0 0 1 8 0v4",
+  download: "M12 4v12m-5-5 5 5 5-5M4 20h16",
+  attachment:
+    "m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8",
   close: "M6 6l12 12M18 6 6 18",
   retry: "M20 7v5h-5M4 17v-5h5M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9",
   transfer: "M3 7h17m-4-4 4 4-4 4M21 17H4m4-4-4 4 4 4",

@@ -351,15 +351,20 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 		return transferBusy()
 	}
 	var code string
-	for code == "" {
-		// 均匀生成一个字母和四位数字，保留前导零；仍检查在线房间是否重名。
-		number, err := rand.Int(rand.Reader, big.NewInt(26*10000))
+	for attempt := 0; code == ""; attempt++ {
+		// 在线房间过多时不再无限重试，避免持锁空转。
+		if attempt >= 64 {
+			h.mu.Unlock()
+			return transferBusy()
+		}
+		// 均匀生成四位数字，保留前导零；仍检查在线房间是否重名。
+		// 组合较少，依靠创建者确认、5 分钟有效期与猜测限频防止撞码。
+		number, err := rand.Int(rand.Reader, big.NewInt(10000))
 		if err != nil {
 			h.mu.Unlock()
 			return err
 		}
-		value := number.Int64()
-		code = fmt.Sprintf("%c%04d", 'A'+value/10000, value%10000)
+		code = fmt.Sprintf("%04d", number.Int64())
 		for _, room := range h.rooms {
 			if room.code == code {
 				code = ""

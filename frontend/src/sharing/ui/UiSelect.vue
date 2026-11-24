@@ -1,7 +1,7 @@
 <script setup>
-import { useAttrs, useSlots } from "vue";
+import { inject, useAttrs, useSlots } from "vue";
 import { NSelect } from "naive-ui";
-import { useDisabled } from "./context.js";
+import { selectMountKey, useDisabled } from "./context.js";
 const props = defineProps({
   modelValue: [String, Number],
   disabled: Boolean,
@@ -11,6 +11,7 @@ const emit = defineEmits(["update:modelValue"]);
 const attrs = useAttrs();
 const slots = useSlots();
 const disabled = useDisabled(props);
+const mountTarget = inject(selectMountKey, null);
 function text(node) {
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(text).join("");
@@ -43,6 +44,7 @@ function update(value) {
 </script>
 <template>
   <NSelect
+    :to="mountTarget || undefined"
     :value="modelValue === '' ? null : modelValue"
     :options="options()"
     :disabled="disabled"

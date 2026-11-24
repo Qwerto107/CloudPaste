@@ -98,7 +98,7 @@ func TestTransferCreateRatePerIP(t *testing.T) {
 func TestTransferJoinRatePerIP(t *testing.T) {
 	f := newFixture(t)
 	join := func(ip string) *httptest.ResponseRecorder {
-		return rateLimitRequest(t, f, "POST", "/api/transfer/join", ip, "", map[string]any{"code": "A1234", "name": "测试设备"})
+		return rateLimitRequest(t, f, "POST", "/api/transfer/join", ip, "", map[string]any{"code": "1234", "name": "测试设备"})
 	}
 	// 无效配对码也计数；不同 IP 总请求超过旧全站 120 次后仍可尝试。
 	for ip := 1; ip <= 5; ip++ {

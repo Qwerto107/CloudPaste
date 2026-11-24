@@ -56,6 +56,6 @@ func TestTransferDeviceRejectsExtraFields(t *testing.T) {
 		{"browser": "Chrome"}, {"admin": true}, {"model": strings.Repeat("x", 97)},
 	} {
 		f.request(t, "POST", "/api/transfer/create", f.admin, map[string]any{"name": "设备", "device": device}, nil, 400)
-		f.request(t, "POST", "/api/transfer/join", "", map[string]any{"name": "设备", "code": "A1234", "device": device}, nil, 400)
+		f.request(t, "POST", "/api/transfer/join", "", map[string]any{"name": "设备", "code": "1234", "device": device}, nil, 400)
 	}
 }

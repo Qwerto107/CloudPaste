@@ -165,7 +165,7 @@ func TestTransferDisabledKeepsExistingRelay(t *testing.T) {
 	f, server, sender, receiver := transferPair(t)
 	f.request(t, "PUT", "/api/admin/settings/group/3", f.admin, map[string]any{"transfer_enabled": false}, nil, 200)
 	f.request(t, "POST", "/api/transfer/create", f.admin, map[string]any{"name": "new"}, nil, 404)
-	f.request(t, "POST", "/api/transfer/join", "", map[string]any{"code": "A1234"}, nil, 404)
+	f.request(t, "POST", "/api/transfer/join", "", map[string]any{"code": "1234"}, nil, 404)
 	id, download := offerRelay(t, sender, receiver, 3)
 	response, err := http.Get(server.URL + download)
 	if err != nil {

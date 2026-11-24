@@ -26,6 +26,8 @@
       href="/apple-touch-icon.png?v=chain-cloud-1"
     />
     <title>CloudPaste</title>
+    <!-- 首屏底色与跨页淡入，避免整页跳转时闪白；同源文件，符合 CSP。 -->
+    <link rel="stylesheet" href="/boot.css" />
     <!-- 同源配置在入口模块前加载，无需内联脚本。 -->
     <script src="/config.js"></script>
     <script src="/theme.js"></script>

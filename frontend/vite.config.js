@@ -1,9 +1,27 @@
 import { defineConfig, loadEnv } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { fileURLToPath, URL } from "node:url";
+import { execSync } from "node:child_process";
+// 控制台版本标识使用的构建日期与提交号；CI 优先读取 GITHUB_SHA。
+function buildInfo() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+  let commit = (process.env.GITHUB_SHA || "").slice(0, 7);
+  if (!commit)
+    try {
+      commit = execSync("git rev-parse --short=7 HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+        .toString()
+        .trim();
+    } catch {
+      commit = "unknown";
+    }
+  return { date, commit };
+}
 // 本站仅打包需要的页面；Markdown 按需加载，不生成全量资源预缓存。
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
+  const build = buildInfo();
   return {
     plugins: [vue()],
     // 部署服务器为每次 HTML 响应替换标记，仅授权本页组件生成的样式。
@@ -22,7 +40,8 @@ export default defineConfig(({ mode }) => {
       ],
     },
     define: {
-      __APP_VERSION__: JSON.stringify("0.8.13"),
+      __APP_VERSION__: JSON.stringify("1.0.0"),
+      __APP_COMMIT__: JSON.stringify(build.commit),
       __APP_ENV__: JSON.stringify(env.VITE_APP_ENV || "production"),
       __BACKEND_URL__: JSON.stringify(env.VITE_BACKEND_URL || ""),
     },

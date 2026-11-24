@@ -57,7 +57,7 @@ func TestTransferIPv6RatePrefix(t *testing.T) {
 		{"2001:db8:1:2::1", 404}, {"2001:db8:1:2::2", 404},
 		{"2001:db8:1:2:ffff::abcd", 429}, {"2001:db8:1:3::1", 404},
 	} {
-		w := rateLimitRequest(t, f, "POST", "/api/transfer/join", step.ip, "", map[string]any{"code": "A1234", "name": "test"})
+		w := rateLimitRequest(t, f, "POST", "/api/transfer/join", step.ip, "", map[string]any{"code": "1234", "name": "test"})
 		requireRateStatus(t, w, step.status)
 	}
 }

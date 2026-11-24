@@ -1,0 +1,2930 @@
+/*
+ * 设计稿对齐层（design/cloudpaste-ui-v3.html）
+ * 在 style.css、theme-vivid.css 之后加载，是最终生效的视觉规范：
+ * 尺寸、字号、圆角、颜色均取自设计稿各层样式层叠后的最终值。
+ * 统一以 #app 开头，保证优先级高于组件内的 scoped 样式；只改视觉，不改结构与交互。
+ */
+
+/* ========== 设计令牌 ========== */
+:root {
+  --text: #101326;
+  --background: #f6f7fb;
+  --surface: #ffffff;
+  --surface-subtle: #f4f4f6;
+  --line: #e7e9f1;
+  --line-strong: #d9d9e0;
+  --muted: #626a86;
+  --success: #16a36b;
+  --success-bg: #e6f6ef;
+  --warning: #c98410;
+  --warning-bg: #fdf4e2;
+  --error: #d6455d;
+  --error-bg: #fcebee;
+  --page-sans: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui,
+    sans-serif;
+  --page-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --design-shadow: 0 1px 2px #1013260a, 0 10px 30px -20px #10132633;
+  --design-pop: 0 12px 32px -12px #11121833;
+  --design-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+html[data-theme="dark"] {
+  --text: #eef0ff;
+  --background: #0b0d17;
+  --surface: #131628;
+  --surface-subtle: #1a1e35;
+  --line: #262b47;
+  --line-strong: #394068;
+  --muted: #99a0c2;
+  --success: #4cd39a;
+  --success-bg: #15302a;
+  --warning: #f0b44c;
+  --warning-bg: #352a15;
+  --error: #f27d91;
+  --error-bg: #3a1e28;
+  --design-shadow: inset 0 1px 0 #ffffff0d, 0 20px 40px -24px #000;
+  --design-pop: 0 12px 32px -12px #000;
+}
+
+/* ========== 页面基础 ========== */
+body {
+  font-family: var(--page-sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+#app .site-main {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 20px 24px 36px;
+  box-sizing: border-box;
+}
+#app .site-footer {
+  padding: 20px 0 28px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ========== 顶栏 ========== */
+#app .site-header {
+  height: 52px;
+  min-height: 52px;
+  padding: 0 24px;
+  gap: 20px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: saturate(1.4) blur(10px);
+}
+html[data-theme="dark"] #app .site-header {
+  background: #0b0d17cc;
+  border-bottom-color: #ffffff10;
+}
+#app .brand {
+  gap: 9px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+#app .brand-icon {
+  width: 30px;
+  height: 30px;
+  color: var(--accent);
+}
+#app .site-header .site-navigation a {
+  height: 30px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  border-radius: 8px;
+}
+#app .site-header .site-navigation a:hover {
+  color: var(--text);
+}
+#app .site-header .site-navigation a.nav-current {
+  color: var(--text);
+  font-weight: 600;
+}
+#app .site-header .site-navigation a[data-nav="text"] .icon {
+  color: #6366f1;
+}
+#app .site-header .site-navigation a[data-nav="file"] .icon {
+  color: #0ea5e9;
+}
+#app .site-header .site-navigation a[data-nav="transfer"] .icon {
+  color: #10b981;
+}
+#app .site-header .site-navigation a[data-nav="admin"] .icon {
+  color: #f97316;
+}
+#app .site-header .nav-indicator {
+  border-radius: 8px;
+  background: var(--soft);
+  box-shadow: none;
+}
+#app .header-actions {
+  gap: 4px;
+}
+#app .header-actions .icon-button,
+#app .site-header .icon-button {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--muted);
+}
+#app .account-chip {
+  gap: 7px;
+  margin-right: 4px;
+  padding: 3px 10px 3px 3px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  font-size: 13px;
+}
+#app .account-chip .avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--surface-subtle);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* 站点公告：与内容区同宽 */
+#app .site-announcement {
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  max-width: none;
+}
+
+/* ========== 卡片 ========== */
+#app .panel {
+  border: 1px solid var(--line) !important;
+  border-radius: 14px !important;
+  background: var(--surface);
+  box-shadow: var(--design-shadow) !important;
+}
+html[data-theme="dark"] #app .panel {
+  background: linear-gradient(180deg, #ffffff06, #ffffff00), var(--surface);
+  border-color: #ffffff12 !important;
+}
+
+/* ========== 标题区（文本、文件、互传、后台） ========== */
+#app .page-heading.hero,
+#app .management-heading:has(.page-illustration) {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin: 0 0 16px;
+  padding: 18px 22px !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: 16px;
+  background: linear-gradient(
+    120deg,
+    var(--soft),
+    color-mix(in srgb, var(--accent-2) 10%, var(--surface)) 60%,
+    var(--surface)
+  );
+  overflow: hidden;
+  min-height: 0;
+}
+html[data-theme="dark"] #app .page-heading.hero,
+html[data-theme="dark"] #app .management-heading:has(.page-illustration) {
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--accent) 18%, var(--surface)),
+    var(--surface) 70%
+  );
+  border-color: #ffffff12;
+}
+#app .page-heading.hero h1,
+#app .management-heading:has(.page-illustration) h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+#app .page-heading.hero h1::before,
+#app .management-heading h1::before,
+#app .settings-title h1::before {
+  content: none !important;
+  display: none !important;
+}
+#app .page-heading.hero > div > .muted,
+#app .management-heading:has(.page-illustration) > div > .muted {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+#app .page-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+#app .page-chips li {
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+#app .page-illustration {
+  flex: none;
+  width: 150px;
+  height: 96px;
+  margin: 0 !important;
+}
+/* 后台页头：小标题、大标题；刷新等按钮在插画左侧并靠上 */
+#app .management-heading:has(.page-illustration) {
+  flex-wrap: nowrap;
+  padding-right: 22px !important;
+}
+#app .management-heading:has(.page-illustration) > div {
+  flex: 1;
+  min-width: 0;
+}
+#app .management-heading .eyebrow {
+  margin: 0 0 2px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+#app .management-heading:has(.page-illustration) > .ui-button {
+  position: static !important;
+  align-self: flex-start;
+  margin: 0 0 0 auto !important;
+  order: 0 !important;
+}
+#app .management-heading:has(.page-illustration) > .page-illustration {
+  order: 1 !important;
+}
+/* 设置页：只有标题 */
+#app .settings-title {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+#app .settings-title h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+
+/* ========== 按钮 ========== */
+#app .ui-button,
+body .n-dialog .ui-button {
+  font-weight: 500;
+  box-shadow: none;
+}
+#app .ui-button.n-button--primary-type:not(.n-button--disabled),
+body .n-dialog .ui-button.n-button--primary-type:not(.n-button--disabled) {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
+  color: #fff !important;
+  box-shadow: 0 6px 16px -8px var(--accent) !important;
+}
+#app .ui-button.n-button--primary-type .n-button__border,
+#app .ui-button.n-button--primary-type .n-button__state-border {
+  border: 0 !important;
+}
+#app .ui-button.n-button--primary-type:not(.n-button--disabled):hover {
+  filter: brightness(1.06);
+  box-shadow: 0 10px 22px -8px var(--accent) !important;
+}
+#app .ui-button.n-button--primary-type.n-button--disabled {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
+  color: #fff !important;
+  opacity: 0.45 !important;
+  filter: none;
+  box-shadow: none !important;
+}
+html[data-theme="dark"]
+  #app
+  .ui-button.n-button--primary-type:not(.n-button--disabled) {
+  box-shadow:
+    0 0 0 1px #ffffff14 inset,
+    0 8px 24px -8px var(--accent) !important;
+}
+/* 次要按钮：白底细边框 */
+#app .ui-button.n-button--default-type:not(.n-button--quaternary) {
+  background: var(--surface);
+  color: var(--text);
+}
+#app .ui-button.n-button--default-type:not(.n-button--quaternary):hover {
+  color: var(--accent);
+}
+/* 幽灵按钮：无底无框 */
+#app .ui-button.n-button--quaternary {
+  color: var(--muted);
+}
+#app .ui-button.n-button--quaternary:not(.n-button--disabled):hover {
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+/* 危险按钮：透明底、细边框、红字；悬停填充红色 */
+#app .ui-button.n-button--error-type:not(.n-button--quaternary) {
+  background: transparent !important;
+  color: var(--error) !important;
+}
+#app .ui-button.n-button--error-type:not(.n-button--quaternary) .n-button__border {
+  border: 1px solid var(--line) !important;
+}
+#app .ui-button.n-button--error-type:not(.n-button--quaternary) .n-button__state-border {
+  border: 0 !important;
+}
+#app
+  .ui-button.n-button--error-type:not(.n-button--quaternary):not(
+    .n-button--disabled
+  ):hover {
+  background: var(--error) !important;
+  color: #fff !important;
+}
+#app .ui-button .n-button__icon {
+  font-size: 14px;
+}
+#app .ui-button.n-button--small-type .n-button__icon,
+#app .ui-button.n-button--small-type .icon {
+  width: 13px;
+  height: 13px;
+}
+
+/* ========== 输入框 ========== */
+#app .ui-input.n-input {
+  font-size: 13px;
+}
+#app .ui-input.n-input:not(.n-input--textarea) {
+  --n-height: 32px;
+}
+#app .ui-input.n-input.n-input--textarea .n-input__textarea-el,
+#app .ui-input.n-input.n-input--textarea .n-input__placeholder {
+  padding: 7px 10px;
+}
+html[data-theme="dark"] #app .ui-input.n-input {
+  --n-color: #ffffff08 !important;
+  --n-color-focus: #ffffff08 !important;
+}
+/* 带前缀的输入组（/paste/、/file/、次后失效、单位） */
+#app .share-name-input {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  overflow: hidden;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+#app .share-name-input:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+#app .share-name-input > span {
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--page-mono);
+  white-space: nowrap;
+}
+#app .share-name-input .ui-input {
+  --n-color: transparent !important;
+  --n-color-focus: transparent !important;
+  --n-box-shadow-focus: none !important;
+}
+#app .share-name-input .n-input__border,
+#app .share-name-input .n-input__state-border {
+  display: none;
+}
+html[data-theme="dark"] #app .share-name-input {
+  background: #ffffff08;
+  border-color: #ffffff14;
+}
+
+/* ========== 开关、勾选框 ========== */
+#app .page-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 30px !important;
+  height: 18px !important;
+  margin: 0;
+  border: 0;
+  border-radius: 99px;
+  background: var(--line-strong) !important;
+  cursor: pointer;
+  transition: background 0.25s;
+}
+#app .page-switch::after,
+#app .page-switch::before {
+  content: "";
+  position: absolute;
+  top: 2px !important;
+  left: 2px !important;
+  width: 14px !important;
+  height: 14px !important;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px #0003;
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+#app .page-switch::before {
+  display: none;
+}
+#app .page-switch:checked {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
+}
+#app .page-switch:checked::after {
+  transform: translateX(12px) !important;
+}
+#app .page-switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+#app .page-switch:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  outline-offset: 2px;
+}
+#app .n-switch.n-switch--active .n-switch__rail {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
+}
+#app .n-checkbox.n-checkbox--checked .n-checkbox-box {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
+}
+#app .n-checkbox.n-checkbox--checked .n-checkbox-box__border {
+  border-color: transparent !important;
+}
+#app .check,
+#app label.check {
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* 开关行：左侧名称（可带说明），右侧开关 */
+#app .switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 400;
+}
+#app .switch-row > span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+#app .switch-row > span > small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+/* ========== 分段按钮 ========== */
+#app .page-segment {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--surface-subtle);
+}
+#app .page-segment button {
+  min-height: 0;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.55;
+  box-shadow: none;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+#app .page-segment button[aria-pressed="true"],
+#app .page-segment button.active,
+#app .page-segment button[aria-selected="true"] {
+  background: var(--soft) !important;
+  color: var(--accent) !important;
+  font-weight: 600;
+  box-shadow: none !important;
+}
+#app .page-segment button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ========== 标签 ========== */
+#app .page-tag,
+#app .badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+#app .page-tag.accent,
+#app .badge {
+  background: var(--soft);
+  color: var(--accent);
+}
+#app .page-tag.success {
+  background: var(--success-bg);
+  color: var(--success);
+}
+#app .page-tag.failure {
+  background: var(--error-bg);
+  color: var(--error);
+}
+#app .page-tag.warning {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+#app .page-tag.success::before,
+#app .page-tag.failure::before,
+#app .page-tag.warning::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ========== 表单标签 ========== */
+#app .share-settings label,
+#app .share-name-field > label,
+#app .expiry-select > span,
+#app .upload-settings-fields > label,
+#app .transfer-entry-card > label,
+#app .transfer-connection-fields > label,
+#app .management-editor label:not(.check) {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+#app .share-name-field {
+  display: grid;
+  gap: 4px;
+}
+#app .share-settings small.muted,
+#app .upload-settings-fields small.muted {
+  font-size: 12px;
+}
+
+/* ========== 文本 / 文件分享：布局 ========== */
+#app .share-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 288px;
+  gap: 14px;
+  align-items: start;
+}
+#app .share-sidebar {
+  display: grid;
+  gap: 12px;
+  position: sticky;
+  top: 66px;
+}
+#app .share-settings {
+  display: grid;
+  gap: 11px;
+  padding: 14px !important;
+}
+#app .share-settings > h2,
+#app .share-settings h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+#app .share-settings .upload-settings-fields,
+#app .share-access-fields {
+  display: grid;
+  gap: 11px;
+}
+#app .share-access-fields .switch-row:not(:first-child) {
+  margin-top: 0;
+}
+#app .share-submit {
+  width: 100%;
+  height: 34px;
+}
+#app .share-shortcut {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+#app .share-cancel {
+  width: 100%;
+}
+
+/* 有效期 */
+#app .expiry-select {
+  display: grid;
+  gap: 4px;
+}
+#app .expiry-quick {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 4px !important;
+}
+#app .expiry-chip {
+  height: 28px;
+  min-width: 0;
+  padding: 0 4px;
+  border: 1px solid var(--line) !important;
+  border-radius: 6px !important;
+  background: var(--surface) !important;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  box-shadow: none !important;
+  grid-column: auto !important;
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    color 0.2s,
+    background 0.2s;
+}
+#app .expiry-chip:hover {
+  border-color: var(--line-strong) !important;
+  color: var(--text);
+}
+#app .expiry-chip.active {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent) !important;
+  background: var(--soft) !important;
+  color: var(--accent) !important;
+  font-weight: 600;
+}
+#app .expiry-chip:last-child {
+  grid-column: span 2 !important;
+}
+#app .expiry-custom {
+  display: flex;
+  gap: 6px;
+  padding-top: 6px;
+}
+#app .expiry-custom > .ui-input {
+  flex: 1;
+}
+#app .expiry-custom > .n-select {
+  width: 92px;
+  flex: none;
+}
+#app .expiry-hint,
+#app .expiry-error {
+  font-size: 12px;
+}
+
+/* 编辑器卡片 */
+#app .compose-panel {
+  padding: 0 !important;
+  overflow: hidden;
+}
+#app .compose-panel .title-input {
+  --n-color: transparent !important;
+  --n-color-focus: transparent !important;
+  --n-box-shadow-focus: none !important;
+  --n-height: auto !important;
+  font-size: 17px;
+  font-weight: 600;
+}
+#app .compose-panel .title-input .n-input__input-el,
+#app .compose-panel .title-input .n-input__placeholder {
+  height: auto;
+  padding: 14px 16px 4px !important;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+#app .compose-panel .title-input .n-input__border,
+#app .compose-panel .title-input .n-input__state-border {
+  display: none;
+}
+#app .compose-panel .md-editor-toolbar-wrapper {
+  padding: 5px 8px !important;
+  border-bottom: 1px solid var(--line) !important;
+  background: transparent !important;
+}
+#app .compose-panel .md-editor-toolbar-item {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--muted);
+}
+#app .compose-panel .md-editor-toolbar-item:hover {
+  background: var(--soft);
+  color: var(--accent);
+}
+#app .compose-panel .md-editor-toolbar-divider {
+  height: 18px;
+  margin: 0 4px;
+  background: var(--line);
+}
+#app .editor-modes {
+  margin: 0 4px 0 auto;
+}
+#app .editor-modes button {
+  height: 22px;
+  padding: 0 10px !important;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+#app .compose-panel .md-editor-input-wrapper .cm-content,
+#app .compose-panel .cm-editor .cm-line {
+  font-family: var(--page-mono);
+  font-size: 13px;
+  line-height: 1.75;
+}
+#app .compose-panel .cm-editor .cm-content {
+  padding: 10px 16px 14px !important;
+}
+#app .compose-panel .md-editor-content {
+  min-height: 360px;
+}
+#app .compose-panel .md-editor-footer {
+  height: auto;
+  min-height: 0;
+  padding: 6px 16px !important;
+  border-top: 1px solid var(--line);
+}
+#app .editor-status {
+  display: flex;
+  gap: 14px;
+  width: 100%;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+#app .editor-status > :last-child {
+  margin-left: auto;
+}
+
+/* 创建结果卡 */
+#app .share-created {
+  display: grid;
+  gap: 10px;
+  padding: 14px !important;
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line)) !important;
+}
+#app .share-created-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#app .share-created-heading h2 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+#app .share-created-heading .muted {
+  margin: 0;
+  font-size: 12px;
+}
+#app .share-created-check {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--soft);
+  color: var(--accent);
+}
+#app .share-created-check .icon {
+  width: 16px;
+  height: 16px;
+}
+#app .created-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 5px 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+}
+#app .created-link .ui-input {
+  --n-color: transparent !important;
+  --n-color-focus: transparent !important;
+  --n-text-color: var(--accent) !important;
+  --n-height: 26px !important;
+  --n-padding-left: 0 !important;
+  font-family: var(--page-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+#app .created-link .n-input__border,
+#app .created-link .n-input__state-border {
+  display: none;
+}
+#app .result-actions {
+  display: flex;
+  gap: 6px;
+}
+#app .result-actions > * {
+  flex: 1;
+}
+
+/* 文件分享：上传区与文件行 */
+#app .upload-workspace {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+#app .drop-zone {
+  padding: 30px 16px !important;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 40%, var(--line)) !important;
+  border-radius: 10px !important;
+  background: linear-gradient(180deg, var(--soft), var(--surface) 75%) !important;
+  text-align: center;
+}
+#app .drop-zone.drag-over {
+  border-style: solid !important;
+  border-color: var(--accent) !important;
+  background: var(--soft) !important;
+  transform: scale(1.008);
+}
+#app .upload-drop-icon {
+  display: grid;
+  place-items: center;
+  width: 36px !important;
+  height: 36px !important;
+  margin: 0 auto 10px !important;
+  border-radius: 8px !important;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
+  color: #fff !important;
+  box-shadow: 0 12px 24px -10px var(--accent);
+}
+#app .upload-drop-icon .icon {
+  width: 18px;
+  height: 18px;
+}
+#app .drop-zone h2 {
+  margin: 0 0 4px;
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 700;
+}
+#app .drop-zone > p {
+  margin: 0 0 14px !important;
+  color: var(--muted);
+  font-size: 12px;
+}
+#app .file-queue {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+#app .file-upload-entry {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto auto;
+  gap: 3px 10px;
+  align-items: center;
+  padding: 7px 10px !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+#app .file-upload-entry .file-ext {
+  grid-row: span 2;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  font: 700 9px var(--page-mono);
+}
+#app .file-upload-entry .file-rename {
+  --n-color: transparent !important;
+  --n-color-focus: var(--surface-subtle) !important;
+  --n-box-shadow-focus: none !important;
+  --n-height: 24px !important;
+  --n-padding-left: 4px !important;
+  margin-left: -4px;
+  font-weight: 500;
+}
+#app .file-upload-entry .file-rename .n-input__border,
+#app .file-upload-entry .file-rename .n-input__state-border {
+  display: none;
+}
+#app .file-upload-entry .uploaded-name {
+  font-weight: 500;
+}
+#app .file-upload-size {
+  color: var(--muted);
+  font-family: var(--page-mono);
+  font-size: 12px;
+}
+#app .file-upload-entry progress {
+  grid-column: 2 / 5;
+  height: 4px;
+}
+#app .upload-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 28px 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+#app .upload-empty strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ========== 设备互传：入口 ========== */
+#app .transfer-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 0;
+}
+#app .transfer-entry-card {
+  display: grid !important;
+  align-content: start;
+  gap: 16px !important;
+  padding: 16px !important;
+  background: var(--surface) !important;
+}
+#app .transfer-entry-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+#app .transfer-entry-heading > span {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: var(--soft);
+  color: var(--accent);
+}
+#app .transfer-entry-heading > span .icon {
+  width: 16px;
+  height: 16px;
+}
+#app .transfer-entry-heading h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+#app .transfer-entry-heading .muted {
+  margin: 0;
+  font-size: 12px;
+}
+#app .transfer-options {
+  display: grid;
+  gap: 16px;
+}
+#app .transfer-options > .muted.small,
+#app .transfer-entry-card > .muted.small:not(.transfer-join-safety) {
+  margin: -10px 0 0;
+  font-size: 12px;
+}
+#app .transfer-risk {
+  margin: -8px 0 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 12px;
+}
+#app .transfer-connection-settings {
+  margin: 0;
+}
+#app .transfer-connection-settings > summary {
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 400;
+  cursor: pointer;
+}
+#app .transfer-connection-fields {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+}
+#app .transfer-stun-picks {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 2px 0 6px;
+  border: 0;
+}
+#app .transfer-stun-picks legend {
+  display: none;
+}
+#app .transfer-stun-pick {
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+#app .transfer-stun-pick code {
+  font-family: var(--page-mono);
+  font-size: 13px;
+}
+#app .transfer-entry-card > .ui-button.n-button--primary-type,
+#app .transfer-entry-card form > .ui-button.n-button--primary-type {
+  width: 100%;
+  height: 34px;
+}
+#app .transfer-code-field > label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+#app .transfer-code-input {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+#app .transfer-code-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+#app .transfer-join-safety {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+#app .transfer-join-safety .icon {
+  width: 14px;
+  height: 14px;
+}
+#app .transfer-history-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 10px 14px !important;
+  font-size: 12px;
+}
+
+/* 配对码格子 */
+#app .pair-code {
+  grid-template-columns: repeat(4, 52px) !important;
+  gap: 10px !important;
+  justify-content: center;
+}
+#app .pair-code input {
+  width: 52px !important;
+  height: 58px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 9px !important;
+  background: var(--surface) !important;
+  font: 600 24px var(--page-mono) !important;
+}
+#app .pair-code input:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+#app .pair-code input.filled {
+  border-color: var(--accent) !important;
+  background: var(--soft) !important;
+}
+
+/* ========== 设备互传：等待页 ========== */
+#app .transfer-wait-heading {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+#app .transfer-wait-heading h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+#app .transfer-wait-heading > .ui-button {
+  margin-left: auto;
+}
+#app .transfer-wait-layout.has-code {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+#app .transfer-waiting {
+  display: grid;
+  justify-items: center;
+  gap: 18px !important;
+  padding: 16px !important;
+  text-align: center;
+}
+#app .transfer-waiting .transfer-radar {
+  width: 150px !important;
+  height: 150px !important;
+  margin: 0 auto !important;
+}
+#app .transfer-radar span {
+  width: 60px !important;
+  height: 60px !important;
+  border-radius: 18px !important;
+  box-shadow: 0 14px 30px -10px var(--accent);
+}
+#app .transfer-radar span .icon {
+  width: 24px;
+  height: 24px;
+}
+#app .transfer-waiting .transfer-code {
+  margin: 0 !important;
+  gap: 10px !important;
+  font: 700 52px/1 var(--page-mono) !important;
+  letter-spacing: 0 !important;
+}
+#app .transfer-wait-actions {
+  display: flex;
+  gap: 10px;
+}
+#app .transfer-countdown {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  color: var(--muted);
+  font-size: 12px;
+}
+#app .transfer-countdown svg {
+  width: 44px;
+  height: 44px;
+  transform: rotate(-90deg);
+}
+#app .transfer-countdown svg circle {
+  fill: none;
+  stroke-width: 3;
+  stroke: var(--line);
+}
+#app .transfer-countdown svg circle + circle {
+  stroke: var(--accent);
+}
+#app .transfer-countdown b {
+  display: block;
+  color: var(--text);
+  font: 600 13.5px var(--page-mono);
+}
+#app .transfer-requests {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  padding: 16px !important;
+}
+#app .transfer-requests .transfer-section-heading {
+  justify-content: flex-start;
+  gap: 10px;
+}
+#app .transfer-requests .transfer-section-heading h2 {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+#app .transfer-requests > .muted {
+  margin: 0;
+  font-size: 12px;
+}
+#app .transfer-joining {
+  display: grid;
+  gap: 14px;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+}
+#app .transfer-joining .transfer-peer-details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 14px;
+  margin: 0;
+  font-size: 13px;
+}
+#app .transfer-joining .transfer-peer-details > div {
+  display: contents;
+}
+#app .transfer-joining .transfer-peer-details dt {
+  color: var(--muted);
+}
+#app .transfer-joining .transfer-peer-details dd {
+  margin: 0;
+  font-family: inherit;
+}
+#app .transfer-confirm-actions {
+  display: flex !important;
+  gap: 10px !important;
+  margin: 0 !important;
+}
+#app .transfer-confirm-actions > .ui-button:first-child {
+  flex: 1;
+}
+
+/* ========== 设备互传：已连接 ========== */
+#app .transfer-peer {
+  margin-bottom: 14px;
+  padding: 14px 18px !important;
+  border-left-width: 1px !important;
+  background: var(--surface) !important;
+  background-image: none !important;
+  box-shadow: 0 1px 2px #1013260a !important;
+}
+#app .transfer-peer-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+#app .transfer-peer-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+#app .transfer-peer-status {
+  gap: 10px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+}
+#app .transfer-peer-status i {
+  width: 10px !important;
+  height: 10px !important;
+}
+#app .transfer-peer-sep {
+  flex: none;
+  width: 1px;
+  height: 28px;
+  background: var(--line);
+}
+#app .transfer-peer-device {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+#app .transfer-peer-device > .icon {
+  flex: none;
+  box-sizing: border-box;
+  width: 34px !important;
+  height: 34px !important;
+  padding: 9px;
+  border-radius: 10px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+}
+#app .transfer-peer-device strong {
+  display: block;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+#app .transfer-peer-device small {
+  display: block;
+  font-size: 12px;
+}
+#app .transfer-peer-wire {
+  flex: none;
+  width: 44px !important;
+}
+#app .transfer-peer-link {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+  font: 500 12px var(--page-mono);
+  white-space: nowrap;
+}
+#app .transfer-peer-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+#app .transfer-connection-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 11px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+#app .transfer-connection-banner > .icon {
+  box-sizing: border-box;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 7px;
+  border-radius: 9px;
+  color: #fff;
+  background: var(--warning);
+}
+#app .transfer-connection-banner.disconnected > .icon {
+  background: var(--error);
+}
+#app .transfer-connection-banner time {
+  margin-left: auto;
+  font: 600 13px var(--page-mono);
+}
+@media (min-width: 901px) {
+  #app .transfer-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 14px;
+    align-items: start;
+  }
+}
+#app .transfer-chat {
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
+  overflow: hidden;
+}
+#app .transfer-chat .transfer-section-heading {
+  padding: 10px 14px !important;
+  border-bottom: 1px solid var(--line);
+}
+#app .transfer-chat .transfer-section-heading h2 {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+#app .transfer-chat .transfer-section-heading .muted {
+  font-size: 12px;
+}
+#app .transfer-messages {
+  height: 440px;
+  padding: 12px !important;
+  gap: 8px !important;
+  background: var(--background) !important;
+}
+html[data-theme="dark"] #app .transfer-messages {
+  background: #00000022 !important;
+}
+/* 消息气泡：正文在上，“名字 · 时间”在下 */
+#app .transfer-message {
+  display: flex;
+  flex-direction: column;
+  min-width: 0 !important;
+  max-width: 72%;
+  padding: 6px 10px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 10px !important;
+  background: var(--surface) !important;
+  font-size: 13px;
+}
+#app .transfer-message.mine {
+  border-color: transparent !important;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
+  color: #fff !important;
+}
+html[data-theme="dark"] #app .transfer-message:not(.mine) {
+  background: #ffffff0a !important;
+  border-color: #ffffff12 !important;
+}
+#app .transfer-message > p {
+  margin: 0;
+  line-height: 1.55;
+}
+#app .transfer-message-header {
+  order: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 0 0 !important;
+}
+#app .transfer-message-meta {
+  display: flex;
+  gap: 0 !important;
+  font-size: 11px !important;
+  opacity: 0.65;
+  color: inherit !important;
+}
+#app .transfer-message-meta small,
+#app .transfer-message-meta time {
+  font-size: 11px !important;
+}
+#app .transfer-message-meta small::after {
+  content: " · ";
+  white-space: pre;
+}
+#app .transfer-message-meta:not(:has(time)) small::after {
+  content: none;
+}
+#app .transfer-message.mine .transfer-message-meta {
+  opacity: 0.8;
+}
+#app .transfer-bubble-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#app .transfer-bubble-file .file-ext {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  font: 600 9px var(--page-mono);
+}
+#app .transfer-message.mine .transfer-bubble-file .file-ext {
+  background: #ffffff26 !important;
+  color: #fff !important;
+}
+#app .transfer-bubble-file strong {
+  display: block;
+  font-weight: 700;
+}
+#app .transfer-bubble-file small {
+  display: block;
+  font-size: 11px;
+  opacity: 0.8;
+}
+#app .transfer-system-message {
+  align-self: center;
+  margin: 0;
+  padding: 3px 12px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+}
+#app .transfer-message-composer {
+  display: flex !important;
+  align-items: center;
+  gap: 6px !important;
+  padding: 10px !important;
+  border-top: 1px solid var(--line);
+}
+#app .transfer-composer-tools {
+  display: flex;
+  gap: 2px;
+}
+#app .transfer-composer-tools .ui-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 6px;
+}
+#app .transfer-message-composer > .ui-input {
+  flex: 1;
+}
+#app .transfer-message-composer .transfer-send {
+  height: 32px;
+}
+#app .transfer-conversation-sidebar {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+#app .transfer-details-panel,
+#app .transfer-file-panel {
+  display: grid;
+  gap: 10px;
+  padding: 16px !important;
+}
+#app .transfer-details-panel .transfer-section-heading h2,
+#app .transfer-file-panel .transfer-section-heading h2 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+#app .transfer-details-panel .transfer-section-heading .muted {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--soft);
+  color: var(--accent);
+  font-size: 11.5px;
+  line-height: 20px;
+}
+#app .transfer-details-panel .transfer-peer-details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 13px;
+}
+#app .transfer-details-panel .transfer-peer-details > div {
+  display: contents;
+}
+#app .transfer-details-panel .transfer-peer-details dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+#app .transfer-details-panel .transfer-peer-details dd {
+  margin: 0;
+  font-family: inherit;
+  font-size: 13px;
+}
+#app .transfer-receive-settings {
+  margin: 0 !important;
+  color: var(--muted);
+  font-size: 12px !important;
+}
+#app .transfer-file-panel .transfer-list-heading,
+#app .transfer-file-panel h3 {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+#app .transfer-file {
+  padding: 7px 10px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 8px !important;
+  font-size: 13px;
+}
+
+/* ========== 分享查看 ========== */
+#app .share-lock {
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+  padding: 28px 24px 20px !important;
+  text-align: center;
+}
+#app .share-lock-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 14px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+}
+#app .share-lock h1,
+#app .share-lock h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 600;
+}
+#app .share-view-card {
+  padding: 0 !important;
+  overflow: hidden;
+}
+#app .share-view-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+#app .share-view-title {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+#app .collection-file-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--line);
+}
+#app .collection-file-row .file-ext {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+}
+
+/* ========== 登录 ========== */
+#app .login-panel:not(.share-lock) {
+  max-width: 420px;
+  margin: 30px auto;
+  padding: 30px !important;
+}
+#app .login-panel h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+#app .login-modes {
+  margin-bottom: 22px;
+}
+
+/* ========== 后台：布局与侧栏 ========== */
+#app .admin-layout {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+#app .admin-nav {
+  position: sticky;
+  top: 66px;
+  display: grid;
+  gap: 2px;
+  padding: 8px !important;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--design-shadow);
+  font-size: 13px;
+}
+#app .admin-nav .nav-caption {
+  padding: 8px 8px 3px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+#app .admin-nav a {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  text-decoration: none;
+  background: none;
+}
+#app .admin-nav a::before {
+  display: none !important;
+}
+#app .admin-nav a .icon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+  opacity: 0.7;
+}
+#app .admin-nav a:hover {
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+#app .admin-nav > a.router-link-exact-active,
+#app .admin-nav > a.router-link-active,
+#app .admin-nav > a.nav-selected,
+#app .admin-settings-nav a.router-link-exact-active {
+  background: var(--soft) !important;
+  color: var(--accent) !important;
+  font-weight: 600 !important;
+}
+#app .admin-nav a.router-link-exact-active .icon,
+#app .admin-nav a.nav-selected .icon {
+  opacity: 1;
+}
+#app .admin-settings-nav {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0 0 0 28px;
+  border: 0;
+}
+#app .admin-settings-nav a {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+/* 统计卡 */
+#app .admin-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 14px;
+}
+#app .admin-stat {
+  display: grid !important;
+  grid-template-columns: 40px 1fr;
+  gap: 4px 12px;
+  align-items: center;
+  padding: 14px 16px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 14px !important;
+  background: var(--surface);
+  box-shadow: var(--design-shadow);
+}
+#app .admin-stat-icon {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 40px !important;
+  height: 40px !important;
+  border-radius: 12px !important;
+  color: #fff;
+}
+#app .admin-stat-icon .icon {
+  width: 20px;
+  height: 20px;
+}
+#app .admin-stat small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+#app .admin-stat .stat-value {
+  font: 700 22px/1.1 var(--page-sans);
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+#app .admin-stat:has(.stat-value[data-zero]) {
+  opacity: 1;
+}
+
+/* 列表卡：工具栏、表格、行内按钮、分页 */
+#app .management-list {
+  padding: 0 !important;
+  overflow: hidden;
+}
+#app .management-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 !important;
+  padding: 12px 14px !important;
+  border-bottom: 1px solid var(--line);
+}
+#app .management-toolbar > .ui-input {
+  max-width: 280px;
+}
+#app .management-toolbar .management-create {
+  margin-left: auto;
+}
+#app .management-list table,
+#app .audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+#app .management-list th,
+#app .audit-table th {
+  padding: 9px 14px !important;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-subtle) !important;
+  color: var(--muted);
+  font-size: 12px !important;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+html[data-theme="dark"] #app .management-list th,
+html[data-theme="dark"] #app .audit-table th {
+  background: #ffffff06 !important;
+}
+#app .management-list td,
+#app .audit-table td {
+  padding: 11px 14px !important;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  vertical-align: top;
+}
+#app .management-list tbody tr:hover td,
+#app .audit-row:hover td {
+  background: var(--surface-subtle);
+}
+#app .management-list td strong,
+#app .management-name strong {
+  display: block;
+  font-weight: 500;
+}
+#app .management-list td small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+#app .share-status {
+  display: inline-block;
+  padding: 2px 8px !important;
+  border-radius: 5px !important;
+  font-size: 12px !important;
+  line-height: 1.5;
+}
+#app .share-status.valid {
+  background: var(--success-bg);
+  color: var(--success);
+}
+#app .share-status.invalid {
+  background: var(--error-bg);
+  color: var(--error);
+}
+#app .share-status.private {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+#app .row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px !important;
+}
+#app .row-actions .ui-button {
+  --n-height: 26px !important;
+  --n-padding: 0 9px !important;
+  --n-font-size: 12px !important;
+  --n-border-radius: 5px !important;
+  height: 26px;
+  padding: 0 9px;
+  font-size: 12px;
+  border-radius: 5px;
+}
+#app .management-list .pagination,
+#app .audit-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 10px 14px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* 编辑面板 */
+#app .management-editor {
+  display: grid;
+  gap: 14px;
+  padding: 0 !important;
+  overflow: hidden;
+}
+#app .management-editor .editor-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+#app .management-editor .editor-heading h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+#app .management-editor form {
+  display: grid;
+  gap: 14px;
+  padding: 0 16px 16px;
+}
+#app .management-editor .form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+#app .management-editor fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+#app .management-editor legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+#app .storage-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#app .storage-options .check {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+#app .storage-options .check.selected {
+  border-color: var(--accent);
+  background: var(--soft);
+}
+
+/* ========== 后台：系统设置 ========== */
+#app .settings-fields {
+  display: grid;
+  gap: 16px;
+}
+#app .settings-card {
+  padding: 2px 16px !important;
+  overflow: hidden;
+}
+#app .settings-card .settings-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+#app .settings-card-icon,
+#app .settings-card .settings-card-heading .muted {
+  display: none !important;
+}
+#app .settings-card .settings-card-heading h2 {
+  margin: 12px 0 2px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+#app .settings-card .advanced-indicator {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+#app .settings-card-body {
+  padding: 0;
+}
+#app .settings-card .setting-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 300px) !important;
+  gap: 12px !important;
+  align-items: center;
+  padding: 10px 0 !important;
+  border-top: 0 !important;
+  border-bottom: 1px solid var(--line);
+}
+#app .settings-card .setting-row:last-child {
+  border-bottom: 0;
+}
+#app .settings-card .setting-row-wide {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+#app .setting-description label {
+  display: block;
+  margin: 0;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+#app .setting-description p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+#app .setting-control {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+#app .setting-row-wide .setting-control {
+  justify-content: stretch;
+}
+#app .setting-row-wide .setting-control > * {
+  flex: 1;
+}
+#app .panel .setting-toggle,
+#app .setting-toggle {
+  min-height: 0 !important;
+  margin: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+#app .setting-toggle .switch-state {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+#app .setting-input {
+  display: flex;
+  width: 100%;
+}
+#app .setting-input.with-unit {
+  width: 170px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  overflow: hidden;
+}
+#app .setting-input.with-unit:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+#app .setting-input.with-unit .ui-input {
+  --n-color: transparent !important;
+  --n-color-focus: transparent !important;
+  --n-box-shadow-focus: none !important;
+  font-family: var(--page-mono);
+}
+#app .input-unit {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding: 0 8px !important;
+  border: 0 !important;
+  background: none !important;
+  color: var(--muted);
+  font-size: 12px !important;
+  white-space: nowrap;
+}
+#app .setting-control .n-select {
+  width: 170px;
+}
+#app .setting-readonly {
+  color: var(--muted);
+  font-size: 13px;
+}
+#app .settings-savebar {
+  position: sticky;
+  bottom: 16px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 7px 8px 7px 14px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 8px !important;
+  background: var(--surface);
+  box-shadow: var(--design-pop);
+}
+#app .settings-savebar > div {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+#app .settings-savebar .unsaved-state {
+  font-size: 13px;
+}
+#app .settings-savebar .ui-button {
+  --n-height: 26px !important;
+  --n-padding: 0 8px !important;
+  --n-font-size: 12px !important;
+  --n-border-radius: 5px !important;
+}
+#app .settings-savebar .ui-button.n-button--default-type {
+  background: none;
+  color: var(--muted);
+}
+#app .settings-savebar .ui-button.n-button--default-type .n-button__border {
+  border: 0 !important;
+}
+
+/* ========== 后台：操作日志 ========== */
+#app .audit-heading > .ui-button.n-button--quaternary {
+  color: var(--muted);
+}
+#app .audit-categories {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+#app .audit-categories a {
+  flex: none;
+  padding: 6px 11px;
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400;
+  text-decoration: none;
+  white-space: nowrap;
+}
+#app .audit-categories a:hover {
+  background: var(--surface-subtle);
+}
+#app .audit-categories .router-link-exact-active {
+  background: var(--soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+#app .audit-filters {
+  display: grid;
+  grid-template-columns:
+    minmax(105px, 0.8fr) minmax(150px, 1.1fr) minmax(105px, 0.8fr)
+    minmax(150px, 1.2fr) minmax(150px, 1.2fr) 88px;
+  gap: 10px;
+  align-items: end;
+  margin: 0 0 12px;
+  padding: 12px 14px !important;
+}
+#app .audit-filters label {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+#app .audit-filters > .ui-button {
+  width: 100%;
+}
+#app .audit-list {
+  padding: 0 !important;
+  overflow: hidden;
+}
+#app .audit-time,
+#app .audit-ip {
+  color: var(--muted);
+  white-space: nowrap;
+}
+#app .audit-module {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--surface-subtle);
+  font-size: 12px;
+}
+#app .audit-action {
+  font-weight: 600;
+}
+#app .audit-merged {
+  margin-left: 5px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+#app .audit-result {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+#app .audit-detail-toggle {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+#app .audit-table td.audit-detail {
+  padding: 16px 20px 18px !important;
+  background: var(--surface-subtle);
+}
+#app .audit-detail-meta {
+  gap: 8px 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+#app .audit-detail-tag,
+#app .audit-detail-value-tag {
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--soft);
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1.5;
+}
+#app .audit-detail-endpoint {
+  font-family: var(--page-mono);
+  font-size: 12px;
+}
+#app .audit-detail-ids {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+#app .audit-detail-ids span,
+#app .audit-detail-fields dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+#app .audit-detail-ids code {
+  font: 12.5px var(--page-mono);
+}
+#app .audit-detail-fields {
+  gap: 14px 20px;
+  padding-top: 12px;
+}
+#app .audit-detail-fields dd {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+/* ========== 弹层下拉 ========== */
+body .n-base-select-menu {
+  border-radius: 8px !important;
+  box-shadow: var(--design-pop) !important;
+}
+body .n-base-select-option {
+  font-size: 13px;
+}
+
+/* 设置项：无说明时不占位；固定策略用禁用控件展示 */
+#app .setting-description p:empty {
+  display: none;
+}
+#app .setting-description .badge {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+#app .setting-fixed .ui-input {
+  --n-color-disabled: transparent !important;
+  --n-text-color-disabled: var(--text) !important;
+}
+#app .setting-fixed.with-unit {
+  background: var(--surface-subtle);
+}
+#app .setting-toggle .n-switch--disabled {
+  opacity: 0.7;
+}
+
+/* 后台面板：页头 + 内容（新密钥、预览、账号） */
+#app .management-panel-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+#app .management-panel-body > p {
+  margin: 0;
+}
+#app .management-editor .editor-heading .muted.small {
+  margin: 0;
+  font-size: 12px;
+}
+#app .new-key-panel {
+  border-color: var(--accent) !important;
+}
+#app .management-editor .copy-row,
+#app .new-key-panel .copy-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+#app .management-editor .copy-row > .ui-input,
+#app .management-editor .copy-row > .n-date-picker {
+  flex: 1;
+  min-width: 0;
+}
+#app .new-key-panel .copy-row .ui-input {
+  font-family: var(--page-mono);
+}
+#app .account-panel .account-form {
+  max-width: 520px;
+}
+#app .management-editor .expiry-field,
+#app .management-editor .markdown-field {
+  display: grid;
+  gap: 4px;
+}
+#app .management-editor .expiry-field > label,
+#app .management-editor .markdown-field > .field-label {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+#app .management-editor .expiry-field .muted.small,
+#app .management-editor fieldset .muted.small,
+#app .management-editor #custom-key-hint {
+  margin: 0;
+  font-size: 12px;
+}
+
+/* 日志分页：每页条数靠左，翻页靠右 */
+#app .audit-pagination .audit-page-size {
+  margin-right: auto;
+  font-size: 12.5px;
+}
+#app .audit-pagination .audit-page-size .n-select {
+  width: 96px;
+}
+
+/* 互传入口：高级连接设置折叠行（左文字、右箭头） */
+#app .transfer-connection-settings > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  list-style: none;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 400;
+}
+#app .transfer-connection-settings > summary::-webkit-details-marker,
+#app .transfer-connection-settings > summary::marker {
+  display: none;
+  content: "";
+}
+#app .transfer-connection-settings > summary .icon {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+@media (prefers-reduced-motion: no-preference) {
+  #app .transfer-connection-settings > summary .icon {
+    transition: transform 0.25s var(--design-out);
+  }
+}
+#app .transfer-connection-settings[open] > summary .icon {
+  transform: rotate(180deg);
+}
+#app .transfer-switch-described,
+#app .transfer-join-relay {
+  align-items: center;
+}
+#app .transfer-switch-described > span,
+#app .transfer-join-relay > span {
+  display: grid;
+  gap: 1px;
+}
+#app .transfer-switch-described small,
+#app .transfer-join-relay small {
+  display: block;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+#app .transfer-history-notice .ui-button:first-of-type {
+  margin-left: auto;
+}
+
+/* 标题区的幽灵按钮（如“日志设置”）：无边框、灰字 */
+#app .management-heading > .ui-button.n-button--quaternary {
+  border: 0 !important;
+  background: none !important;
+  color: var(--muted);
+}
+#app .management-heading > .ui-button.n-button--quaternary:hover {
+  background: var(--surface-subtle) !important;
+  color: var(--text);
+}
+
+/* 互传：正文字号与设计稿一致（组件内默认 14px） */
+#app .transfer-page {
+  font-size: 13.5px;
+}
+/* 文件列表：接收方式 + 并发，一行排开 */
+#app .transfer-file-panel .transfer-receive-settings {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px !important;
+  margin: 0 !important;
+  color: var(--muted);
+  font-size: 12px !important;
+}
+#app .transfer-receive-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+#app .transfer-receive-settings .page-segment button {
+  min-height: 0 !important;
+  padding: 3px 9px !important;
+  font-size: 12px;
+}
+#app .transfer-stepper {
+  display: inline-flex;
+  align-items: stretch;
+  flex: none;
+  height: 30px !important;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  overflow: hidden;
+}
+#app .transfer-stepper button {
+  width: 28px !important;
+  color: var(--muted);
+  font-size: 15px;
+}
+#app .transfer-stepper input {
+  width: 44px !important;
+  color: var(--text);
+  font: 500 13px var(--page-mono) !important;
+}
+#app .transfer-stepper:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+#app .transfer-file-panel .transfer-auto-receive {
+  font-size: 13px;
+}
+#app .transfer-message-composer .transfer-send {
+  height: 32px;
+  min-width: 0;
+  padding: 0 12px;
+}
+
+/* 侧栏“系统设置”只作分组入口：选中态落在子菜单项上 */
+#app .admin-nav > a.nav-settings {
+  background: none !important;
+  color: var(--muted) !important;
+  font-weight: 400 !important;
+}
+#app .admin-nav > a.nav-settings:hover {
+  background: var(--surface-subtle) !important;
+  color: var(--text) !important;
+}
+#app .admin-nav > a.nav-settings .icon {
+  opacity: 0.7;
+}
+#app .admin-settings-nav a {
+  color: var(--muted);
+}
+
+/* 展开区：与设计稿 .reveal 一致，收起时只占网格间距，展开时上方留 2px */
+@media (min-width: 651px) {
+  #app .upload-settings-fields > .field-reveal {
+    margin-top: 0;
+  }
+  #app .share-settings .field-reveal.expanded > div {
+    padding-block: 2px 0;
+  }
+}
+
+/* ========== 窄屏（放在最后，避免被上面的宽屏规则覆盖） ========== */
+@media (max-width: 900px) {
+  #app .share-layout,
+  #app .transfer-entry-grid,
+  #app .transfer-wait-layout.has-code,
+  #app .admin-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #app .admin-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #app .share-sidebar,
+  #app .admin-nav {
+    position: static;
+  }
+}
+@media (max-width: 720px) {
+  #app .site-main {
+    padding: 16px 16px 140px;
+  }
+  #app .page-heading.hero,
+  #app .management-heading:has(.page-illustration) {
+    padding: 14px 16px !important;
+    border-radius: 14px;
+  }
+  #app .page-heading.hero h1,
+  #app .management-heading:has(.page-illustration) h1,
+  #app .settings-title h1,
+  #app .transfer-wait-heading h1 {
+    font-size: 20px;
+  }
+  #app .page-illustration {
+    width: 88px;
+    height: 60px;
+  }
+  #app .page-chips {
+    display: none;
+  }
+  #app .management-heading:has(.page-illustration) > .ui-button {
+    display: none;
+  }
+  #app .settings-card .setting-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+  #app .settings-card .setting-row:has(.setting-toggle) {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+  #app .setting-control {
+    justify-content: flex-start;
+  }
+  #app .setting-row:has(.setting-toggle) .setting-control {
+    justify-content: flex-end;
+  }
+  #app .setting-input.with-unit,
+  #app .setting-control .n-select {
+    width: 100%;
+  }
+  #app .audit-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+  #app .audit-filters > .ui-button {
+    grid-column: 1 / -1;
+  }
+  #app .pair-code {
+    grid-template-columns: repeat(4, 60px) !important;
+  }
+  #app .pair-code input {
+    width: 60px !important;
+    height: 64px !important;
+    font-size: 26px !important;
+    border-radius: 14px !important;
+  }
+  #app .transfer-waiting .transfer-radar {
+    width: 120px !important;
+    height: 120px !important;
+  }
+  #app .transfer-waiting .transfer-code {
+    font-size: 44px !important;
+  }
+  #app .transfer-message {
+    max-width: 84%;
+    font-size: 14px;
+  }
+  #app .transfer-messages {
+    height: auto;
+  }
+  #app .ui-button,
+  #app .ui-input.n-input:not(.n-input--textarea) {
+    --n-height: 40px;
+  }
+  #app .ui-button.n-button--small-type {
+    --n-height: 32px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #app .page-switch::after,
+  #app .expiry-chip,
+  #app .drop-zone {
+    transition: none !important;
+  }
+}
+
+/* 手机：列表底部给悬浮新建按钮留位置（放在最后，避免被上面的 padding:0 覆盖） */
+@media (max-width: 720px) {
+  #app .management-list {
+    padding-bottom: 72px !important;
+  }
+}
+@media (max-width: 720px) {
+  #app .transfer-stepper {
+    height: 36px !important;
+  }
+  #app .transfer-stepper button {
+    width: 36px !important;
+  }
+  #app .transfer-stepper input {
+    width: 48px !important;
+    font-size: 14px !important;
+  }
+}
+@media (max-width: 650px) {
+  #app .transfer-message-composer .transfer-send {
+    height: 42px;
+    padding: 0 16px;
+    border-radius: 99px;
+  }
+}
+/* 手机：后台导航改为横向滚动的胶囊（设计稿 .m .an） */
+@media (max-width: 650px) {
+  #app .admin-nav {
+    display: flex !important;
+    flex-direction: row;
+    gap: 6px;
+    margin: 0 -16px;
+    padding: 0 16px 2px !important;
+    overflow-x: auto;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    scrollbar-width: none;
+  }
+  #app .admin-nav::-webkit-scrollbar {
+    display: none;
+  }
+  #app .admin-nav .nav-caption,
+  #app .admin-nav a .icon {
+    display: none;
+  }
+  #app .admin-settings-nav {
+    display: contents;
+  }
+  #app .admin-nav a,
+  #app .admin-settings-nav a {
+    flex: none;
+    min-height: 0;
+    padding: 7px 14px;
+    border: 1px solid var(--line);
+    border-radius: 99px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  #app .admin-nav > a.nav-settings {
+    background: var(--surface) !important;
+  }
+  #app .admin-nav > a.router-link-exact-active:not(.nav-settings),
+  #app .admin-nav > a.nav-selected,
+  #app .admin-settings-nav a.router-link-exact-active {
+    border-color: transparent;
+    background: linear-gradient(
+      135deg,
+      var(--accent),
+      var(--accent-2)
+    ) !important;
+    color: #fff !important;
+    font-weight: 600 !important;
+  }
+}
+/* 手机底部标签栏：显示完整名称（设计稿 .m .nav a span）；顶栏不显示 GitHub */
+@media (max-width: 650px) {
+  #app .site-navigation .nav-label {
+    display: inline !important;
+  }
+  #app .site-navigation .nav-label-short {
+    display: none !important;
+  }
+  #app .site-header .header-actions a.icon-button[aria-label="GitHub"] {
+    display: none;
+  }
+}
+
+/* ===== 对照修正（23:55） ===== */
+/* 加入 / 创建分段切换只在手机显示 */
+#app .transfer-entry-tabs {
+  display: none;
+}
+@media (max-width: 650px) {
+  #app .transfer-entry-tabs {
+    display: flex;
+  }
+}
+/* 开关行：名称与说明在左，开关在右（加入卡的“仅使用中继”也一样） */
+#app .transfer-entry-card .switch-row,
+#app .transfer-join-relay {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+#app .transfer-entry-card .switch-row > input,
+#app .transfer-join-relay > input,
+#app .transfer-entry-card .switch-row > .n-switch {
+  flex: none;
+  margin: 0;
+}
+/* 开关名称用正文字号，不用小标签样式 */
+#app .transfer-entry-card .switch-row > span {
+  font-size: 13.5px;
+  font-weight: 400;
+}
+/* 系统设置：分组卡片撑满内容区宽度，左对齐 */
+#app .settings-form,
+#app .settings-fields {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+#app .settings-fields > .settings-card {
+  width: 100%;
+  margin: 0 !important;
+  box-sizing: border-box;
+}
+#app .settings-title {
+  margin: 0 0 14px;
+}
+#app .settings-title h1 {
+  font-size: 22px;
+}
+
+/* 手机全屏聊天：内容区不留边距，聊天铺满屏幕宽度（优先级需高于上面的 #app .site-main） */
+@media (max-width: 720px) {
+  html:has(.transfer-conversation) #app .site-main {
+    padding: 0 !important;
+  }
+}
+
+/* 所有开关行：名称在左、开关在右（覆盖 .share-settings label 等网格标签规则） */
+#app label.switch-row,
+#app .share-settings label.switch-row,
+#app .upload-settings-fields label.switch-row,
+#app .share-access-fields label.switch-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px;
+  font-size: 13.5px;
+  font-weight: 400;
+  color: var(--text);
+}
+#app label.switch-row > .page-switch,
+#app label.switch-row > .n-switch {
+  flex: none;
+  margin: 0;
+}
+/* 禁用的主按钮：保持主题渐变，降低不透明度即可 */
+#app .ui-button.primary.n-button--disabled,
+#app .button.primary:disabled {
+  opacity: 0.55 !important;
+  filter: none !important;
+}
+
+/* 手机全屏聊天：聊天面板去掉边框、圆角和阴影，铺满 390px（覆盖 #app .panel 的 !important 边框） */
+@media (max-width: 720px) {
+  #app .transfer-conversation .transfer-workspace .transfer-chat.panel,
+  #app .transfer-conversation .transfer-conversation-sidebar .panel {
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+}
+
+/* 手机全屏聊天输入栏：只保留“+”入口，文件/文件夹/图片按钮收进“+”里 */
+@media (max-width: 720px) {
+  #app .transfer-conversation .transfer-composer-tools {
+    display: none !important;
+  }
+}
+/* 设置页数字输入：隐藏浏览器自带的上下箭头，和设计稿一致 */
+#app .setting-control input[type="number"]::-webkit-inner-spin-button,
+#app .setting-control input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+#app .setting-control input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+#app .setting-control .n-input__suffix .n-base-icon,
+#app .setting-control .n-input-number-button {
+  display: none !important;
+}
+
+/* ===== 后台列表：单元格垂直居中（状态标签、操作按钮与两行文字对齐） ===== */
+#app .management-list table td,
+#app .management-list table th {
+  vertical-align: middle !important;
+}
+#app .management-list .row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+#app .management-list .share-status-cell {
+  white-space: nowrap;
+}
+#app .management-list .share-status-cell small {
+  display: block;
+  margin-top: 2px;
+}
+/* 后台标题区：去掉刷新按钮后插画不再预留右侧空位 */
+#app .management-heading .page-illustration {
+  margin-right: 0 !important;
+}
+/* ===== 编辑 / 预览弹窗 ===== */
+.management-dialog.n-card {
+  border-radius: 14px;
+}
+.management-dialog .n-card-header {
+  padding: 16px 20px 8px;
+}
+.management-dialog .n-card-header__main {
+  font-size: 16px;
+  font-weight: 650;
+}
+.management-dialog .n-card__content {
+  max-height: min(70vh, 680px);
+  overflow: auto;
+  padding: 8px 20px 4px;
+}
+.management-dialog .n-card__footer {
+  padding: 12px 20px 16px;
+}
+.management-dialog-form {
+  display: grid;
+  gap: 14px;
+}
+.management-dialog-form label:not(.check) {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.management-dialog-form .form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.management-dialog-form fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.management-dialog-form .error {
+  margin: 0;
+}
+.management-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+  position: sticky;
+  bottom: -4px;
+  background: var(--surface);
+}
+.management-dialog-preview {
+  max-height: min(65vh, 640px);
+  overflow: auto;
+}
+/* 手机：弹窗改为底部抽屉 */
+@media (max-width: 720px) {
+  .management-dialog.n-card {
+    position: fixed;
+    inset: auto 0 0;
+    width: 100% !important;
+    max-width: none;
+    margin: 0;
+    border-radius: 18px 18px 0 0;
+  }
+  .management-dialog .n-card__content {
+    max-height: 72dvh;
+  }
+  .management-dialog-form .form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .management-dialog-actions .ui-button {
+    flex: 1;
+  }
+}
+
+/* 站点外观：Markdown 编辑器占满整行，说明文字放在编辑器下方 */
+#app .settings-card .setting-row-markdown {
+  grid-template-columns: minmax(0, 1fr) !important;
+  align-items: start;
+}
+#app .setting-row-markdown .setting-control {
+  display: grid !important;
+  gap: 6px;
+  justify-content: stretch !important;
+}
+#app .setting-row-markdown .setting-control > * {
+  width: 100%;
+  min-width: 0;
+}
+#app .setting-row-markdown .setting-control > p.muted {
+  margin: 0;
+  font-size: 12px;
+}
+#app .setting-row-markdown .sharing-editor {
+  border: 1px solid var(--line) !important;
+}
+
+/* 互传入口：历史记录提示与下方两张卡片同宽（覆盖全局 .panel 的 960px 上限） */
+#app .transfer-page .panel.transfer-history-notice {
+  width: 100%;
+  max-width: none !important;
+  margin: 0 0 14px !important;
+  box-sizing: border-box;
+}
+
+/* 手机：主导航是固定在底部的标签栏。顶栏的 backdrop-filter 会让 fixed 子元素
+   以顶栏为定位容器，导致标签栏叠在顶栏里盖住右侧按钮，所以手机上去掉滤镜。 */
+@media (max-width: 650px) {
+  #app .site-header {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--surface);
+  }
+  html[data-theme="dark"] #app .site-header {
+    background: #0b0d17;
+  }
+}

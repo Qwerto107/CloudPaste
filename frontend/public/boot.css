@@ -1,0 +1,23 @@
+/* 首屏底色：在主样式加载前就使用页面背景色，整页跳转（如进入管理员登录）时不闪白。 */
+html {
+  background: #f6f7fb;
+  color-scheme: light;
+}
+html[data-theme="dark"] {
+  background: #0b0d17;
+  color-scheme: dark;
+}
+/* 同源整页跳转时淡入淡出，不支持的浏览器忽略这段。 */
+@view-transition {
+  navigation: auto;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.16s;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}

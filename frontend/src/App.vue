@@ -73,26 +73,287 @@ const githubURL = computed(() => {
 // 首次主题由头部同源脚本提前设置，避免暗色页面刷新时闪白。
 const dark = ref(document.documentElement.dataset.theme === "dark");
 provide(themeKey, dark);
-const uiTheme = computed(() => ({
-  common: {
-    primaryColor: dark.value ? "#87d9b8" : "#126954",
-    primaryColorHover: dark.value ? "#a6e7cc" : "#0b5442",
-    primaryColorPressed: dark.value ? "#71cba6" : "#084935",
-    primaryColorSuppl: dark.value ? "#87d9b8" : "#126954",
-    bodyColor: dark.value ? "#101a17" : "#f3f8f6",
-    cardColor: dark.value ? "#18251f" : "#ffffff",
-    borderColor: dark.value ? "#32473d" : "#dce7e2",
-    textColorBase: dark.value ? "#e2eee8" : "#20332e",
-    borderRadius: "8px",
-    heightMedium: "40px",
-    heightSmall: "32px",
-    fontFamily: 'system-ui, "Segoe UI", "Microsoft YaHei", sans-serif',
+// 功能区决定主题色：文本、文件、互传、管理各用一组颜色。
+const section = computed(() => {
+  const path = route.path;
+  if (path.startsWith("/transfer")) return "transfer";
+  if (path.startsWith("/upload") || path.startsWith("/file/")) return "file";
+  if (
+    path.startsWith("/admin") ||
+    path.startsWith("/manage") ||
+    path.startsWith("/login")
+  )
+    return "admin";
+  return "text";
+});
+const navItems = computed(() => [
+  ...(settings.site_home_editor_enabled !== "false"
+    ? [
+        {
+          section: "text",
+          to: "/",
+          icon: "text-lines",
+          label: "文本分享",
+          short: "文本",
+        },
+      ]
+    : []),
+  ...(settings.site_upload_page_enabled !== "false"
+    ? [
+        {
+          section: "file",
+          to: "/upload",
+          icon: "folder",
+          label: "文件分享",
+          short: "文件",
+        },
+      ]
+    : []),
+  {
+    section: "transfer",
+    to: "/transfer",
+    icon: "transfer",
+    label: "设备互传",
+    short: "互传",
   },
-  Button: {
-    textColorPrimary: dark.value ? "#102a1f" : "#ffffff",
-    textColorHoverPrimary: dark.value ? "#102a1f" : "#ffffff",
+  {
+    section: "admin",
+    to: accountTarget.value,
+    icon: "grid",
+    label: session.type === "none" ? "登录" : "管理",
+    short: "管理",
   },
-}));
+]);
+const navPosition = computed(() =>
+  navItems.value.findIndex((item) => item.section === section.value),
+);
+watch(
+  section,
+  (value) => {
+    document.documentElement.dataset.section = value;
+  },
+  { immediate: true },
+);
+const uiTheme = computed(() => {
+  // 组件库与页面共享语义色，主题切换时同时更新控件背景、文字和焦点状态。
+  const palette = {
+    text: ["#6366f1", "#8b5cf6", "#eef0ff", "#818cf8", "#a78bfa", "#1f2147"],
+    file: ["#0ea5e9", "#6366f1", "#e3f4fd", "#38bdf8", "#818cf8", "#0f2a3a"],
+    transfer: [
+      "#10b981",
+      "#0ea5e9",
+      "#dcf6ec",
+      "#34d399",
+      "#38bdf8",
+      "#0f2e24",
+    ],
+    admin: ["#f97316", "#ec4899", "#ffeee2", "#fb923c", "#f472b6", "#36210f"],
+  }[section.value];
+  // 组件库与页面共享语义色；主色随功能区切换，与 theme-vivid.css 保持一致。
+  const colors = dark.value
+    ? {
+        primary: palette[3],
+        hover: palette[4],
+        pressed: palette[3],
+        background: "#0b0d17",
+        surface: "#131628",
+        input: "#1a1e35",
+        border: "#262b47",
+        text: "#eef0ff",
+        muted: "#99a0c2",
+        soft: palette[5],
+        onPrimary: "#ffffff",
+      }
+    : {
+        primary: palette[0],
+        hover: palette[1],
+        pressed: palette[0],
+        background: "#f6f7fb",
+        surface: "#ffffff",
+        input: "#ffffff",
+        border: "#e7e9f1",
+        text: "#101326",
+        muted: "#626a86",
+        soft: palette[2],
+        onPrimary: "#ffffff",
+      };
+  // 设计稿（design/cloudpaste-ui-v3.html）的紧凑控件尺寸：按钮 32/26/34px、圆角 6/5px、
+  // 输入 32px、字号 13/12px；开关 30×18、勾选框 15px。组件库尺寸统一在这里配置。
+  const ring = (hex, alpha) => {
+    const value = parseInt(hex.slice(1), 16);
+    return `rgba(${value >> 16}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
+  };
+  const font =
+    '"Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif';
+  const mono = '"JetBrains Mono", ui-monospace, Consolas, monospace';
+  const strong = dark.value ? "#394068" : "#d9d9e0";
+  return {
+    common: {
+      primaryColor: colors.primary,
+      primaryColorHover: colors.hover,
+      primaryColorPressed: colors.pressed,
+      primaryColorSuppl: colors.primary,
+      bodyColor: colors.background,
+      cardColor: colors.surface,
+      inputColor: colors.input,
+      borderColor: colors.border,
+      textColorBase: colors.text,
+      textColor1: colors.text,
+      textColor2: colors.text,
+      textColor3: colors.muted,
+      placeholderColor: colors.muted,
+      errorColor: dark.value ? "#f27d91" : "#d6455d",
+      errorColorHover: dark.value ? "#f27d91" : "#d6455d",
+      successColor: dark.value ? "#4cd39a" : "#16a36b",
+      warningColor: dark.value ? "#f0b44c" : "#c98410",
+      borderRadius: "6px",
+      borderRadiusSmall: "5px",
+      heightTiny: "22px",
+      heightSmall: "26px",
+      heightMedium: "32px",
+      heightLarge: "34px",
+      fontSize: "13px",
+      fontSizeTiny: "12px",
+      fontSizeSmall: "12px",
+      fontSizeMedium: "13px",
+      fontSizeLarge: "13px",
+      fontWeightStrong: "600",
+      fontFamily: font,
+      fontFamilyMono: mono,
+    },
+    Button: {
+      heightTiny: "22px",
+      heightSmall: "26px",
+      heightMedium: "32px",
+      heightLarge: "34px",
+      paddingTiny: "0 6px",
+      paddingSmall: "0 8px",
+      paddingMedium: "0 12px",
+      paddingLarge: "0 14px",
+      paddingRoundSmall: "0 8px",
+      paddingRoundMedium: "0 12px",
+      fontSizeTiny: "12px",
+      fontSizeSmall: "12px",
+      fontSizeMedium: "13px",
+      fontSizeLarge: "13px",
+      fontWeight: "500",
+      borderRadiusTiny: "5px",
+      borderRadiusSmall: "5px",
+      borderRadiusMedium: "6px",
+      borderRadiusLarge: "6px",
+      iconSizeTiny: "13px",
+      iconSizeSmall: "13px",
+      iconSizeMedium: "14px",
+      iconSizeLarge: "14px",
+      iconMarginSmall: "5px",
+      iconMarginMedium: "6px",
+      iconMarginLarge: "6px",
+      border: `1px solid ${colors.border}`,
+      borderHover: `1px solid ${ring(colors.primary, 0.45)}`,
+      borderPressed: `1px solid ${colors.primary}`,
+      borderFocus: `1px solid ${ring(colors.primary, 0.45)}`,
+      textColor: colors.text,
+      textColorHover: colors.primary,
+      textColorPressed: colors.primary,
+      textColorFocus: colors.primary,
+      color: colors.surface,
+      colorHover: colors.surface,
+      colorPressed: colors.surface,
+      colorFocus: colors.surface,
+      textColorPrimary: colors.onPrimary,
+      textColorHoverPrimary: colors.onPrimary,
+      textColorPressedPrimary: colors.onPrimary,
+      textColorFocusPrimary: colors.onPrimary,
+      textColorQuaternary: colors.muted,
+      textColorQuaternaryHover: colors.text,
+      textColorQuaternaryPressed: colors.text,
+      colorQuaternaryHover: dark.value ? "#1a1e35" : "#f4f4f6",
+      colorQuaternaryPressed: dark.value ? "#1a1e35" : "#f4f4f6",
+    },
+    Input: {
+      heightTiny: "22px",
+      heightSmall: "26px",
+      heightMedium: "32px",
+      heightLarge: "34px",
+      fontSizeTiny: "12px",
+      fontSizeSmall: "12px",
+      fontSizeMedium: "13px",
+      fontSizeLarge: "13px",
+      paddingTiny: "0 6px",
+      paddingSmall: "0 8px",
+      paddingMedium: "0 10px",
+      paddingLarge: "0 10px",
+      borderRadius: "6px",
+      color: colors.input,
+      colorFocus: colors.input,
+      colorDisabled: dark.value ? "#1a1e35" : "#f4f4f6",
+      border: `1px solid ${colors.border}`,
+      borderHover: `1px solid ${colors.border}`,
+      borderFocus: `1px solid ${colors.primary}`,
+      boxShadowFocus: `0 0 0 3px ${ring(colors.primary, 0.18)}`,
+      placeholderColor: colors.muted,
+      lineHeightTextarea: "1.55",
+    },
+    InternalSelection: {
+      heightTiny: "22px",
+      heightSmall: "26px",
+      heightMedium: "32px",
+      heightLarge: "34px",
+      fontSizeTiny: "12px",
+      fontSizeSmall: "12px",
+      fontSizeMedium: "13px",
+      fontSizeLarge: "13px",
+      paddingSingle: "0 26px 0 10px",
+      borderRadius: "6px",
+      color: colors.input,
+      colorActive: colors.input,
+      border: `1px solid ${colors.border}`,
+      borderHover: `1px solid ${colors.border}`,
+      borderActive: `1px solid ${colors.primary}`,
+      borderFocus: `1px solid ${colors.primary}`,
+      boxShadowActive: `0 0 0 3px ${ring(colors.primary, 0.18)}`,
+      boxShadowFocus: `0 0 0 3px ${ring(colors.primary, 0.18)}`,
+      placeholderColor: colors.muted,
+    },
+    InternalSelectMenu: {
+      borderRadius: "8px",
+      optionHeightMedium: "30px",
+      optionFontSizeMedium: "13px",
+      optionPaddingMedium: "0 10px",
+      optionTextColorActive: colors.primary,
+      optionCheckColor: colors.primary,
+    },
+    Switch: {
+      railHeightSmall: "18px",
+      railWidthSmall: "30px",
+      buttonHeightSmall: "14px",
+      buttonWidthSmall: "14px",
+      railHeightMedium: "18px",
+      railWidthMedium: "30px",
+      buttonHeightMedium: "14px",
+      buttonWidthMedium: "14px",
+      buttonWidthPressedMedium: "18px",
+      railColor: strong,
+      railColorActive: colors.primary,
+      buttonBoxShadow: "0 1px 3px rgba(0, 0, 0, 0.2)",
+    },
+    Checkbox: {
+      sizeSmall: "15px",
+      sizeMedium: "15px",
+      sizeLarge: "15px",
+      borderRadius: "4px",
+      border: `1.5px solid ${strong}`,
+      borderFocus: `1.5px solid ${colors.primary}`,
+      borderChecked: `1.5px solid ${colors.primary}`,
+      colorChecked: colors.primary,
+      fontSizeMedium: "13px",
+      labelPadding: "0 0 0 8px",
+    },
+    Card: { borderRadius: "14px" },
+    Dialog: { borderRadius: "14px", padding: "16px", titleFontSize: "15px" },
+    Notification: { borderRadius: "10px" },
+  };
+});
 function applyTheme() {
   document.documentElement.dataset.theme = dark.value ? "dark" : "light";
   try {
@@ -155,27 +416,37 @@ async function logout() {
     <NDialogProvider>
       <header class="site-header">
         <RouterLink class="brand" to="/"
-          ><span class="brand-icon"><Icon name="cloud" /></span
+          ><span class="brand-icon" aria-hidden="true"></span
           ><span class="brand-name">{{
             settings.site_title || "CloudPaste"
           }}</span></RouterLink
         >
-        <nav aria-label="主导航">
+        <nav
+          class="site-navigation"
+          aria-label="主导航"
+          :style="{ '--nav-position': navPosition }"
+        >
+          <span
+            v-if="navPosition >= 0"
+            class="nav-indicator"
+            :class="{ 'nav-indicator-admin': section === 'admin' }"
+            aria-hidden="true"
+          ></span>
           <RouterLink
-            v-if="settings.site_home_editor_enabled !== 'false'"
-            to="/"
-            ><Icon name="text" />文本分享</RouterLink
-          ><RouterLink
-            v-if="settings.site_upload_page_enabled !== 'false'"
-            to="/upload"
-            ><Icon name="folder" />文件分享</RouterLink
-          ><RouterLink to="/transfer"
-            ><Icon name="transfer" />设备互传</RouterLink
-          ><RouterLink :to="accountTarget"
-            ><Icon name="grid" />{{
-              session.type === "none" ? "登录" : "管理"
-            }}</RouterLink
+            v-for="item in navItems"
+            :key="item.section"
+            :to="item.to"
+            :data-nav="item.section"
+            :class="{ 'nav-current': item.section === section }"
+            :aria-label="item.label"
           >
+            <Icon :name="item.icon" /><span class="nav-label">{{
+              item.label
+            }}</span
+            ><span class="nav-label-short" aria-hidden="true">{{
+              item.short
+            }}</span>
+          </RouterLink>
         </nav>
         <div class="header-actions">
           <span
@@ -191,7 +462,7 @@ async function logout() {
           >
           <UiButton
             v-if="announcementEnabled"
-            class="quiet icon-button"
+            class="quiet icon-button site-bell"
             icon="bell"
             aria-label="站点公告"
             :aria-expanded="announcement"
@@ -235,34 +506,36 @@ async function logout() {
           <UiButton class="quiet" @click="error = ''">关闭</UiButton>
         </p>
         <div class="custom-content" v-html="head"></div>
-        <section
-          v-if="announcement && announcementEnabled"
-          class="site-announcement"
-          role="region"
-          aria-label="站点公告"
-        >
-          <span class="site-announcement-icon"><Icon name="bell" /></span>
-          <MarkdownPreview
-            class="site-announcement-content"
-            :content="settings.site_announcement_content || ''"
-          />
-          <UiButton
-            type="button"
-            class="quiet site-announcement-close"
-            size="small"
-            icon="close"
-            aria-label="关闭公告"
-            title="关闭公告"
-            @click="announcement = false"
-          />
-        </section>
+        <Transition name="announcement">
+          <section
+            v-if="announcement && announcementEnabled"
+            class="site-announcement"
+            role="region"
+            aria-label="站点公告"
+          >
+            <span class="site-announcement-icon"><Icon name="bell" /></span>
+            <MarkdownPreview
+              class="site-announcement-content"
+              :content="settings.site_announcement_content || ''"
+            />
+            <UiButton
+              type="button"
+              class="quiet site-announcement-close"
+              size="small"
+              icon="close"
+              aria-label="关闭公告"
+              title="关闭公告"
+              @click="announcement = false"
+            />
+          </section>
+        </Transition>
         <NNotificationProvider
           container-class="site-notifications"
           placement="top-right"
           :max="3"
           keep-alive-on-hover
         >
-          <RouterView />
+          <div :key="section" class="site-page"><RouterView /></div>
         </NNotificationProvider>
         <div class="custom-content" v-html="body"></div>
       </main>

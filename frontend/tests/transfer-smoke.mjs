@@ -114,16 +114,17 @@ try {
         );
     });
   await Promise.all([a.goto(base + "/transfer"), b.goto(base + "/transfer")]);
-  await a
+  const createPanel = a.locator(".transfer-entry-card").first();
+  await createPanel
     .getByRole("textbox", { name: "设备名称", exact: true })
     .fill("发送设备");
   assert.equal(
     await a
-      .getByRole("checkbox", { name: "自动同意设备加入", exact: true })
+      .getByRole("switch", { name: "自动同意设备加入", exact: true })
       .isChecked(),
     false,
   );
-  const approveDevice = a.getByRole("checkbox", {
+  const approveDevice = a.getByRole("switch", {
     name: "自动同意设备加入",
     exact: true,
   });
@@ -133,37 +134,36 @@ try {
   await approveDevice.uncheck();
   await a.reload();
   assert.equal(await approveDevice.isChecked(), false);
-  await a
+  await createPanel
     .getByRole("textbox", { name: "设备名称", exact: true })
     .fill("发送设备");
-  await a
-    .getByRole("checkbox", {
-      name: "仅使用中继，不向对方交换直连网络地址",
+  await createPanel
+    .getByRole("switch", {
+      name: "仅使用中继",
       exact: true,
     })
     .check();
   await a.getByRole("button", { name: "创建配对码", exact: true }).click();
-  await a.getByRole("heading", { name: "等待另一台设备" }).waitFor();
+  await a.getByRole("heading", { name: "等待对方加入" }).waitFor();
   const code = (await a.locator(".transfer-code").textContent())
     .replaceAll(" ", "")
     .trim();
-  assert.match(code, /^[A-Z]-[0-9]{4}$/);
+  assert.match(code, /^[0-9]{4}$/);
   await a.getByRole("button", { name: "复制配对码", exact: true }).click();
   const copiedCode = await a.evaluate(() => navigator.clipboard.readText());
-  assert.equal(copiedCode, code.replace("-", ""));
+  assert.equal(copiedCode, code);
   await b
-    .getByRole("textbox", { name: "设备名称", exact: true })
+    .getByRole("textbox", { name: "加入时的设备名称", exact: true })
     .fill("接收设备");
   const cells = b.locator(".pair-code input");
-  assert.equal(await cells.count(), 5);
-  assert.equal(await b.locator(".pair-code-separator").textContent(), "-");
-  for (let index = 0; index < 5; index++) {
+  assert.equal(await cells.count(), 4);
+  for (let index = 0; index < 4; index++) {
     assert.equal(await cells.nth(index).inputValue(), "");
     assert.equal(await cells.nth(index).getAttribute("placeholder"), null);
   }
-  // 暂不填写字母，检查编辑行为时不能提前自动加入。
-  for (let index = 1; index < 5; index++)
-    await cells.nth(index).fill(copiedCode[index].toLowerCase());
+  // 先只填后三位，检查编辑行为时不能提前自动加入。
+  for (let index = 1; index < 4; index++)
+    await cells.nth(index).fill(copiedCode[index]);
   await b.waitForFunction(
     (code) =>
       Array.from(
@@ -174,28 +174,29 @@ try {
   );
   // 自动跳格、方向键和中间删除都要保留数字的位置，不能自动挤向前面。
   assert.equal(
-    await cells.nth(4).evaluate((input) => input === document.activeElement),
-    true,
-  );
-  await cells.nth(4).press("ArrowLeft");
-  assert.equal(
     await cells.nth(3).evaluate((input) => input === document.activeElement),
     true,
   );
-  await cells.nth(3).press("Backspace");
-  assert.equal(await cells.nth(3).inputValue(), "");
-  assert.equal(await cells.nth(4).inputValue(), copiedCode[4]);
+  await cells.nth(3).press("ArrowLeft");
   assert.equal(
-    await b.getByRole("button", { name: "加入连接", exact: true }).isDisabled(),
+    await cells.nth(2).evaluate((input) => input === document.activeElement),
     true,
   );
-  await cells.nth(3).press("Backspace");
+  await cells.nth(2).press("Backspace");
   assert.equal(await cells.nth(2).inputValue(), "");
+  assert.equal(await cells.nth(3).inputValue(), copiedCode[3]);
+  assert.equal(
+    await b.getByRole("button", { name: "加入", exact: true }).isDisabled(),
+    true,
+  );
+  await cells.nth(2).press("Backspace");
+  assert.equal(await cells.nth(1).inputValue(), "");
+  await cells.nth(1).fill(copiedCode[1]);
   await cells.nth(2).fill(copiedCode[2]);
-  await cells.nth(3).fill(copiedCode[3]);
-  // 完整代码粘贴会自动提交；失效时清空五格并回到字母输入框。
-  const invalidCode = (copiedCode[0] === "A" ? "B" : "A") + copiedCode.slice(1);
-  await cells.nth(2).evaluate(
+  // 完整代码粘贴会自动提交；失效时清空四格并回到第一格。
+  const invalidCode =
+    String((Number(copiedCode[0]) + 1) % 10) + copiedCode.slice(1);
+  await cells.nth(1).evaluate(
     (input, value) => {
       const clipboard = new DataTransfer();
       clipboard.setData("text/plain", value);
@@ -207,7 +208,7 @@ try {
         }),
       );
     },
-    " " + invalidCode[0].toLowerCase() + "-" + invalidCode.slice(1) + " ",
+    " " + invalidCode.slice(0, 2) + "-" + invalidCode.slice(2) + " ",
   );
   await b
     .getByRole("alert")
@@ -246,10 +247,10 @@ try {
     fullPage: true,
   });
   await b.setViewportSize({ width: 390, height: 844 });
-  for (let index = 0; index < 4; index++)
-    await cells.nth(index).fill(copiedCode[index].toLowerCase());
+  for (let index = 0; index < 3; index++)
+    await cells.nth(index).fill(copiedCode[index]);
   assert.equal(
-    await b.getByRole("button", { name: "加入连接", exact: true }).isDisabled(),
+    await b.getByRole("button", { name: "加入", exact: true }).isDisabled(),
     true,
   );
   let joinRequests = 0;
@@ -261,13 +262,32 @@ try {
     response.url().endsWith("/api/transfer/join"),
   );
   // 最后一位触发加入，不需要再点按钮；同一次输入只发出一次请求。
-  await cells.nth(4).fill(copiedCode[4]);
+  await cells.nth(3).fill(copiedCode[3]);
   assert.equal((await joinedResponse).status(), 200);
   await b.getByRole("heading", { name: "等待对方确认" }).waitFor();
   assert.equal(joinRequests, 1);
   b.off("request", countJoin);
   await a.getByRole("button", { name: "确认连接", exact: true }).click();
-  await b.getByRole("heading", { name: "消息", exact: true }).waitFor();
+  await b.getByRole("log", { name: "对话消息" }).waitFor();
+  assert.equal(await b.locator(".site-header").isVisible(), false);
+  assert.ok((await b.locator(".transfer-send-label").boundingBox()).width > 20);
+  assert.equal(
+    (await b.locator(".transfer-messages").boundingBox()).width,
+    390,
+  );
+  await b.getByRole("button", { name: "文件列表", exact: true }).click();
+  await b
+    .getByRole("dialog", { name: "文件列表" })
+    .getByText("暂无传输任务")
+    .waitFor();
+  await b.keyboard.press("Escape");
+  await b.getByRole("button", { name: "添加附件" }).click();
+  await b
+    .getByRole("dialog", { name: "发送附件" })
+    .getByRole("button", { name: "图片" })
+    .waitFor();
+  await b.keyboard.press("Escape");
+  await b.setViewportSize({ width: 980, height: 844 });
 
   for (const [sender, receiver, content] of [
     [a, b, '<img src=x onerror="alert(1)"> 原样显示'],
@@ -449,7 +469,7 @@ try {
     process.env.TRANSFER_TEST_AB ? 32 * 1024 * 1024 : 2 * 1024 * 1024,
   );
   for (let i = 0; i < toolPayload.length; i++) toolPayload[i] = i % 251;
-  await a.getByLabel("选择互传文件").setInputFiles({
+  await a.getByLabel("选择互传文件", { exact: true }).setInputFiles({
     name: "download-tool.bin",
     mimeType: "application/octet-stream",
     buffer: toolPayload,
@@ -682,7 +702,7 @@ try {
     if (automaticDownloads.length === 2) finishAutomatic();
   };
   b.on("download", collectAutomatic);
-  await a.getByLabel("选择互传文件").setInputFiles([
+  await a.getByLabel("选择互传文件", { exact: true }).setInputFiles([
     {
       name: "auto-one.txt",
       mimeType: "text/plain",
@@ -734,7 +754,7 @@ try {
   await autoReceive.check();
   const failedDownload = b.waitForEvent("download");
   const retryPayload = Buffer.from("失败后重新发送，同一个本地文件");
-  await a.getByLabel("选择互传文件").setInputFiles({
+  await a.getByLabel("选择互传文件", { exact: true }).setInputFiles({
     name: "retry.txt",
     mimeType: "text/plain",
     buffer: retryPayload,
@@ -788,12 +808,12 @@ try {
   await a.unroute("**/api/transfer/upload/*", failOnce);
 
   // 重复选择追加，移除只影响待发送列表。
-  await a.getByLabel("选择互传文件").setInputFiles({
+  await a.getByLabel("选择互传文件", { exact: true }).setInputFiles({
     name: "one.txt",
     mimeType: "text/plain",
     buffer: Buffer.from("one"),
   });
-  await a.getByLabel("选择互传文件").setInputFiles({
+  await a.getByLabel("选择互传文件", { exact: true }).setInputFiles({
     name: "two.txt",
     mimeType: "text/plain",
     buffer: Buffer.from("two"),
@@ -802,9 +822,12 @@ try {
   await a.getByRole("button", { name: "移除 one.txt", exact: true }).click();
   assert.equal(await a.locator(".transfer-selected li").count(), 1);
   // 隐藏原生输入，但保留按钮触发选择器与辅助技术名称。
-  assert.equal(await a.getByLabel("选择互传文件").isVisible(), false);
+  assert.equal(
+    await a.getByLabel("选择互传文件", { exact: true }).isVisible(),
+    false,
+  );
   const chooserEvent = a.waitForEvent("filechooser");
-  await a.getByRole("button", { name: "选择文件", exact: true }).click();
+  await a.getByRole("button", { name: "发送文件", exact: true }).click();
   await (
     await chooserEvent
   ).setFiles({
@@ -836,10 +859,12 @@ try {
     path: resolve(root, "backend/bin/transfer-screenshots/desktop.png"),
     fullPage: true,
   });
+  await b.setViewportSize({ width: 390, height: 844 });
   await b.screenshot({
     path: resolve(root, "backend/bin/transfer-screenshots/compact.png"),
     fullPage: true,
   });
+  await b.setViewportSize({ width: 980, height: 844 });
   const history = await Promise.all(
     [a, b].map((page) =>
       page.evaluate(() => ({
@@ -854,7 +879,7 @@ try {
       })),
     ),
   );
-  await b.getByRole("button", { name: "断开连接", exact: true }).click();
+  await b.getByRole("button", { name: "断开", exact: true }).click();
   await a.getByRole("button", { name: "重新连接", exact: true }).waitFor();
   // 两端退出后仍可查看已有内容，但不能继续发送或使用旧下载链接。
   for (const [index, page] of [a, b].entries()) {
@@ -879,7 +904,7 @@ try {
     );
     assert.equal(await page.locator(".transfer-peer-disconnected").count(), 1);
     assert.equal(
-      await page.getByRole("button", { name: "断开连接", exact: true }).count(),
+      await page.getByRole("button", { name: "断开", exact: true }).count(),
       0,
     );
     assert.equal(
@@ -895,8 +920,8 @@ try {
     assert.equal(
       await page
         .getByRole("textbox", { name: "发送文字", exact: true })
-        .count(),
-      0,
+        .isDisabled(),
+      true,
     );
     assert.equal(await page.locator(".transfer-tool-link").count(), 0);
     await page
@@ -907,6 +932,14 @@ try {
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "重新连接", exact: true }).click();
   }
+  await b.reload();
+  await b.getByRole("button", { name: "查看记录", exact: true }).click();
+  await b
+    .getByRole("log")
+    .getByText("文字可以双向发送", { exact: true })
+    .waitFor();
+  await b.locator(".transfer-chat-image").first().waitFor();
+  await b.getByRole("button", { name: "重新连接", exact: true }).click();
 
   // 只替换系统保存对话框；真实 WebRTC、背压确认与浏览器文件写入保持不变。
   // OPFS 是自动化测试的磁盘落点，生产界面仍使用用户选择的普通文件。
@@ -967,25 +1000,25 @@ try {
       };
     });
   }
-  await a
-    .getByRole("checkbox", {
-      name: "仅使用中继，不向对方交换直连网络地址",
+  await createPanel
+    .getByRole("switch", {
+      name: "仅使用中继",
       exact: true,
     })
     .uncheck();
   await a
-    .getByRole("checkbox", { name: "自动同意设备加入", exact: true })
+    .getByRole("switch", { name: "自动同意设备加入", exact: true })
     .check();
   await a.getByRole("button", { name: "创建配对码", exact: true }).click();
-  await a.getByRole("heading", { name: "等待另一台设备" }).waitFor();
+  await a.getByRole("heading", { name: "等待对方加入" }).waitFor();
   assert.equal(await a.locator(".transfer-message").count(), 0);
   assert.equal(await a.locator(".transfer-file").count(), 0);
   const directCode = (await a.locator(".transfer-code").textContent())
     .replaceAll(" ", "")
     .trim();
-  assert.match(directCode, /^[A-Z]-[0-9]{4}$/);
+  assert.match(directCode, /^[0-9]{4}$/);
   await b
-    .getByRole("textbox", { name: "配对码字母", exact: true })
+    .getByRole("textbox", { name: "配对码第1位数字", exact: true })
     .evaluate((input, value) => {
       const clipboard = new DataTransfer();
       clipboard.setData("text/plain", value);
@@ -997,14 +1030,15 @@ try {
         }),
       );
     }, directCode);
-  await a.getByRole("heading", { name: "消息", exact: true }).waitFor();
+  await a.getByRole("heading", { name: "消息与文件", exact: true }).waitFor();
   assert.equal(
     await a.getByRole("button", { name: "确认连接", exact: true }).count(),
     0,
   );
   for (const page of [a, b])
     await page
-      .getByText("已授权 · 点对点可用 · 中继可用", { exact: true })
+      .locator(".transfer-peer-link")
+      .filter({ hasText: /^点对点/ })
       .waitFor({ timeout: 15000 });
   assert.equal(
     await b
@@ -1021,7 +1055,9 @@ try {
   async function direct(sender, receiver, name, payload) {
     const source = resolve(temp, name);
     await writeFile(source, payload);
-    await sender.getByLabel("选择互传文件").setInputFiles(source);
+    await sender
+      .getByLabel("选择互传文件", { exact: true })
+      .setInputFiles(source);
     await sender.getByRole("button", { name: /^发送所选文件/ }).click();
     const row = receiver
       .locator(".transfer-file")
@@ -1078,7 +1114,7 @@ try {
     [a, b, b, "接收方"],
   ]) {
     const name = `取消直连-${label}.bin`;
-    await sender.getByLabel("选择互传文件").setInputFiles({
+    await sender.getByLabel("选择互传文件", { exact: true }).setInputFiles({
       name,
       mimeType: "application/octet-stream",
       buffer: Buffer.alloc(16 << 20, 31),
@@ -1102,7 +1138,8 @@ try {
         /已取消/,
       );
       await page
-        .getByText("已授权 · 点对点可用 · 中继可用", { exact: true })
+        .locator(".transfer-peer-link")
+        .filter({ hasText: /^点对点/ })
         .waitFor({ timeout: 15000 });
     }
     // 验证重建后确实能完成下一份文件，且不会混入取消文件的旧分块。
@@ -1133,7 +1170,7 @@ try {
       page.locator(".transfer-peer-details dd").allTextContents(),
     ),
   );
-  await b.getByRole("button", { name: "断开连接", exact: true }).click();
+  await b.getByRole("button", { name: "断开", exact: true }).click();
   await a.getByRole("button", { name: "重新连接", exact: true }).waitFor();
   for (const [index, page] of [a, b].entries()) {
     assert.deepEqual(

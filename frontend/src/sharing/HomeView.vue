@@ -1,16 +1,23 @@
 <script setup>
-import { computed, defineAsyncComponent, ref } from "vue";
+import { computed, defineAsyncComponent, ref, useTemplateRef } from "vue";
 import { useRoute } from "vue-router";
 import { request, shareURL } from "./api.js";
 import { hasPermission } from "./session.js";
 import { settings } from "./settings.js";
-import { shareText } from "./share-text.js";
+import { shareSettingsSummary } from "./share-expiry.js";
 import ShareNameField from "./ShareNameField.vue";
+import ShareAccessFields from "./ShareAccessFields.vue";
+import ShareResult from "./ShareResult.vue";
 import ExpirySelect from "./ExpirySelect.vue";
+import Icon from "./Icon.vue";
+import PageIllustration from "./PageIllustration.vue";
+import MobileSheet from "./ui/MobileSheet.vue";
+
 const MarkdownEditor = defineAsyncComponent(
   () => import("./MarkdownEditor.vue"),
 );
 const route = useRoute();
+const form = useTemplateRef("form");
 const title = ref("");
 const slug = ref("");
 const content = ref("");
@@ -19,19 +26,34 @@ const hours = ref(Number(settings.share_default_expiry_hours ?? 24));
 const maxViews = ref(0);
 const busy = ref(false);
 const error = ref("");
-const link = ref("");
-const copied = ref(false);
-const sharedPassword = ref("");
-const copiedText = ref(false);
+const result = ref(null);
+const settingsOpen = ref(false);
+const resultOpen = ref(false);
 const allowed = computed(() => hasPermission(1));
-const validHours = computed(() => Number.isFinite(hours.value));
+const canSubmit = computed(
+  () =>
+    !busy.value &&
+    allowed.value &&
+    Number.isFinite(hours.value) &&
+    content.value.trim(),
+);
+
+function shortcut(event) {
+  if (
+    event.key !== "Enter" ||
+    event.isComposing ||
+    (!event.ctrlKey && !event.metaKey)
+  )
+    return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (canSubmit.value) form.value.requestSubmit();
+}
 async function share() {
-  if (busy.value || !allowed.value || !validHours.value) return;
+  if (!canSubmit.value) return;
   busy.value = true;
   error.value = "";
-  link.value = "";
-  copied.value = false;
-  copiedText.value = false;
+  result.value = null;
   try {
     const expires_at =
       hours.value > 0
@@ -49,117 +71,117 @@ async function share() {
         is_public: true,
       },
     });
-    link.value = shareURL("paste", record.slug);
-    // 结果绑定本次创建响应，修改表单不会改变已生成分享的密码。
-    sharedPassword.value = record.password || "";
+    // 结果使用本次创建响应中的密码，不受后续编辑影响。
+    result.value = {
+      link: shareURL("paste", record.slug),
+      password: record.password || "",
+    };
+    settingsOpen.value = false;
+    resultOpen.value = true;
   } catch (reason) {
     error.value = reason.message;
   } finally {
     busy.value = false;
   }
 }
-async function copy() {
-  try {
-    await navigator.clipboard.writeText(link.value);
-    copied.value = true;
-  } catch {
-    error.value = "复制失败，请手动复制链接";
-  }
-}
-async function copyShareText() {
-  try {
-    await navigator.clipboard.writeText(
-      shareText(link.value, sharedPassword.value),
-    );
-    copiedText.value = true;
-  } catch {
-    error.value = "复制失败，请手动复制分享链接和密码";
-  }
-}
 </script>
+
 <template>
-  <div class="page-heading">
-    <p class="eyebrow">简单分享，按时到期</p>
-    <h1>把文字留在这里</h1>
-    <p class="muted">粘贴文本或 Markdown，生成一个带有效期的分享链接。</p>
+  <header class="page-heading hero">
+    <div>
+      <h1>文本分享</h1>
+      <p class="muted">粘贴文字或 Markdown，生成一条带有效期的链接</p>
+      <ul class="page-chips">
+        <li>Markdown 实时预览</li>
+        <li>密码与查看次数</li>
+        <li>Ctrl + Enter 创建</li>
+      </ul>
+    </div>
+    <PageIllustration section="text" />
+  </header>
+  <div v-if="!allowed" class="notice share-permission">
+    创建分享需要授权。<RouterLink
+      :to="{ path: '/login', query: { redirect: route.fullPath } }"
+      >使用 API Key 登录</RouterLink
+    >
   </div>
-  <section class="panel compose-panel">
-    <div v-if="!allowed" class="notice">
-      创建分享需要授权。<RouterLink
-        :to="{ path: '/login', query: { redirect: route.fullPath } }"
-        >使用 API Key 登录</RouterLink
-      >
-    </div>
-    <form @submit.prevent="share">
-      <UiFieldset class="share-fields" :disabled="busy || !allowed">
-        <UiInput
-          v-model="title"
-          class="title-input"
-          placeholder="标题（可选）"
-          maxlength="200"
-          aria-label="分享标题"
-        />
-        <MarkdownEditor v-model="content" :disabled="busy || !allowed" />
-        <ShareNameField v-model="slug" id="text-share-name" :disabled="busy" />
-        <div class="share-options">
-          <div class="form-row share-main-fields">
-            <ExpirySelect v-model="hours" />
-            <label
-              >最多查看次数<UiInput
-                v-model.number="maxViews"
-                type="number"
-                min="0"
-                step="1"
-                required
-              /><small class="muted">0 表示不限次数</small></label
-            >
-            <label
-              >访问密码<UiInput
-                v-model="password"
-                type="password"
-                placeholder="可选"
-                autocomplete="new-password"
-                maxlength="72"
-            /></label>
-          </div>
+  <form
+    ref="form"
+    class="share-layout"
+    @submit.prevent="share"
+    @keydown.capture="shortcut"
+    @invalid.capture="settingsOpen = true"
+  >
+    <section class="panel compose-panel" aria-label="Markdown 编辑器">
+      <UiInput
+        v-model="title"
+        class="title-input"
+        placeholder="标题（可选）"
+        maxlength="200"
+        aria-label="分享标题"
+        :disabled="busy || !allowed"
+      />
+      <MarkdownEditor v-model="content" :disabled="busy || !allowed" compact />
+      <p v-if="error" class="error share-form-error" role="alert">
+        {{ error }}
+      </p>
+    </section>
+    <UiButton
+      v-if="result"
+      type="button"
+      class="mobile-result-link"
+      @click="resultOpen = true"
+      >查看分享结果</UiButton
+    >
+    <aside class="share-sidebar" aria-label="分享设置与结果">
+      <MobileSheet v-model="settingsOpen" title="分享设置">
+        <UiFieldset class="panel share-settings" :disabled="busy || !allowed">
+          <h2>分享设置</h2>
+          <ShareNameField v-model="slug" id="text-share-name" />
+          <ExpirySelect v-model="hours" />
+          <ShareAccessFields
+            v-model:password="password"
+            v-model:max-views="maxViews"
+          />
           <UiButton
-            class="primary"
+            class="primary share-submit"
             icon="link"
-            :disabled="busy || !allowed || !content.trim() || !validHours"
+            :disabled="!canSubmit"
+            >{{ busy ? "正在创建…" : "创建分享" }}</UiButton
           >
-            {{ busy ? "正在创建…" : "创建分享" }}
-          </UiButton>
-        </div>
-      </UiFieldset>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-    </form>
-  </section>
-  <section v-if="link" class="panel result">
-    <h2>分享已创建</h2>
-    <!-- 原生只读文本框可选择、复制整段文字，禁用剪贴板权限时也能使用。 -->
-    <UiInput
-      :value="shareText(link, sharedPassword)"
-      type="textarea"
-      :rows="sharedPassword ? 2 : 1"
-      :autosize="{ minRows: sharedPassword ? 2 : 1, maxRows: 6 }"
-      readonly
-      aria-label="分享文字"
-    />
-    <div class="result-actions">
-      <UiButton type="button" @click="copy">{{
-        copied ? "链接已复制" : "复制链接"
-      }}</UiButton>
-      <UiButton type="button" @click="copyShareText">{{
-        copiedText ? "分享文字已复制" : "复制分享文字"
-      }}</UiButton>
-      <UiButton
-        tag="a"
+          <small class="muted share-shortcut">Ctrl + Enter 快速创建</small>
+          <p v-if="settingsOpen && error" class="error" role="alert">
+            {{ error }}
+          </p>
+        </UiFieldset>
+        <template #footer>
+          <UiButton type="button" @click="settingsOpen = false">完成</UiButton>
+          <UiButton class="primary" :disabled="!canSubmit">{{
+            busy ? "正在创建…" : "创建分享"
+          }}</UiButton>
+        </template>
+      </MobileSheet>
+      <MobileSheet v-if="result" v-model="resultOpen" title="分享结果">
+        <ShareResult v-bind="result" title="分享已创建" />
+      </MobileSheet>
+    </aside>
+    <div class="mobile-share-actions">
+      <button
         type="button"
-        :href="link"
-        target="_blank"
-        rel="noopener noreferrer"
-        >打开分享</UiButton
+        class="mobile-settings-summary"
+        @click="settingsOpen = true"
+      >
+        <Icon name="gear" /><span
+          ><small>分享设置</small
+          >{{ shareSettingsSummary(hours, password, maxViews) }}</span
+        >
+      </button>
+      <UiButton
+        class="primary"
+        :disabled="busy || !allowed || !content.trim()"
+        @click="!Number.isFinite(hours) && (settingsOpen = true)"
+        >{{ busy ? "正在创建…" : "创建分享" }}</UiButton
       >
     </div>
-  </section>
+  </form>
 </template>

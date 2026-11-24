@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from "vue";
+import { expiryPresets as quick } from "./share-expiry.js";
 
 const hours = defineModel({ type: Number, required: true });
 // 与文件上传接口统一使用小时；小数表示分钟，服务端上限为 876000 小时。
@@ -14,13 +15,6 @@ const units = [
   [8760, "年"],
 ];
 // 快捷项以外的站点默认时长自动进入自定义，保留原有时长。
-const quick = [
-  [1, "1 小时"],
-  [24, "1 天"],
-  [168, "7 天"],
-  [720, "30 天"],
-  [0, "长期"],
-];
 const isPreset = (value) =>
   quick.some(([preset]) => Math.abs(preset - value) < 1e-9);
 // 不在预设内的值（如站点默认 2 小时）直接显示为自定义，换算成最合适的单位。
@@ -66,17 +60,6 @@ watch(hours, (value) => {
 function pick(value) {
   choice.value = value;
 }
-const expiresAt = computed(() => {
-  if (customError.value || !hours.value) return "";
-  // 仅作提示，按页面渲染时间估算。
-  return new Date(Date.now() + hours.value * 3600000).toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-});
 </script>
 
 <template>
@@ -104,30 +87,38 @@ const expiresAt = computed(() => {
         自定义
       </button>
     </div>
-    <div v-if="choice === CUSTOM" class="expiry-custom">
-      <UiInput
-        v-model.number="amount"
-        type="number"
-        size="small"
-        min="1"
-        step="1"
-        aria-label="自定义有效期数值"
-      />
-      <UiSelect
-        v-model.number="unit"
-        size="small"
-        aria-label="自定义有效期单位"
-      >
-        <option v-for="[size, text] in units" :key="text" :value="size">
-          {{ text }}
-        </option>
-      </UiSelect>
+    <div
+      class="field-reveal"
+      :class="{ expanded: choice === CUSTOM }"
+      :inert="choice !== CUSTOM"
+    >
+      <div>
+        <div class="expiry-custom">
+          <UiInput
+            v-model.number="amount"
+            type="number"
+            size="small"
+            min="1"
+            step="1"
+            aria-label="自定义有效期数值"
+          />
+          <UiSelect
+            v-model.number="unit"
+            size="small"
+            aria-label="自定义有效期单位"
+          >
+            <option v-for="[size, text] in units" :key="text" :value="size">
+              {{ text }}
+            </option>
+          </UiSelect>
+        </div>
+      </div>
     </div>
     <small v-if="customError" class="expiry-error" role="alert">{{
       customError
     }}</small>
-    <small v-else class="muted">{{
-      expiresAt ? `将于 ${expiresAt} 失效` : "不会按时间失效"
-    }}</small>
+    <small v-else-if="choice === CUSTOM" class="muted expiry-hint"
+      >最短 1 分钟，最长 100 年</small
+    >
   </div>
 </template>

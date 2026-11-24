@@ -11,9 +11,7 @@ const pattern = "[A-Za-z0-9_\\-]{1,100}";
 </script>
 <template>
   <div class="share-name-field">
-    <label :for="id"
-      >自定义链接名称 <span class="muted small">可选</span></label
-    >
+    <label :for="id">链接名称</label>
     <div class="share-name-input">
       <span aria-hidden="true">/{{ type }}/</span>
       <UiInput
@@ -21,6 +19,7 @@ const pattern = "[A-Za-z0-9_\\-]{1,100}";
         :model-value="modelValue"
         @update:model-value="$emit('update:modelValue', $event)"
         :disabled="disabled"
+        aria-label="自定义链接名称"
         :pattern="pattern"
         maxlength="100"
         placeholder="留空自动生成"
@@ -31,7 +30,7 @@ const pattern = "[A-Za-z0-9_\\-]{1,100}";
         title="使用 1–100 个英文字母、数字、短横线或下划线"
       />
     </div>
-    <p class="muted small" :id="id + '-help'">
+    <p class="visually-hidden" :id="id + '-help'">
       支持英文字母、数字、短横线和下划线，最多 100 个字符。
     </p>
   </div>
