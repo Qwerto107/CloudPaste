@@ -205,7 +205,7 @@ export class TransferClient {
     this.stunOverride =
       stunOverride === null ? null : parseSTUNServers(stunOverride);
     this.debug("申请连接", { action: kind });
-    const device = await collectTransferDevice();
+    const device = fields.device ?? (await collectTransferDevice());
     if (this.closed) return;
     const data = await request(`/transfer/${kind}`, {
       method: "POST",

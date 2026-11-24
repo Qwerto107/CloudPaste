@@ -34,6 +34,7 @@ import {
   folderMaxConcurrency,
 } from "./transfer-folders.js";
 import { chatImageHistory, validateChatImage } from "./transfer-images.js";
+import { collectTransferDevice, defaultTransferName } from "./transfer-device.js";
 import {
   normalizePairingCode,
   validPairingCode,
@@ -45,8 +46,24 @@ import {
   transferID,
 } from "./transfer-client.js";
 
-// 每次进入页面生成短随机后缀，方便区分参与配对的设备，用户仍可自行修改。
-const name = ref(`我的设备-${transferID().slice(0, 6)}`);
+// 每个页面独立生成后缀，识别到型号后只更新自动名称。
+const nameSuffix = parseInt(transferID().slice(0, 8), 16)
+  .toString(36)
+  .toUpperCase()
+  .padStart(5, "0")
+  .slice(-5);
+const generatedName = ref(defaultTransferName(nameSuffix));
+const customName = ref(null);
+const name = computed({
+  get: () => customName.value ?? generatedName.value,
+  set: (value) => {
+    customName.value = value;
+  },
+});
+const transferDevice = collectTransferDevice().then((device) => {
+  generatedName.value = defaultTransferName(nameSuffix, navigator, device);
+  return device;
+});
 const code = ref("");
 const route = useRoute();
 const router = useRouter();
@@ -941,10 +958,12 @@ async function open(kind) {
       !customSTUN.value.trim()
     )
       throw new Error("请选择至少一个 STUN 服务器，或选择不使用 STUN");
+    const device = await transferDevice;
     await client.open(
       kind,
       {
         name: name.value,
+        device,
         relay_only: relayOnly.value,
         ...(kind === "join" ? { code: normalizePairingCode(code.value) } : {}),
       },

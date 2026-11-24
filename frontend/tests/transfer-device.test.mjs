@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { collectTransferDevice } from "../src/sharing/transfer-device.js";
+import {
+  collectTransferDevice,
+  defaultTransferName,
+} from "../src/sharing/transfer-device.js";
 
-test("前端只上传原始提示，不判断系统、浏览器和设备类型", async () => {
+test("上报的设备详情只包含原始提示，不包含前端生成的名称", async () => {
   const brands = [
     { brand: "Not;A Brand", version: "99" },
     { brand: "Google Chrome", version: "140.0.1.2" },
@@ -28,6 +31,42 @@ test("前端只上传原始提示，不判断系统、浏览器和设备类型",
   for (const key of ["os", "os_version", "browser", "type", "summary"])
     assert.equal(key in device, false);
   assert.equal(JSON.stringify(device).includes("private-UA"), false);
+});
+
+test("自动名称使用固定格式，优先显示可用型号", () => {
+  const nav = {
+    userAgent: "Mozilla/5.0 (Windows NT 10.0) Chrome/155.0 Edg/155.0",
+  };
+  assert.equal(
+    defaultTransferName("AWW1W", nav),
+    "我的 Windows 设备 - Edge - AWW1W",
+  );
+  const android = {
+    userAgent: "Mozilla/5.0 (Linux; Android 10; K) Chrome/155.0 Mobile",
+  };
+  assert.equal(
+    defaultTransferName("AWW1W", android, { model: " Pixel 9 " }),
+    "我的 Pixel 9 - Chrome - AWW1W",
+  );
+  assert.equal(
+    defaultTransferName("AWW1W", android, { model: "invalid/model" }),
+    "我的 Android 手机 - Chrome - AWW1W",
+  );
+});
+
+test("缺少型号时使用可读的系统和类型，缺少浏览器信息时保留后缀", () => {
+  const ipad = {
+    userAgent: "Mozilla/5.0 (Macintosh) Version/26.0 Safari/617.1",
+    maxTouchPoints: 5,
+  };
+  assert.equal(
+    defaultTransferName("AWW1W", ipad),
+    "我的 iPadOS 平板 - Safari - AWW1W",
+  );
+  assert.equal(
+    defaultTransferName("AWW1W", null),
+    "我的 设备 - 浏览器 - AWW1W",
+  );
 });
 
 test("读取被拒绝或不响应时限时回退，不阻塞配对", async () => {
