@@ -13,9 +13,10 @@ import UiCheckbox from "./sharing/ui/UiCheckbox.vue";
 import UiFieldset from "./sharing/ui/UiFieldset.vue";
 // 控制台版本标识：第一行名称与版本，第二行版权。
 console.log(
-  `%cCloudPaste%c v${__APP_VERSION__}_${__APP_COMMIT__} \n%cCopyright © 2026 Qwerto107. All rights reserved.`,
+  `%cCloudPaste%c v${__APP_VERSION__}_${__APP_COMMIT__} %c\n%cCopyright © 2026 Qwerto107. All rights reserved.`,
   "background:#2563eb;color:#fff;padding:2px 6px;border-radius:3px 0 0 3px",
   "background:#dbeafe;color:#1d4ed8;padding:2px 6px;border-radius:0 3px 3px 0",
+  "",
   "color:#2563eb;line-height:2",
 );
 cleanupLegacyCaches().catch(() => {});
