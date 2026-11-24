@@ -240,9 +240,11 @@ const connectionLink = computed(() =>
 );
 const canDirect = computed(() => direct.value && canSaveDirectly());
 const peerName = computed(() => names.value[1 - myMember.value] || "对方设备");
-const memberDetails = computed(
-  () => peerDevices.value[myMember.value]?.summary || "",
-);
+const peerDevice = computed(() => peerDevices.value[1 - myMember.value]);
+const localDeviceSummary = computed(() => {
+  const summary = peerDevices.value[myMember.value]?.summary;
+  return summary ? `这台设备 · ${summary}` : "这台设备";
+});
 const candidateRoute = computed(() =>
   [localEndpoint.value?.type, peerEndpoint.value?.type]
     .filter(Boolean)
@@ -1868,37 +1870,35 @@ onBeforeUnmount(() => {
               ><i aria-hidden="true"></i>{{ connectionLabel }}</span
             >
             <span class="transfer-peer-sep" aria-hidden="true"></span>
-            <div class="transfer-peer-device">
-              <Icon name="monitor" />
-              <div>
-                <strong>{{ names[myMember] || name }}</strong
-                ><small class="muted"
-                  >这台设备<span v-if="memberDetails">
-                    · {{ memberDetails }}</span
-                  ></small
-                >
+            <div class="transfer-peer-devices">
+              <div class="transfer-peer-device">
+                <Icon name="monitor" />
+                <div>
+                  <strong :title="names[myMember] || name">{{
+                    names[myMember] || name
+                  }}</strong
+                  ><small class="muted" :title="localDeviceSummary">{{
+                    localDeviceSummary
+                  }}</small>
+                </div>
               </div>
-            </div>
-            <span
-              class="transfer-peer-wire"
-              :data-state="connectionState"
-              aria-hidden="true"
-              ><span class="transfer-peer-wire-line"></span
-              ><span class="transfer-peer-wire-line"></span
-            ></span>
-            <div class="transfer-peer-device">
-              <Icon
-                :name="
-                  peerDevices[1 - myMember]?.type === 'mobile'
-                    ? 'mobile'
-                    : 'monitor'
-                "
-              />
-              <div>
-                <strong>{{ peerName }}</strong
-                ><small class="muted">{{
-                  peerDevices[1 - myMember]?.summary
-                }}</small>
+              <span
+                class="transfer-peer-wire"
+                :data-state="connectionState"
+                aria-hidden="true"
+                ><span class="transfer-peer-wire-line"></span
+                ><span class="transfer-peer-wire-line"></span
+              ></span>
+              <div class="transfer-peer-device">
+                <Icon
+                  :name="peerDevice?.type === 'mobile' ? 'mobile' : 'monitor'"
+                />
+                <div>
+                  <strong :title="peerName">{{ peerName }}</strong
+                  ><small class="muted" :title="peerDevice?.summary">{{
+                    peerDevice?.summary
+                  }}</small>
+                </div>
               </div>
             </div>
           </div>
@@ -2392,7 +2392,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div>
                   <dt>设备信息</dt>
-                  <dd>{{ peerDevices[1 - myMember]?.summary || "未提供" }}</dd>
+                  <dd>{{ peerDevice?.summary || "未提供" }}</dd>
                 </div>
                 <div>
                   <dt>{{ hasHistory ? "最后点对点地址" : "点对点地址" }}</dt>
@@ -3276,6 +3276,9 @@ onBeforeUnmount(() => {
   min-width: 0;
   font-size: 14px;
 }
+.transfer-peer-devices {
+  display: contents;
+}
 .transfer-peer-device {
   display: flex;
   align-items: center;
@@ -3951,23 +3954,6 @@ onBeforeUnmount(() => {
   .transfer-workspace .transfer-chat {
     height: 540px;
   }
-  .transfer-peer-wire {
-    display: none;
-  }
-  .transfer-peer-info {
-    gap: 14px;
-  }
-  /* 小屏先展示完整设备信息，再排列操作按钮，避免名称被挤成逐字换行。 */
-  .transfer-peer-bar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .transfer-peer-device {
-    flex: 1 1 200px;
-  }
-  .transfer-peer-actions {
-    justify-content: flex-end;
-  }
   .transfer-message {
     max-width: 90%;
   }
@@ -4632,6 +4618,9 @@ onBeforeUnmount(() => {
 .transfer-peer-info {
   flex: 0 1 auto;
 }
+.transfer-peer-bar > .transfer-peer-info {
+  flex-wrap: nowrap;
+}
 .transfer-peer-device {
   flex: 0 1 auto;
 }
@@ -4647,11 +4636,12 @@ onBeforeUnmount(() => {
   height: 34px;
   padding: 8px;
 }
+.transfer-peer-device strong,
 .transfer-peer-device small {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 24ch;
 }
 .transfer-peer-link {
   margin-left: 0;
@@ -4920,11 +4910,36 @@ onBeforeUnmount(() => {
   .transfer-peer-info {
     gap: 8px;
   }
-  .transfer-peer-device small {
-    max-width: 18ch;
+  /* 连接状态和操作占一行，两台设备共用下一行。 */
+  :global(#app .transfer-peer > .transfer-peer-bar) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "status link actions"
+      "devices devices devices";
+    gap: 8px 12px;
   }
-  .transfer-peer .transfer-peer-wire {
-    width: 30px;
+  :global(#app .transfer-peer-bar > .transfer-peer-info) {
+    display: contents;
+  }
+  .transfer-peer-bar .transfer-peer-status {
+    grid-area: status;
+  }
+  .transfer-peer-bar .transfer-peer-sep {
+    display: none;
+  }
+  .transfer-peer-bar .transfer-peer-link {
+    grid-area: link;
+    justify-self: start;
+  }
+  .transfer-peer-bar .transfer-peer-actions {
+    grid-area: actions;
+  }
+  .transfer-peer-devices {
+    display: flex;
+    grid-area: devices;
+    align-items: center;
+    gap: 12px;
   }
 }
 @media (max-width: 720px) {
@@ -5085,6 +5100,7 @@ onBeforeUnmount(() => {
     background: transparent;
   }
   .transfer-details-actions {
+    justify-content: flex-end;
     margin-top: 16px;
   }
   .transfer-details-panel .transfer-section-heading h2,
