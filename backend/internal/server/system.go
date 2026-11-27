@@ -41,6 +41,8 @@ var defaultSettings = []setting{
 	{"max_downloads", "48", "number", 1, 0, "普通文件下载并发（1–65535）"},
 	{"max_staged_size_mb", "20480", "number", 1, 0, "上传暂存总额度（MiB，不小于单文件上限）"},
 	{"share_default_expiry_hours", "24", "number", 1, 0, "新分享默认有效期（小时，0 表示不过期）"},
+	{"share_auto_cleanup_enabled", "false", "bool", 1, 0, "自动清理过期分享（默认关闭，超过保留天数后清理记录与对应文件）"},
+	{"share_expired_retention_days", "180", "number", 1, 0, "过期分享保留天数（0–3650，默认 180 天）"},
 	{"preview_max_text_kb", "512", "number", 2, 0, "文本文件预览上限（KiB，16–2048）"},
 	{"preview_text_types", "txt,md,markdown,json,xml,csv,log,yaml,yml,html,css,js,go,rs,py,toml", "text", 2, 0, "文本预览扩展名（逗号分隔）"},
 	{"preview_image_types", "jpg,jpeg,png,gif,webp,avif,bmp,svg", "text", 2, 0, "图片预览扩展名"},
@@ -84,7 +86,8 @@ func (a *App) maxUploadBytes() int64 {
 
 func privateSetting(item setting) bool {
 	return item.Group == 5 || item.Group == 6 || item.Key == "transfer_stun" ||
-		item.Key == "max_downloads" || item.Key == "max_uploads" || item.Key == "max_staged_size_mb"
+		item.Key == "max_downloads" || item.Key == "max_uploads" || item.Key == "max_staged_size_mb" ||
+		item.Key == "share_auto_cleanup_enabled" || item.Key == "share_expired_retention_days"
 }
 
 func (a *App) defaultShareExpiry(r *http.Request) (*string, error) {
@@ -263,6 +266,9 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 			if key == "audit_retention_days" {
 				minimum, maximum = 1, 3650
 			}
+			if key == "share_expired_retention_days" {
+				minimum, maximum = 0, 3650
+			}
 			if definition.Group == 3 {
 				minimum, maximum = a.transferSettingRange(key)
 			}
@@ -328,6 +334,9 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) error {
 		}
 		if a.audit != nil {
 			a.audit.applySettings(values)
+		}
+		if a.cleaner != nil {
+			a.cleaner.applySettings(values)
 		}
 		if value, ok := values["audit_retention_days"]; ok && a.audit != nil {
 			days, _ := strconv.ParseInt(value, 10, 64)

@@ -169,6 +169,17 @@ export const fields = {
     min: 0,
     max: 876000,
   },
+  share_auto_cleanup_enabled: {
+    label: "自动清理过期分享",
+    help: "默认关闭；开启后在后台定期清理超过保留天数的过期文本、文件记录及对应存储原件",
+  },
+  share_expired_retention_days: {
+    label: "过期分享保留天数",
+    help: "范围 0–3650 天（默认 180 天），0 表示过期后即可清理",
+    unit: "天",
+    min: 0,
+    max: 3650,
+  },
   proxy_sign_all: {
     label: "下载票据校验",
     help: "下载链接需携带短期票据",
@@ -339,6 +350,8 @@ export const sections = {
       icon: "link",
       keys: [
         "share_default_expiry_hours",
+        "share_auto_cleanup_enabled",
+        "share_expired_retention_days",
         "max_upload_size",
         "max_uploads",
         "max_downloads",

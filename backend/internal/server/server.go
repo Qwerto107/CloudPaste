@@ -49,6 +49,7 @@ type App struct {
 	key                   []byte
 	logger                *slog.Logger
 	audit                 *auditLogger
+	cleaner               *shareCleaner
 	downloadCount         int
 	downloadMu            sync.Mutex
 	downloadsByIP         map[string]int
@@ -135,9 +136,16 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		_ = a.Close()
 		return nil, err
 	}
+	if err = a.startShareCleanup(); err != nil {
+		_ = a.Close()
+		return nil, err
+	}
 	return a, nil
 }
 func (a *App) Close() error {
+	if a.cleaner != nil {
+		a.cleaner.close()
+	}
 	if a.transfers != nil {
 		a.transfers.close()
 	}
