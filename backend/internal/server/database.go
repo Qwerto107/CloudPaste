@@ -43,7 +43,11 @@ func openDatabase(dir string) (*sql.DB, error) {
 		`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 	}
 	for table := range resourceTables {
-		statements = append(statements, fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (id TEXT PRIMARY KEY, slug TEXT UNIQUE, owner TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL)`, table))
+		statements = append(statements,
+			fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (id TEXT PRIMARY KEY, slug TEXT UNIQUE, owner TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL)`, table),
+			fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_created ON %s(created_at DESC, id)`, table, table),
+			fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_owner_created ON %s(owner, created_at DESC, id)`, table, table),
+		)
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
