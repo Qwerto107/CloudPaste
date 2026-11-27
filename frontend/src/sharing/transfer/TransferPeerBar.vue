@@ -1,7 +1,8 @@
 <script setup>
+import { computed } from "vue";
 import Icon from "../Icon.vue";
 
-defineProps({
+const props = defineProps({
   peerName: { type: String, required: true },
   connectionState: { type: String, required: true },
   connectionLabel: { type: String, required: true },
@@ -24,6 +25,21 @@ const emit = defineEmits([
   "return-to-entry",
   "leave",
 ]);
+
+function compactDeviceSummary(summary) {
+  if (!summary) return "";
+  return summary
+    .split(" · ")
+    .map((part) => part.trim())
+    .filter((part) => part && !["这台设备", "电脑", "手机", "平板"].includes(part))
+    .map((part) => part.replace(/\s+\d+\.\d+(?:\.\d+)*/g, ""))
+    .join(" · ");
+}
+
+const linkParts = computed(() => {
+  const [mode, latency] = String(props.connectionLink || "").split(" · ");
+  return { mode: mode || "", latency: latency || "" };
+});
 </script>
 
 <template>
@@ -74,38 +90,64 @@ const emit = defineEmits([
         >
         <span class="transfer-peer-sep" aria-hidden="true"></span>
         <div class="transfer-peer-devices">
-          <div class="transfer-peer-device">
+          <div class="transfer-peer-device is-local">
             <Icon name="monitor" />
             <div>
-              <strong :title="localName">{{ localName }}</strong
-              ><small class="muted" :title="localDeviceSummary">{{
-                localDeviceSummary
+              <div class="transfer-peer-device-name">
+                <strong :title="localName">{{ localName }}</strong>
+                <span class="transfer-peer-badge">本机</span>
+              </div>
+              <small class="muted" :title="localDeviceSummary">{{
+                compactDeviceSummary(localDeviceSummary) || "这台设备"
               }}</small>
             </div>
           </div>
           <span
             class="transfer-peer-wire"
+            :class="{ 'has-link': connected }"
             :data-state="connectionState"
-            aria-hidden="true"
-            ><span class="transfer-peer-wire-line"></span
-            ><span class="transfer-peer-wire-line"></span
-          ></span>
+          >
+            <template v-if="connected">
+              <span class="transfer-peer-link-mode">{{ linkParts.mode }}</span>
+              <svg
+                class="transfer-peer-link-arrow"
+                viewBox="0 0 64 14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 4.5h56m-4-3 4 3-4 3" />
+                <path d="M60 9.5H4m4-3-4 3 4 3" />
+              </svg>
+              <span
+                v-if="linkParts.latency"
+                class="transfer-peer-link-latency"
+                >{{ linkParts.latency }}</span
+              >
+            </template>
+            <template v-else>
+              <span class="transfer-peer-wire-line" aria-hidden="true"></span>
+              <span class="transfer-peer-wire-line" aria-hidden="true"></span>
+            </template>
+          </span>
           <div class="transfer-peer-device">
             <Icon
               :name="peerDevice?.type === 'mobile' ? 'mobile' : 'monitor'"
             />
             <div>
-              <strong :title="peerName">{{ peerName }}</strong
-              ><small class="muted" :title="peerDevice?.summary">{{
-                peerDevice?.summary
+              <div class="transfer-peer-device-name">
+                <strong :title="peerName">{{ peerName }}</strong>
+              </div>
+              <small class="muted" :title="peerDevice?.summary">{{
+                compactDeviceSummary(peerDevice?.summary) || "对方设备"
               }}</small>
             </div>
           </div>
         </div>
       </div>
-      <span v-if="connected" class="transfer-peer-link">{{
-        connectionLink
-      }}</span>
       <div v-if="!mobile" class="transfer-peer-actions">
         <template v-if="hasHistory">
           <UiButton
@@ -119,6 +161,7 @@ const emit = defineEmits([
           <UiButton
             type="button"
             size="small"
+            icon="plus"
             @click="emit('return-to-entry', 'create')"
             >新建配对</UiButton
           >
@@ -128,6 +171,7 @@ const emit = defineEmits([
           type="button"
           class="danger"
           size="small"
+          icon="unlink"
           @click="emit('leave')"
           >断开</UiButton
         >
@@ -143,12 +187,12 @@ const emit = defineEmits([
     <Icon :name="hasHistory ? 'unlink' : 'clock'" />
     <div>
       <strong>{{
-        hasHistory ? "已断开连接" : "连接中断，正在自动恢复"
+        hasHistory ? "已断开连接" : "连接中断，正在自动重连"
       }}</strong
       ><span>{{
         hasHistory
           ? "聊天记录已保留，刷新页面后仍可查看"
-          : "恢复期间无法发送，未完成的文件需重发"
+          : "重连期间无法发送，未完成的文件需重发"
       }}</span>
     </div>
     <time v-if="!hasHistory">{{ remainingTime(reconnectSeconds) }}</time>

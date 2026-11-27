@@ -2252,3 +2252,122 @@ html[data-theme="dark"] .transfer-messages {
   gap: 6px;
   white-space: nowrap;
 }
+
+/* 连接详情：顶部指标双卡 + 分组键值列表 */
+.transfer-details-body {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+.transfer-details-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.transfer-details-metric {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-subtle);
+}
+.transfer-details-metric span {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.2;
+}
+.transfer-details-metric strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.transfer-details-metric strong.mono {
+  font-family: var(--page-mono);
+  font-variant-numeric: tabular-nums;
+}
+.transfer-details-groups {
+  display: grid;
+  gap: 10px;
+}
+.transfer-details-group {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.transfer-details-group-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.transfer-details-list {
+  margin: 0;
+  display: grid;
+  gap: 7px;
+}
+.transfer-details-row {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.transfer-details-row dt {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  line-height: 1.45;
+}
+.transfer-details-panel .transfer-details-row dd {
+  margin: 0;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  text-align: right;
+  line-height: 1.45;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.transfer-details-panel .transfer-details-row dd.mono {
+  font-family: var(--page-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* 顶部连接栏：本机区分 + 中间链路拓扑 */
+.transfer-peer-bar > .transfer-peer-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.transfer-peer-devices {
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 10px;
+}
+.transfer-peer-device.is-local > .icon {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+.transfer-peer-device-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.transfer-peer-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}

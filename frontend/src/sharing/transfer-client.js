@@ -20,7 +20,7 @@ const diskBatchSize = 256 * 1024;
 const receiveWindow = 8 * 1024 * 1024;
 const legacyReceiveWindow = 2 * 1024 * 1024;
 const sendBufferLimit = 4 * 1024 * 1024;
-const reconnectWindow = 5 * 60 * 1000;
+const defaultReconnectWindow = 5 * 60 * 1000;
 
 // getRandomValues 也能用于局域网 HTTP；这些编号仅关联消息，认证票据由服务端生成。
 export function transferID() {
@@ -65,6 +65,7 @@ export class TransferClient {
     this.paused = false;
     this.paired = false;
     this.reconnectAttempt = 0;
+    this.reconnectWindow = defaultReconnectWindow;
     // pagehide 只在真正离开页面时触发；切后台仍保留五分钟恢复机会。
     this.pageLeave = () => this.close(true);
     this.foreground = () => {
@@ -216,6 +217,13 @@ export class TransferClient {
     this.maxFile = data.max_file_size;
     this.resumeToken = data.token;
     this.expiresAt = Date.parse(data.expires_at) || Infinity;
+    if (
+      typeof data.reconnect_window_seconds === "number" &&
+      Number.isFinite(data.reconnect_window_seconds) &&
+      data.reconnect_window_seconds >= 0
+    ) {
+      this.reconnectWindow = data.reconnect_window_seconds * 1000;
+    }
     this.onEvent({ type: "created", ...data, token: undefined });
     this.debug("连接申请成功");
     globalThis.document?.addEventListener("visibilitychange", this.foreground);
@@ -228,7 +236,7 @@ export class TransferClient {
     if (this.closed || (resume && !this.paired)) return;
     if (resume && globalThis.document?.visibilityState === "hidden") return;
     if (resume && Date.now() >= this.reconnectUntil) {
-      this.fail("超过 5 分钟未恢复连接，请重新配对");
+      this.fail(this.reconnectTimeoutMessage());
       return;
     }
     // 丢弃旧套接字事件，迟到的 close 不能关闭恢复后的连接。
@@ -286,6 +294,12 @@ export class TransferClient {
       }, 12000);
   }
 
+  reconnectTimeoutMessage() {
+    if (this.reconnectWindow <= 0) return "连接已断开，请重新配对";
+    const minutes = Math.max(1, Math.round(this.reconnectWindow / 60000));
+    return `超过 ${minutes} 分钟未恢复连接，请重新配对`;
+  }
+
   connectionLost() {
     if (this.closed || !this.paired) return;
     clearTimeout(this.checkTimer);
@@ -293,10 +307,14 @@ export class TransferClient {
     const socket = this.socket;
     this.socket = null;
     socket?.close();
+    if (this.reconnectWindow <= 0) {
+      this.fail(this.reconnectTimeoutMessage());
+      return;
+    }
     if (!this.reconnecting) {
       this.reconnectUntil = Math.min(
         this.paused ? this.reconnectUntil : Infinity,
-        Date.now() + reconnectWindow,
+        Date.now() + this.reconnectWindow,
         this.expiresAt,
       );
       this.reconnecting = true;
@@ -309,7 +327,7 @@ export class TransferClient {
     }
     clearTimeout(this.reconnectTimer);
     if (Date.now() >= this.reconnectUntil) {
-      this.fail("超过 5 分钟未恢复连接，请重新配对");
+      this.fail(this.reconnectTimeoutMessage());
       return;
     }
     if (globalThis.document?.visibilityState !== "hidden") {

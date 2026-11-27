@@ -67,24 +67,20 @@ function defaultDeviceLabel(nav, device, ua) {
     /\biPad\b/.test(ua) ||
     (ua.includes("Macintosh") && nav?.maxTouchPoints > 1)
   )
-    return "iPadOS 平板";
-  if (platform === "iOS" || /\b(?:iPhone|iPod)\b/.test(ua)) return "iOS 手机";
+    return "iPad";
+  if (platform === "iOS" || /\b(?:iPhone|iPod)\b/.test(ua)) return "iPhone";
 
   const knownPlatform = platforms.find(([name]) => name === platform);
   const system = (
     knownPlatform || platforms.find(([, pattern]) => pattern.test(ua))
   )?.[0];
+  if (system) return system;
   const formFactors = device.form_factors || [];
   const mobile =
     device.mobile ?? nav?.userAgentData?.mobile ?? /\bMobile\b/.test(ua);
-  let kind = "设备";
-  if (formFactors.includes("Tablet")) kind = "平板";
-  else if (formFactors.includes("Mobile")) kind = "手机";
-  else if (!formFactors.includes("Desktop")) {
-    if (mobile) kind = "手机";
-    else if (system === "Android") kind = "平板";
-  }
-  return [system, kind].filter(Boolean).join(" ");
+  if (formFactors.includes("Tablet")) return "平板";
+  if (formFactors.includes("Mobile") || mobile) return "手机";
+  return "设备";
 }
 
 export function defaultTransferName(
@@ -102,14 +98,13 @@ export function defaultTransferName(
       ([, brand, pattern]) =>
         pattern.test(ua) || brands.some((item) => item.brand === brand),
     )?.[0] || "浏览器";
-  const prefix = "我的 ";
-  const ending = ` - ${browser} - ${suffix}`;
+  const ending = ` ${browser} · ${suffix}`;
   const model = typeof device.model === "string" ? device.model.trim() : "";
   // 过滤系统不接受的名称字符，并为浏览器名和随机后缀预留输入长度。
   const usableModel =
     model &&
-    model.length <= 60 - prefix.length - ending.length &&
+    model.length <= 60 - ending.length &&
     !/[/\\\p{Cc}\p{Cf}]/u.test(model);
   const label = usableModel ? model : defaultDeviceLabel(nav, device, ua);
-  return `${prefix}${label}${ending}`;
+  return `${label}${ending}`;
 }

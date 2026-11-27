@@ -381,10 +381,11 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 	member.token = secretHash(secret)
 	room.members[0] = member
 	h.rooms[room.id] = room
+	reconnectSeconds := int(h.reconnect / time.Second)
 	h.mu.Unlock()
 	setAuditTarget(r, room.id)
 	a.setTransferAuditDetails(r, device, ip, nil)
-	a.write(w, 201, map[string]any{"token": secret, "code": code, "member": 0, "expires_at": room.expires, "max_file_size": room.maxFile}, "连接已创建")
+	a.write(w, 201, map[string]any{"token": secret, "code": code, "member": 0, "expires_at": room.expires, "max_file_size": room.maxFile, "reconnect_window_seconds": reconnectSeconds}, "连接已创建")
 	return nil
 }
 
@@ -445,10 +446,11 @@ func (a *App) joinTransfer(w http.ResponseWriter, r *http.Request) error {
 		room.members[1].audit = a.transferAuditIdentity(r)
 		room.relayOnly = room.relayOnly || body.RelayOnly
 		details := h.joinAuditDetailsLocked(room, time.Time{})
+		reconnectSeconds := int(h.reconnect / time.Second)
 		h.mu.Unlock()
 		setAuditTarget(r, room.id)
 		a.setTransferAuditDetails(r, device, ip, details)
-		a.write(w, 200, map[string]any{"token": secret, "member": 1, "expires_at": room.expires, "max_file_size": room.maxFile}, "等待对方确认")
+		a.write(w, 200, map[string]any{"token": secret, "member": 1, "expires_at": room.expires, "max_file_size": room.maxFile, "reconnect_window_seconds": reconnectSeconds}, "等待对方确认")
 		return nil
 	}
 	h.mu.Unlock()

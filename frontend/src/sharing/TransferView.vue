@@ -52,14 +52,29 @@ import {
 const nameSuffix = parseInt(transferID().slice(0, 8), 16)
   .toString(36)
   .toUpperCase()
-  .padStart(5, "0")
-  .slice(-5);
+  .padStart(4, "0")
+  .slice(-4);
+const customNameStorageKey = "cloudpaste-transfer-device-name";
 const generatedName = ref(defaultTransferName(nameSuffix));
 const customName = ref(null);
+try {
+  const savedName = localStorage.getItem(customNameStorageKey);
+  if (savedName && savedName.trim()) customName.value = savedName;
+} catch {
+  // 浏览器禁用存储时使用自动生成名称。
+}
 const name = computed({
   get: () => customName.value ?? generatedName.value,
   set: (value) => {
     customName.value = value;
+    try {
+      const trimmed = String(value || "").trim();
+      if (trimmed && trimmed !== generatedName.value)
+        localStorage.setItem(customNameStorageKey, trimmed);
+      else localStorage.removeItem(customNameStorageKey);
+    } catch {
+      // 存储失败不影响当前输入。
+    }
   },
 });
 const transferDevice = collectTransferDevice().then((device) => {
@@ -224,7 +239,7 @@ const connectionState = computed(() =>
   hasHistory.value ? "disconnected" : connected.value ? "connected" : "waiting",
 );
 const connectionLabel = computed(() =>
-  hasHistory.value ? "已断开" : connected.value ? "已连接" : "恢复中",
+  hasHistory.value ? "已断开" : connected.value ? "已连接" : "重连中",
 );
 const reconnectDeadline = ref(0);
 const now = ref(Date.now());
@@ -1580,6 +1595,7 @@ onBeforeUnmount(() => {
                         v-if="canDirect"
                         type="button"
                         size="small"
+                        icon="download"
                         :disabled="active || message.file.accepting"
                         @click="accept(message.file, true)"
                         >点对点下载</UiButton
@@ -1587,6 +1603,7 @@ onBeforeUnmount(() => {
                       <UiButton
                         type="button"
                         size="small"
+                        icon="download"
                         :disabled="active || message.file.accepting"
                         @click="accept(message.file, false)"
                         >中继下载</UiButton
@@ -1598,6 +1615,7 @@ onBeforeUnmount(() => {
                       "
                       tag="a"
                       size="small"
+                      icon="download"
                       :href="message.file.url"
                       :download="message.file.name"
                       referrerpolicy="no-referrer"
@@ -1699,6 +1717,7 @@ onBeforeUnmount(() => {
             </div>
             <UiButton
               class="primary transfer-send"
+              icon="send"
               :aria-label="pastedImages.length ? '发送消息' : '发送文字'"
               :title="pastedImages.length ? '发送消息' : '发送文字'"
               :disabled="

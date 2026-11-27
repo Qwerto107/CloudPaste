@@ -38,19 +38,19 @@ test("自动名称使用固定格式，优先显示可用型号", () => {
     userAgent: "Mozilla/5.0 (Windows NT 10.0) Chrome/155.0 Edg/155.0",
   };
   assert.equal(
-    defaultTransferName("AWW1W", nav),
-    "我的 Windows 设备 - Edge - AWW1W",
+    defaultTransferName("AWW1", nav),
+    "Windows Edge · AWW1",
   );
   const android = {
     userAgent: "Mozilla/5.0 (Linux; Android 10; K) Chrome/155.0 Mobile",
   };
   assert.equal(
-    defaultTransferName("AWW1W", android, { model: " Pixel 9 " }),
-    "我的 Pixel 9 - Chrome - AWW1W",
+    defaultTransferName("AWW1", android, { model: " Pixel 9 " }),
+    "Pixel 9 Chrome · AWW1",
   );
   assert.equal(
-    defaultTransferName("AWW1W", android, { model: "invalid/model" }),
-    "我的 Android 手机 - Chrome - AWW1W",
+    defaultTransferName("AWW1", android, { model: "invalid/model" }),
+    "Android Chrome · AWW1",
   );
 });
 
@@ -60,12 +60,12 @@ test("缺少型号时使用可读的系统和类型，缺少浏览器信息时�
     maxTouchPoints: 5,
   };
   assert.equal(
-    defaultTransferName("AWW1W", ipad),
-    "我的 iPadOS 平板 - Safari - AWW1W",
+    defaultTransferName("AWW1", ipad),
+    "iPad Safari · AWW1",
   );
   assert.equal(
-    defaultTransferName("AWW1W", null),
-    "我的 设备 - 浏览器 - AWW1W",
+    defaultTransferName("AWW1", null),
+    "设备 浏览器 · AWW1",
   );
 });
 
