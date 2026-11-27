@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,24 +12,13 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"cloudpaste/backend/internal/storage"
 )
 
-type Listing struct {
-	Items      []FileInfo `json:"items"`
-	NextCursor string     `json:"nextCursor,omitempty"`
-	HasMore    bool       `json:"hasMore"`
-}
-type Stream struct {
-	Body   io.ReadCloser
-	Status int
-	Header http.Header
-}
-type Driver interface {
-	List(context.Context, string, string, int) (Listing, error)
-	Stat(context.Context, string) (FileInfo, error)
-	Open(context.Context, string, *http.Request) (Stream, error)
-	Close() error
-}
+type Listing = storage.Listing
+type Stream = storage.Stream
+type Driver = storage.Driver
 type cachedDriver struct {
 	Driver  Driver
 	Updated string
@@ -62,46 +49,9 @@ func cleanPath(value string) (string, error) {
 	}
 	return path.Clean(value), nil
 }
-func within(base, target string) bool {
-	return base == "/" || target == base || strings.HasPrefix(target, base+"/")
-}
+func within(base, target string) bool { return storage.Within(base, target) }
 
-func classify(info *FileInfo) {
-	if info.Directory {
-		info.Type = 1
-		info.TypeName = "folder"
-		info.MimeType = "application/x-directory"
-		info.Size = nil
-		return
-	}
-	if info.MimeType == "" {
-		info.MimeType = mime.TypeByExtension(strings.ToLower(path.Ext(info.Name)))
-	}
-	if info.MimeType == "" {
-		info.MimeType = "application/octet-stream"
-	}
-	info.TypeName = "unknown"
-	switch {
-	case strings.HasPrefix(info.MimeType, "image/"):
-		info.Type = 5
-		info.TypeName = "image"
-	case strings.HasPrefix(info.MimeType, "video/"):
-		info.Type = 2
-		info.TypeName = "video"
-	case strings.HasPrefix(info.MimeType, "audio/"):
-		info.Type = 3
-		info.TypeName = "audio"
-	case info.MimeType == "application/pdf":
-		info.Type = 7
-		info.TypeName = "document"
-	case strings.HasPrefix(info.MimeType, "text/") || slices.Contains([]string{".json", ".yaml", ".yml", ".toml", ".md", ".js", ".go", ".rs", ".xml"}, strings.ToLower(path.Ext(info.Name))):
-		info.Type = 4
-		info.TypeName = "text"
-	case slices.Contains([]string{".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}, strings.ToLower(path.Ext(info.Name))):
-		info.Type = 6
-		info.TypeName = "office"
-	}
-}
+func classify(info *FileInfo) { storage.Classify(info) }
 
 func (a *App) storageAllowed(p *Principal, s Storage) bool {
 	if p == nil {

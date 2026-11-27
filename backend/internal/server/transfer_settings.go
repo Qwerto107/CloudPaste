@@ -1,72 +1,20 @@
 package server
 
 import (
-	"net"
 	"strconv"
-	"strings"
 	"time"
+
+	"cloudpaste/backend/internal/transfer"
 )
 
-const defaultTransferSTUN = "stun:stun.miwifi.com:3478\n" +
-	"stun:stun.hitv.com:3478\n" +
-	"stun:stun.cloudflare.com:3478\n" +
-	"stun:stun.l.google.com:19302\n" +
-	"stun:stun.nextcloud.com:3478"
+const defaultTransferSTUN = transfer.DefaultSTUN
 
-// 地址列表保持原有文本设置兼容性；限制数量，避免浏览器同时向过多服务器探测。
 func normalizeTransferSTUN(value string) (string, bool) {
-	if len(value) > 1284 {
-		return "", false
-	}
-	servers := []string{}
-	seen := map[string]bool{}
-	for _, line := range strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if !validTransferSTUN(line) {
-			return "", false
-		}
-		key := strings.ToLower(line)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		servers = append(servers, line)
-		if len(servers) > 5 {
-			return "", false
-		}
-	}
-	return strings.Join(servers, "\n"), true
+	return transfer.NormalizeSTUN(value)
 }
 
 func validTransferSTUN(value string) bool {
-	if value == "" {
-		return true
-	}
-	if len(value) > 256 || !strings.HasPrefix(value, "stun:") || strings.ContainsAny(value, " /\\\r\n\t@?#") {
-		return false
-	}
-	host, port, err := net.SplitHostPort(strings.TrimPrefix(value, "stun:"))
-	number, portErr := strconv.ParseUint(port, 10, 16)
-	if err != nil || portErr != nil || number == 0 || host == "" {
-		return false
-	}
-	if net.ParseIP(host) != nil {
-		return true
-	}
-	for _, label := range strings.Split(strings.TrimSuffix(host, "."), ".") {
-		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, char := range label {
-			if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '-') {
-				return false
-			}
-		}
-	}
-	return true
+	return transfer.ValidSTUN(value)
 }
 
 // 只暴露业务保护值；背压缓冲、票据强度和消息边界仍由协议固定保证。

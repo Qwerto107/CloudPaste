@@ -177,7 +177,14 @@ func withPrincipal(ctx context.Context, p *Principal) context.Context {
 }
 
 func permissionMap(p *Principal) map[string]bool {
-	return map[string]bool{"text_share": p.Has(TextShare), "text_manage": p.Has(TextManage), "file_share": p.Has(FileShare), "file_manage": p.Has(FileManage), "mount_view": p.Has(MountView), "mount_upload": p.Has(MountUpload), "mount_copy": false, "mount_rename": false, "mount_delete": false, "webdav_read": false, "webdav_manage": false}
+	return map[string]bool{
+		"text_share":   p.Has(TextShare),
+		"text_manage":  p.Has(TextManage),
+		"file_share":   p.Has(FileShare),
+		"file_manage":  p.Has(FileManage),
+		"mount_view":   p.Has(MountView),
+		"mount_upload": p.Has(MountUpload),
+	}
 }
 
 func (a *App) registerAuth(mux *apiMux) {

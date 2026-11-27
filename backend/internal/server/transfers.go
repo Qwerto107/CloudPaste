@@ -18,6 +18,8 @@ import (
 	"unicode"
 
 	"github.com/coder/websocket"
+
+	"cloudpaste/backend/internal/transfer"
 )
 
 const (
@@ -107,15 +109,8 @@ type transferMessage struct {
 }
 
 // 直连地址由接收端浏览器上报，仅作为诊断信息，不参与鉴权或传输判断。
-type transferConnection struct {
-	Local  transferEndpoint `json:"local"`
-	Remote transferEndpoint `json:"remote"`
-}
-
-type transferEndpoint struct {
-	Address string `json:"address"`
-	Port    int    `json:"port"`
-}
+type transferConnection = transfer.Connection
+type transferEndpoint = transfer.Endpoint
 
 func transferSecret() string {
 	var b [32]byte
@@ -325,7 +320,7 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	name := transferName(body.Name)
-	if err := body.Device.validate(); err != nil {
+	if err := validateTransferDevice(body.Device); err != nil {
 		return err
 	}
 	device := parseTransferDevice(r.UserAgent(), body.Device)
@@ -413,7 +408,7 @@ func (a *App) joinTransfer(w http.ResponseWriter, r *http.Request) error {
 	if err := transferDecode(w, r, &body); err != nil {
 		return err
 	}
-	if err := body.Device.validate(); err != nil {
+	if err := validateTransferDevice(body.Device); err != nil {
 		return err
 	}
 	device := parseTransferDevice(r.UserAgent(), body.Device)

@@ -10,7 +10,7 @@ func TestTransferDeviceValidation(t *testing.T) {
 	for _, device := range []*transferDeviceInput{
 		nil, {}, {Platform: "Windows", PlatformVersion: "15.0.0"}, {Model: strings.Repeat("机", 32)},
 	} {
-		if err := device.validate(); err != nil {
+		if err := validateTransferDevice(device); err != nil {
 			t.Fatal("拒绝了有效或缺失的原始提示", err)
 		}
 	}
@@ -19,7 +19,7 @@ func TestTransferDeviceValidation(t *testing.T) {
 		{Platform: "Linux\nforged-log"}, {Model: "设备\u202eexe"}, {PlatformVersion: "1\x00"},
 		{TouchPoints: -1}, {Brands: make([]transferDeviceBrand, 9)},
 	} {
-		if err := device.validate(); err == nil {
+		if err := validateTransferDevice(device); err == nil {
 			t.Fatal("接受了无效或无界的原始提示", device)
 		}
 	}

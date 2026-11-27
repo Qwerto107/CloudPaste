@@ -5,12 +5,12 @@ import (
 	"errors"
 	"io"
 	"mime"
-	"net"
 	"net/http"
-	"net/netip"
 	"strconv"
 	"strings"
 	"time"
+
+	"cloudpaste/backend/internal/transfer"
 )
 
 // 实时中继没有文件缓存；io.Pipe 把接收端背压一直传递到上传端。
@@ -49,14 +49,7 @@ func (f *transferFile) lastActivity() time.Time {
 }
 
 func transferEndpointLabel(endpoint transferEndpoint) string {
-	if endpoint.Port < 1 || endpoint.Port > 65535 {
-		return "不可用"
-	}
-	address, err := netip.ParseAddr(endpoint.Address)
-	if err != nil {
-		return "浏览器未公开（端口 " + strconv.Itoa(endpoint.Port) + "）"
-	}
-	return net.JoinHostPort(address.Unmap().String(), strconv.Itoa(endpoint.Port))
+	return transfer.EndpointLabel(endpoint)
 }
 
 // 文件与图片只记录必要的传输元数据，开始和结束事件使用同一套字段。

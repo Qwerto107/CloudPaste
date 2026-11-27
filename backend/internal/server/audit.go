@@ -13,27 +13,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
+
+	"cloudpaste/backend/internal/audit"
 )
 
 // 操作日志只接收明确挑选的字段，绝不截取请求体、响应体或完整 URL。
-type auditEvent struct {
-	ID         int64  `json:"id"`
-	Time       int64  `json:"time"`
-	Module     string `json:"module"`
-	Action     string `json:"action"`
-	ActorType  string `json:"actor_type"`
-	ActorID    string `json:"actor_id"`
-	ActorName  string `json:"actor_name"`
-	IP         string `json:"ip"`
-	Target     string `json:"target"`
-	Method     string `json:"method"`
-	Endpoint   string `json:"endpoint"`
-	Status     int    `json:"status"`
-	Result     string `json:"result"`
-	DurationMS int64  `json:"duration_ms"`
-	Details    string `json:"details"`
-}
+type auditEvent = audit.Event
 
 type auditContextKey struct{}
 
@@ -139,10 +124,7 @@ type auditLogger struct {
 }
 
 // 模块位图只在保存配置时更新，请求路径仅做原子读取，不查询数据库或加锁。
-var auditModuleBits = map[string]uint32{
-	"auth": 1 << 0, "text": 1 << 1, "file": 1 << 2, "transfer": 1 << 3,
-	"storage": 1 << 4, "keys": 1 << 5, "settings": 1 << 6,
-}
+var auditModuleBits = audit.ModuleBits
 
 func (l *auditLogger) allows(module string) bool {
 	return l != nil && l.enabled.Load() && l.disabledModules.Load()&auditModuleBits[module] == 0
@@ -166,17 +148,7 @@ func (l *auditLogger) applySettings(values map[string]string) {
 }
 
 func auditText(value string, limit int) string {
-	value = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, value)
-	runes := []rune(value)
-	if len(runes) > limit {
-		return string(runes[:limit])
-	}
-	return value
+	return audit.SanitizeText(value, limit)
 }
 
 func auditActor(p *Principal) (string, string, string) {

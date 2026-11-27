@@ -3,7 +3,8 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"time"
+
+	"cloudpaste/backend/internal/storage"
 )
 
 const (
@@ -160,19 +161,7 @@ type Share struct {
 	UpdatedAt     string  `json:"updated_at"`
 }
 
-type FileInfo struct {
-	IsMount     bool       `json:"isMount,omitempty"`
-	Path        string     `json:"path"`
-	Name        string     `json:"name"`
-	Directory   bool       `json:"isDirectory"`
-	Size        *int64     `json:"size"`
-	Modified    *time.Time `json:"modified"`
-	MimeType    string     `json:"mimetype"`
-	MountID     string     `json:"mount_id"`
-	StorageType string     `json:"storage_type"`
-	Type        int        `json:"type"`
-	TypeName    string     `json:"typeName"`
-}
+type FileInfo = storage.FileInfo
 
 func toMap(value any) map[string]any {
 	b, _ := json.Marshal(value)
