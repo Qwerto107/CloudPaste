@@ -46,7 +46,7 @@ ALLOWED_ORIGINS=
 ENCRYPTION_SECRET=
 ```
 
-拉取镜像（[docker-compose.yml](../docker-compose.yml)，默认 `ghcr.io/qwerto107/cloudpaste:1.0.5`）并启动：
+拉取镜像（[docker-compose.yml](../docker-compose.yml)，默认 `ghcr.io/qwerto107/cloudpaste:1.0.6`）并启动：
 
 ```sh
 docker compose up -d --pull always
@@ -64,7 +64,7 @@ docker compose up -d --pull always
 
 ## 多容器部署与模式切换
 
-需要分离管理 Nginx 前端和 Go 后端时（支持 Linux `amd64` / `arm64`，拉取 `cloudpaste-frontend:1.0.5` 与 `cloudpaste-backend:1.0.5`），下载 [docker-compose.split.yml](../docker-compose.split.yml) 保存为 `docker-compose.yml` 即可：
+需要分离管理 Nginx 前端和 Go 后端时（支持 Linux `amd64` / `arm64`，拉取 `cloudpaste-frontend:1.0.6` 与 `cloudpaste-backend:1.0.6`），下载 [docker-compose.split.yml](../docker-compose.split.yml) 保存为 `docker-compose.yml` 即可：
 
 ```sh
 curl -fL https://raw.githubusercontent.com/Qwerto107/CloudPaste/main/docker-compose.split.yml -o docker-compose.yml
