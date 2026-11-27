@@ -5,8 +5,10 @@ import { request } from "./api.js";
 import { auditModules } from "./audit-modules.js";
 import { auditDateBoundary } from "./audit-date.js";
 import { useConfirmation } from "./ui/confirm.js";
+import { useNotify } from "./ui/notify.js";
 
 const confirmAction = useConfirmation();
+const notify = useNotify();
 const cleanup = reactive({ from: "", to: "", module: "all" });
 const cleaning = ref(false);
 const confirming = ref(false);
@@ -57,9 +59,14 @@ async function clearLogs() {
       hasMore = result.has_more;
       message.value = `已删除 ${total} 条日志${hasMore ? "，继续清理中…" : ""}`;
     } while (hasMore && !active.signal.aborted);
+    if (!active.signal.aborted) {
+      notify("success", `已删除 ${total} 条日志`);
+    }
   } catch (reason) {
-    if (reason.name !== "AbortError")
+    if (reason.name !== "AbortError") {
       error.value = `${reason.message}；已删除 ${total} 条，请检查剩余记录`;
+      notify("error", error.value);
+    }
   } finally {
     if (controller === active) cleaning.value = false;
   }

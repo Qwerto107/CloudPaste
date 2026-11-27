@@ -156,7 +156,7 @@ async function share() {
         </UiFieldset>
         <template #footer>
           <UiButton type="button" @click="settingsOpen = false">完成</UiButton>
-          <UiButton class="primary" :disabled="!canSubmit">{{
+          <UiButton class="primary" icon="link" :disabled="!canSubmit">{{
             busy ? "正在创建…" : "创建分享"
           }}</UiButton>
         </template>
@@ -178,6 +178,7 @@ async function share() {
       </button>
       <UiButton
         class="primary"
+        icon="link"
         :disabled="busy || !allowed || !content.trim()"
         @click="!Number.isFinite(hours) && (settingsOpen = true)"
         >{{ busy ? "正在创建…" : "创建分享" }}</UiButton

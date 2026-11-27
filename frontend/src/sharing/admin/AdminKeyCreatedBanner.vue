@@ -1,10 +1,23 @@
 <script setup>
+import { ref } from "vue";
+
 defineProps({
   createdKey: { type: String, required: true },
   visible: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["close", "toggle-visible", "copy"]);
+const copied = ref(false);
+let copiedTimer;
+
+function handleCopy() {
+  emit("copy");
+  copied.value = true;
+  clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => {
+    copied.value = false;
+  }, 1800);
+}
 </script>
 
 <template>
@@ -28,7 +41,13 @@ const emit = defineEmits(["close", "toggle-visible", "copy"]);
           <span v-if="visible">隐藏密钥</span>
           <span v-else>显示密钥</span>
         </UiButton>
-        <UiButton class="primary" @click="emit('copy')">复制</UiButton>
+        <UiButton
+          class="primary"
+          :icon="copied ? 'check' : 'clipboard'"
+          :class="{ 'is-copied': copied }"
+          @click="handleCopy"
+          >{{ copied ? "已复制" : "复制" }}</UiButton
+        >
       </div>
     </div>
   </section>

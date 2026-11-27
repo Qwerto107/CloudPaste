@@ -9,7 +9,9 @@ import {
   h,
 } from "vue";
 import { useConfirmation } from "./ui/confirm.js";
+import { useNotify } from "./ui/notify.js";
 const confirmAction = useConfirmation();
+const notify = useNotify();
 const MarkdownEditor = defineAsyncComponent(
   () => import("./MarkdownEditor.vue"),
 );
@@ -158,8 +160,10 @@ async function save() {
     saved.value = { ...values };
     await loadSettings(true);
     success.value = "设置已保存";
+    notify("success", "设置已保存");
   } catch (reason) {
     error.value = reason.message;
+    notify("error", reason.message);
   } finally {
     saving.value = false;
   }
@@ -195,7 +199,6 @@ const markdownKeys = ["site_announcement_content", "site_footer_markdown"];
     <h1>{{ route.meta.title || "系统设置" }}</h1>
   </header>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
-  <p v-if="success && !dirty" class="success" role="status">{{ success }}</p>
   <div v-if="loading" class="panel empty" role="status">正在加载设置…</div>
   <UiButton
     v-else-if="panel !== 'ip-location' && !definitions.length"

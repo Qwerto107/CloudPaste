@@ -65,6 +65,19 @@ const uploadLabel = computed(() =>
         ? "重试剩余文件"
         : "上传并分享",
 );
+const uploadIcon = computed(() =>
+  busy.value
+    ? "upload"
+    : uploaded.value.length && !pending.value.length
+      ? "link"
+      : pending.value.length &&
+          (hasCompleted.value ||
+            pending.value.some((entry) =>
+              ["cancelled", "failed"].includes(entry.status),
+            ))
+        ? "retry"
+        : "upload",
+);
 const uploadLimit = computed(() => {
   const size = Number(settings.max_upload_size);
   return size >= 1024 ? `${size / 1024} GiB` : `${size} MiB`;
@@ -284,6 +297,7 @@ async function upload() {
         <p class="muted small">单次最多 30 个 · 单文件 ≤ {{ uploadLimit }}</p>
         <UiButton
           type="button"
+          icon="folder"
           :disabled="busy || !allowed || uploaded.length > 0"
           @click.stop="picker?.click()"
           >选择文件</UiButton
@@ -458,6 +472,7 @@ async function upload() {
           </UiFieldset>
           <UiButton
             class="primary share-submit"
+            :icon="uploadIcon"
             :disabled="!canUpload || !validHours"
             >{{ uploadLabel }}</UiButton
           >
@@ -465,6 +480,7 @@ async function upload() {
             v-if="busy"
             type="button"
             class="share-cancel"
+            icon="close"
             @click="controller?.abort()"
             >取消上传</UiButton
           >
@@ -483,12 +499,14 @@ async function upload() {
             v-if="busy"
             type="button"
             class="danger"
+            icon="close"
             @click="controller?.abort()"
             >取消上传</UiButton
           >
           <UiButton
             v-else
             class="primary"
+            :icon="uploadIcon"
             :disabled="!canUpload || !validHours"
             >{{ uploadLabel }}</UiButton
           >
@@ -510,12 +528,13 @@ async function upload() {
           }}{{ shareSettingsSummary(hours, password, maxViews) }}</span
         >
       </button>
-      <UiButton v-if="busy" type="button" @click="controller?.abort()"
+      <UiButton v-if="busy" type="button" icon="close" @click="controller?.abort()"
         >取消上传</UiButton
       >
       <UiButton
         v-else
         class="primary"
+        :icon="uploadIcon"
         :disabled="!canUpload"
         @click="!validHours && (settingsOpen = true)"
         >{{ uploadLabel }}</UiButton

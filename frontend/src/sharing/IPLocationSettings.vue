@@ -1,7 +1,10 @@
 <script setup>
 import { onMounted, onBeforeUnmount, ref } from "vue";
 import { request } from "./api.js";
+import { useNotify } from "./ui/notify.js";
 import Icon from "./Icon.vue";
+
+const notify = useNotify();
 
 const database = ref({ loaded: false });
 const file = ref(null);
@@ -56,16 +59,20 @@ async function update(method) {
       body: method === "PUT" ? file.value : undefined,
       signal: AbortSignal.any([controller.signal, timeout]),
     });
-    success.value =
+    const msg =
       method === "PUT"
         ? updating
           ? "数据库已更新"
           : "数据库已加载"
         : "数据库已卸载，已停止显示归属地";
+    notify("success", msg);
     file.value = null;
     if (input.value) input.value.value = "";
   } catch (reason) {
-    if (!controller.signal.aborted) error.value = reason.message;
+    if (!controller.signal.aborted) {
+      error.value = reason.message;
+      notify("error", reason.message);
+    }
   } finally {
     busy.value = false;
   }
@@ -165,9 +172,6 @@ onBeforeUnmount(() => controller.abort());
         </div>
       </div>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <p v-if="success" class="ip-location-success small" role="status">
-        {{ success }}
-      </p>
       <footer class="ip-location-notes muted small">
         <p>手动更新 · 加载后立即生效 · 重启保留 · IPv6 不显示位置</p>
       </footer>

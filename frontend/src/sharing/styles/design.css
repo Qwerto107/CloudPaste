@@ -323,13 +323,48 @@ html[data-theme="dark"]
   background: var(--error) !important;
   color: #fff !important;
 }
-#app .ui-button .n-button__icon {
-  font-size: 14px;
+#app .ui-button,
+body .n-dialog .ui-button {
+  --n-icon-size: 15px;
+  --n-icon-margin: 6px;
 }
-#app .ui-button.n-button--small-type .n-button__icon,
-#app .ui-button.n-button--small-type .icon {
-  width: 13px;
-  height: 13px;
+#app .ui-button .n-button__icon,
+body .n-dialog .ui-button .n-button__icon {
+  width: var(--n-icon-size);
+  height: var(--n-icon-size);
+  max-width: var(--n-icon-size);
+  font-size: var(--n-icon-size);
+  margin-top: 0;
+  margin-bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#app .ui-button .n-button__icon .n-icon-slot,
+body .n-dialog .ui-button .n-button__icon .n-icon-slot {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#app .ui-button .n-button__icon .icon,
+body .n-dialog .ui-button .n-button__icon .icon {
+  width: 100%;
+  height: 100%;
+}
+#app .ui-button .n-button__content,
+body .n-dialog .ui-button .n-button__content {
+  line-height: 1.25;
+}
+#app .ui-button.n-button--small-type,
+body .n-dialog .ui-button.n-button--small-type {
+  --n-icon-size: 14px;
+  --n-icon-margin: 5px;
+}
+#app .ui-button.icon-button,
+body .n-dialog .ui-button.icon-button {
+  --n-icon-size: 16px;
 }
 
 /* ========== 输入框 ========== */
@@ -1280,6 +1315,10 @@ html[data-theme="dark"] #app .share-name-input {
   background: var(--surface-subtle);
   color: var(--muted);
 }
+#app .transfer-peer-device.is-local > .icon {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
 #app .transfer-peer-device strong {
   display: block;
   color: var(--text);
@@ -1292,15 +1331,39 @@ html[data-theme="dark"] #app .share-name-input {
 }
 #app .transfer-peer-wire {
   flex: none;
-  width: 44px !important;
+  width: 44px;
 }
-#app .transfer-peer-link {
-  flex: none;
-  padding: 4px 10px;
-  border-radius: 8px;
-  background: var(--surface-subtle);
+#app .transfer-peer-wire.has-link {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: auto;
+  height: auto;
+  min-width: 84px;
+  padding-inline: 12px;
+}
+#app .transfer-peer-link-mode {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--success);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+#app .transfer-peer-link-arrow {
+  display: block;
+  width: 64px;
+  height: 14px;
+  color: var(--success);
+  opacity: 0.82;
+}
+#app .transfer-peer-link-latency {
+  font: 500 10.5px var(--page-mono);
   color: var(--muted);
-  font: 500 12px var(--page-mono);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 #app .transfer-peer-actions {
@@ -2888,4 +2951,74 @@ body .n-base-select-option {
   html[data-theme="dark"] #app .site-header {
     background: #0b0d17;
   }
+}
+
+/* ========== 视觉对比度与微交互增强 ========== */
+#app .ui-button.primary,
+#app .button.primary {
+  background: var(--btn-primary-bg, var(--accent-gradient)) !important;
+  color: var(--on-primary) !important;
+}
+#app .ui-button.is-copied {
+  border-color: var(--success) !important;
+  color: var(--success) !important;
+  background: var(--success-bg) !important;
+}
+#app .ui-button.primary.is-copied {
+  background: var(--success) !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  #app .ui-button:not(:disabled):active,
+  #app .button:not(:disabled):active,
+  #app .page-segment button:not(:disabled):active {
+    transform: scale(0.98);
+  }
+  #app .admin-stat {
+    transition:
+      transform var(--motion-fast) var(--motion-ease),
+      border-color var(--motion-fast) var(--motion-ease),
+      box-shadow var(--motion-fast) var(--motion-ease);
+  }
+  #app .admin-stat:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--tone) 36%, var(--line));
+  }
+  @keyframes progress-shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+  #app .transfer-file progress::-webkit-progress-value,
+  #app .transfer-message progress::-webkit-progress-value {
+    background-image:
+      linear-gradient(
+        110deg,
+        transparent 25%,
+        #ffffff38 50%,
+        transparent 75%
+      ),
+      var(--accent-gradient);
+    background-size: 200% 100%, 100% 100%;
+    animation: progress-shimmer 2.2s linear infinite;
+  }
+}
+
+/* 紧凑化后台骨架屏高度，避免慢网络加载时撑高页面造成跳动；图标底色切换更平滑。 */
+#app .management-skeleton {
+  gap: 8px;
+  padding: 8px 0;
+}
+#app .management-skeleton span {
+  height: 36px;
+  border-radius: 6px;
+}
+#app .admin-stat-icon {
+  transition: background var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
 }

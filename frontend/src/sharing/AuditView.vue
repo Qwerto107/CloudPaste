@@ -208,7 +208,7 @@ onBeforeUnmount(() => controller?.abort());
         }}；保留 {{ days }} 天。{{ enabled ? "新记录可能稍有延迟。" : "" }}
       </p>
     </div>
-    <PageIllustration section="admin" />
+    <PageIllustration section="admin-audit" />
   </header>
   <!-- 分类放在内容区，避免侧栏因展开多个模块而变得过长。 -->
   <nav class="audit-categories" aria-label="日志分类">

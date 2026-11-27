@@ -1394,7 +1394,7 @@ h1 {
 .button.primary,
 .ui-button.primary:not(.n-button--disabled),
 .ui-button.n-button--primary-type:not(.n-button--disabled) {
-  background: var(--accent-gradient);
+  background: var(--btn-primary-bg, var(--accent-gradient));
   border-color: transparent;
   color: #fff;
   box-shadow: 0 6px 16px -8px var(--accent);
@@ -1408,7 +1408,7 @@ h1 {
 .button.primary:hover,
 .ui-button.primary:not(.n-button--disabled):hover,
 .ui-button.n-button--primary-type:not(.n-button--disabled):hover {
-  background: var(--accent-gradient);
+  background: var(--btn-primary-bg, var(--accent-gradient));
   filter: brightness(1.06);
   transform: translateY(-1px);
   box-shadow: 0 10px 22px -8px var(--accent);
@@ -1606,17 +1606,24 @@ html[data-theme="dark"] .brand-icon {
   grid-template-rows: auto auto;
   column-gap: 12px;
 }
-.admin-stat[data-tone="b"] {
+.admin-stat[data-tone="b"],
+.admin-stat[data-tone="ok"] {
   --tone: #10b981;
-  --tone-2: #0ea5e9;
+  --tone-2: #059669;
 }
-.admin-stat[data-tone="c"] {
+.admin-stat[data-tone="c"],
+.admin-stat[data-tone="warn"] {
   --tone: #f59e0b;
-  --tone-2: #f97316;
+  --tone-2: #d97706;
 }
-.admin-stat[data-tone="d"] {
-  --tone: #8b5cf6;
-  --tone-2: #ec4899;
+.admin-stat[data-tone="danger"] {
+  --tone: #ef4444;
+  --tone-2: #e11d48;
+}
+.admin-stat[data-tone="d"],
+.admin-stat[data-tone="info"] {
+  --tone: #6366f1;
+  --tone-2: #0ea5e9;
 }
 .admin-stat-icon {
   background: linear-gradient(135deg, var(--tone), var(--tone-2));

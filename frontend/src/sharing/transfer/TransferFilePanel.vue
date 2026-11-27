@@ -330,6 +330,7 @@ const emit = defineEmits([
                 <UiButton
                   class="primary"
                   size="small"
+                  icon="download"
                   :disabled="
                     active || folder.accepting || !folderSavingSupported
                   "
@@ -339,6 +340,7 @@ const emit = defineEmits([
                 <UiButton
                   v-if="canDirect && folderSavingSupported"
                   size="small"
+                  icon="download"
                   :theme-overrides="directButtonTheme"
                   :disabled="active || folder.accepting"
                   @click="emit('accept-folder', folder, true)"
@@ -349,6 +351,7 @@ const emit = defineEmits([
                 v-if="['active', 'offered'].includes(folder.state)"
                 class="quiet"
                 size="small"
+                icon="close"
                 @click="emit('cancel-folder', folder)"
                 >{{
                   folder.from !== myMember && folder.state === "offered"
@@ -360,6 +363,7 @@ const emit = defineEmits([
                 v-else
                 class="quiet"
                 size="small"
+                icon="trash"
                 @click="emit('remove-folder', folder.id)"
                 >移除记录</UiButton
               >
@@ -501,6 +505,7 @@ const emit = defineEmits([
                   class="transfer-action transfer-download-choice"
                   :class="{ primary: preferredTransport === 'p2p' }"
                   size="small"
+                  icon="download"
                   :disabled="active || file.accepting"
                   @click="emit('accept', file, true)"
                   >点对点下载</UiButton
@@ -511,6 +516,7 @@ const emit = defineEmits([
                     primary: preferredTransport === 'relay' || !canDirect,
                   }"
                   size="small"
+                  icon="download"
                   :disabled="active || file.accepting"
                   @click="emit('accept', file, false)"
                   >中继下载</UiButton
@@ -521,6 +527,7 @@ const emit = defineEmits([
                   tag="a"
                   class="primary transfer-action"
                   size="small"
+                  icon="download"
                   :href="file.url"
                   :download="file.name"
                   referrerpolicy="no-referrer"
@@ -535,6 +542,7 @@ const emit = defineEmits([
                 <UiButton
                   class="transfer-action"
                   size="small"
+                  :icon="file.linkCopied ? 'check' : 'clipboard'"
                   @click="emit('copy-download-link', file)"
                 >
                   {{ file.linkCopied ? "已复制链接" : "复制下载链接" }}</UiButton
@@ -542,6 +550,7 @@ const emit = defineEmits([
                 <UiButton
                   class="transfer-action"
                   size="small"
+                  icon="check"
                   :disabled="
                     !file.completedRound ||
                     file.completedRound !== file.progressRound
@@ -558,6 +567,7 @@ const emit = defineEmits([
                 v-if="['offered', 'active'].includes(file.state)"
                 class="transfer-action"
                 size="small"
+                icon="close"
                 @click="emit('send', { type: 'cancel', id: file.id })"
                 >{{
                   file.state === "offered" && file.from !== myMember

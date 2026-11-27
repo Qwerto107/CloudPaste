@@ -43,7 +43,9 @@ const emit = defineEmits([
         }}
       </h1>
     </div>
-    <UiButton type="button" @click="emit('leave')">取消连接</UiButton>
+    <UiButton type="button" icon="close" @click="emit('leave')"
+      >取消连接</UiButton
+    >
   </header>
   <div class="transfer-wait-layout" :class="{ 'has-code': pairingCode }">
     <section class="panel transfer-waiting">
@@ -59,13 +61,18 @@ const emit = defineEmits([
           >
         </p>
         <div class="transfer-wait-actions">
-          <UiButton type="button" size="small" @click="emit('copy-code')"
+          <UiButton
+            type="button"
+            size="small"
+            icon="clipboard"
+            @click="emit('copy-code')"
             >复制配对码</UiButton
           >
           <UiButton
             type="button"
             class="quiet"
             size="small"
+            icon="link"
             @click="emit('copy-join-link')"
             >复制加入链接</UiButton
           >
@@ -135,12 +142,14 @@ const emit = defineEmits([
           <UiButton
             type="button"
             class="primary"
+            icon="check"
             @click="emit('confirm-join')"
             >确认连接</UiButton
           >
           <UiButton
             type="button"
             class="danger"
+            icon="close"
             @click="emit('reject-join')"
             >拒绝并关闭</UiButton
           >

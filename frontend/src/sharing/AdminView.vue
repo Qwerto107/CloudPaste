@@ -12,6 +12,7 @@ import { useRoute } from "vue-router";
 import { NModal } from "naive-ui";
 import { request } from "./api.js";
 import { useConfirmation, useFileDeletionConfirmation } from "./ui/confirm.js";
+import { useNotify } from "./ui/notify.js";
 import Icon from "./Icon.vue";
 import PageIllustration from "./PageIllustration.vue";
 import StatValue from "./StatValue.vue";
@@ -22,6 +23,7 @@ import AdminTable from "./admin/AdminTable.vue";
 
 const confirmAction = useConfirmation();
 const confirmFileDeletion = useFileDeletionConfirmation();
+const notify = useNotify();
 const MarkdownPreview = defineAsyncComponent(
   () => import("./MarkdownPreview.vue"),
 );
@@ -43,6 +45,8 @@ const page = ref(1);
 const statusTime = ref(Date.now());
 let statusTimer;
 const busy = ref(false);
+const showSkeleton = ref(false);
+let skeletonTimer;
 const error = ref("");
 const success = ref("");
 const savedID = ref("");
@@ -121,20 +125,20 @@ const stats = computed(() => {
       {
         label: scope + "有效",
         value: count((item) => shareState(item).kind === "valid"),
-        icon: "link",
-        tone: "b",
+        icon: "check-circle",
+        tone: "ok",
       },
       {
         label: scope + "已失效",
         value: count((item) => shareState(item).kind === "invalid"),
         icon: "clock",
-        tone: "c",
+        tone: "warn",
       },
       {
         label: scope + "查看次数",
         value: list.reduce((sum, item) => sum + (Number(item.views) || 0), 0),
-        icon: "user",
-        tone: "d",
+        icon: "eye",
+        tone: "info",
       },
     ];
   }
@@ -144,20 +148,20 @@ const stats = computed(() => {
       {
         label: "已启用",
         value: count((item) => item.status === "ENABLED"),
-        icon: "link",
-        tone: "b",
+        icon: "check-circle",
+        tone: "ok",
       },
       {
         label: "只读",
         value: count((item) => item.readonly),
-        icon: "clock",
-        tone: "c",
+        icon: "lock",
+        tone: "warn",
       },
       {
         label: "默认存储",
         value: list.find((item) => item.is_default)?.name || "未设置",
-        icon: "settings",
-        tone: "d",
+        icon: "star",
+        tone: "info",
       },
     ];
   if (panel.value === "keys")
@@ -166,14 +170,14 @@ const stats = computed(() => {
       {
         label: "已启用",
         value: count((item) => item.is_enable),
-        icon: "link",
-        tone: "b",
+        icon: "check-circle",
+        tone: "ok",
       },
       {
         label: "已停用",
         value: count((item) => !item.is_enable),
-        icon: "clock",
-        tone: "c",
+        icon: "ban",
+        tone: "warn",
       },
       {
         label: "已过期",
@@ -181,8 +185,8 @@ const stats = computed(() => {
           (item) =>
             item.expires_at && Date.parse(item.expires_at) <= statusTime.value,
         ),
-        icon: "trash",
-        tone: "d",
+        icon: "clock",
+        tone: "danger",
       },
     ];
   return [];
@@ -201,6 +205,11 @@ async function load() {
   statusTime.value = Date.now();
   hideKeys();
   busy.value = true;
+  clearTimeout(skeletonTimer);
+  // 延迟 180ms 才展示骨架屏，避免快速切换管理菜单时闪烁。
+  skeletonTimer = setTimeout(() => {
+    if (busy.value && !items.value.length) showSkeleton.value = true;
+  }, 180);
   error.value = "";
   editing.value = false;
   previewText.value = null;
@@ -224,6 +233,8 @@ async function load() {
   } catch (reason) {
     error.value = reason.message;
   } finally {
+    clearTimeout(skeletonTimer);
+    showSkeleton.value = false;
     busy.value = false;
   }
 }
@@ -371,7 +382,7 @@ async function save() {
       newlyCreatedKey.value = result.key;
       values.custom_key = "";
     }
-    success.value = "已保存";
+    notify("success", "已保存");
     await load();
   } catch (reason) {
     error.value = reason.message;
@@ -404,10 +415,11 @@ async function remove(item) {
         `/admin/${panel.value === "storage" ? "storage" : "api-keys"}/${encodeURIComponent(item.id)}`,
         { method: "DELETE" },
       );
-    success.value = "已删除";
+    notify("success", "已删除");
     await load();
   } catch (reason) {
     error.value = reason.message;
+    notify("error", reason.message);
   } finally {
     busy.value = false;
   }
@@ -420,10 +432,11 @@ async function storageAction(item, action) {
     await request(`/admin/storage/${encodeURIComponent(item.id)}/${action}`, {
       method: action === "test" ? "POST" : "PUT",
     });
-    success.value = action === "test" ? "连接测试通过" : "默认存储已更新";
+    notify("success", action === "test" ? "连接测试通过" : "默认存储已更新");
     await load();
   } catch (reason) {
     error.value = reason.message;
+    notify("error", reason.message);
   } finally {
     busy.value = false;
   }
@@ -441,9 +454,10 @@ async function textPreview(item) {
 async function copyKey() {
   try {
     await navigator.clipboard.writeText(newlyCreatedKey.value);
-    success.value = "密钥已复制";
+    notify("success", "密钥已复制");
   } catch {
     error.value = "复制失败，请手动复制";
+    notify("error", "复制失败，请手动复制");
   }
 }
 
@@ -504,6 +518,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   clearInterval(statusTimer);
+  clearTimeout(skeletonTimer);
   hideKeys();
 });
 </script>
@@ -514,12 +529,12 @@ onBeforeUnmount(() => {
       <p class="eyebrow">管理你的分享空间</p>
       <h1>{{ title }}</h1>
     </div>
-    <PageIllustration section="admin" />
+    <PageIllustration :section="'admin-' + panel" />
   </header>
   <div v-if="stats.length" class="admin-stats" aria-label="统计">
     <div
-      v-for="stat in stats"
-      :key="stat.label"
+      v-for="(stat, index) in stats"
+      :key="index"
       class="admin-stat"
       :data-tone="stat.tone"
     >
@@ -531,7 +546,6 @@ onBeforeUnmount(() => {
     </div>
   </div>
   <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
-  <p v-if="success" class="success" role="status">{{ success }}</p>
   <AdminKeyCreatedBanner
     v-if="newlyCreatedKey"
     :created-key="newlyCreatedKey"
@@ -607,16 +621,18 @@ onBeforeUnmount(() => {
         >
       </div>
       <div
-        v-if="busy && !items.length"
+        v-if="showSkeleton && !items.length"
         class="management-skeleton"
         role="status"
         aria-label="正在读取"
       >
-        <span v-for="row in 4" :key="row"></span>
+        <span v-for="row in 3" :key="row"></span>
       </div>
-      <p v-else-if="!visible.length" class="empty muted">这里还没有记录。</p>
+      <p v-else-if="!busy && !visible.length" class="empty muted">
+        这里还没有记录。
+      </p>
       <AdminTable
-        v-else
+        v-else-if="visible.length"
         :panel="panel"
         :items="visible"
         :saved-i-d="savedID"

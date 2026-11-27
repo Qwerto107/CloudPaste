@@ -50,6 +50,7 @@
   --sec-admin-soft: #ffeee2;
   --accent-2: var(--sec-text-2);
   --accent-gradient: linear-gradient(135deg, var(--accent), var(--accent-2));
+  --btn-primary-bg: var(--accent-gradient);
   --mobile-nav: calc(62px + env(safe-area-inset-bottom));
   --page-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
   --line-strong: #d9d9e0;
@@ -67,11 +68,12 @@ html[data-theme="dark"] {
   --surface-subtle: #1a1e35;
   --line: #262b47;
   --muted: #99a0c2;
-  --accent: #c0baf7;
-  --soft: #38334f;
-  --primary: #c0baf7;
-  --primary-hover: #d2ceff;
+  --accent: var(--sec-text);
+  --soft: var(--sec-text-soft);
+  --primary: var(--sec-text);
+  --primary-hover: var(--sec-text-2);
   --on-primary: #ffffff;
+  --btn-primary-bg: linear-gradient(135deg, #4f46e5, #7c3aed);
   --error: #f27d91;
   --error-bg: #3a1e28;
   --success: #4cd39a;
@@ -120,4 +122,16 @@ html[data-section="admin"] {
   --primary: var(--sec-admin);
   --primary-hover: var(--sec-admin-2);
   --soft: var(--sec-admin-soft);
+  --btn-primary-bg: linear-gradient(135deg, #ea580c, #db2777);
+}
+
+/* 暗色模式下实心主按钮使用降明度饱和渐变，确保纯白文字达到 WCAG AA 对比度。 */
+html[data-theme="dark"][data-section="file"] {
+  --btn-primary-bg: linear-gradient(135deg, #0284c7, #4f46e5);
+}
+html[data-theme="dark"][data-section="transfer"] {
+  --btn-primary-bg: linear-gradient(135deg, #059669, #0284c7);
+}
+html[data-theme="dark"][data-section="admin"] {
+  --btn-primary-bg: linear-gradient(135deg, #c2410c, #be185d);
 }

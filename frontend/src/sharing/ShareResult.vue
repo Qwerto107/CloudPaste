@@ -13,9 +13,11 @@ const props = defineProps({
 const copied = ref("");
 const showCode = ref(false);
 const error = ref("");
+let copiedTimer;
 watch(
   () => props.link,
   () => {
+    clearTimeout(copiedTimer);
     copied.value = "";
     showCode.value = false;
     error.value = "";
@@ -28,6 +30,10 @@ async function copy(kind) {
     );
     copied.value = kind;
     error.value = "";
+    clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => {
+      if (copied.value === kind) copied.value = "";
+    }, 1800);
   } catch {
     error.value = "复制失败，请手动复制";
   }
@@ -45,9 +51,14 @@ async function copy(kind) {
     </header>
     <div class="created-link">
       <UiInput :value="link" readonly aria-label="分享链接" />
-      <UiButton type="button" size="small" @click="copy('link')">{{
-        copied === "link" ? "链接已复制" : "复制链接"
-      }}</UiButton>
+      <UiButton
+        type="button"
+        size="small"
+        :icon="copied === 'link' ? 'check' : 'clipboard'"
+        :class="{ 'is-copied': copied === 'link' }"
+        @click="copy('link')"
+        >{{ copied === "link" ? "链接已复制" : "复制链接" }}</UiButton
+      >
     </div>
     <UiInput
       v-if="password"
@@ -59,9 +70,14 @@ async function copy(kind) {
       aria-label="分享文字"
     />
     <div class="result-actions">
-      <UiButton type="button" size="small" @click="copy('text')">{{
-        copied === "text" ? "分享文字已复制" : "复制分享文字"
-      }}</UiButton>
+      <UiButton
+        type="button"
+        size="small"
+        :icon="copied === 'text' ? 'check' : 'clipboard'"
+        :class="{ 'is-copied': copied === 'text' }"
+        @click="copy('text')"
+        >{{ copied === "text" ? "分享文字已复制" : "复制分享文字" }}</UiButton
+      >
       <UiButton
         type="button"
         size="small"

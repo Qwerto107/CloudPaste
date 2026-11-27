@@ -62,13 +62,18 @@ defineExpose({
         >上次与 {{ archived.names[1 - archived.member] }} 的聊天记录已保留 ·
         {{ archived.messages.length }} 条消息</span
       >
-      <UiButton size="small" type="button" @click="emit('view-history')"
+      <UiButton
+        size="small"
+        type="button"
+        icon="clock"
+        @click="emit('view-history')"
         >查看记录</UiButton
       >
       <UiButton
         size="small"
         type="button"
         class="quiet"
+        icon="trash"
         @click="emit('clear-history')"
         >清空</UiButton
       >
@@ -254,6 +259,7 @@ defineExpose({
                 type="button"
                 class="quiet"
                 size="small"
+                icon="close"
                 aria-label="清空配对码"
                 :disabled="busy || !canJoin || pastingCode || !code"
                 @click="emit('clear-code')"
@@ -293,6 +299,7 @@ defineExpose({
         </p>
         <UiButton
           class="primary"
+          icon="login"
           :disabled="busy || !canJoin || !validPairingCode(code)"
           >加入</UiButton
         >
