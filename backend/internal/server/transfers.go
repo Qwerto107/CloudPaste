@@ -23,9 +23,10 @@ import (
 )
 
 const (
-	transferRooms       = 16
-	transferConnections = 40
-	transferFiles       = 32
+	transferRooms         = 32
+	transferRoomsPerOwner = 5
+	transferConnections   = 40
+	transferFiles         = 32
 	// 覆盖一批文件夹任务的通知与状态消息，并保留控制消息空间。
 	transferQueue     = 3*transferFolderMaxConcurrency + transferFiles
 	transferFrame     = 16 << 10
@@ -48,9 +49,11 @@ type transferHub struct {
 	connectionCount                       int
 	relays                                int
 	maxRelays                             int
+	maxRooms, maxRoomsPerOwner            int
 	folderConcurrency, folderReservations int
 	nextByte                              time.Time
 	maxFile, bytesPerSecond               int64
+	reconnect                             time.Duration
 	stun                                  string
 	enabled                               atomic.Bool
 }
@@ -122,11 +125,13 @@ func transferSecret() string {
 
 func newTransferHub(a *App) *transferHub {
 	ctx, cancel := context.WithCancel(context.Background())
-	h := &transferHub{app: a, ctx: ctx, cancel: cancel, rooms: map[string]*transferRoom{}, limits: newRateLimitTable(1024), probes: newRateLimitTable(256), connections: map[string]int{}, maxFile: a.cfg.TransferMaxFileBytes, bytesPerSecond: a.cfg.TransferBytesPerSecond, stun: defaultTransferSTUN}
+	h := &transferHub{app: a, ctx: ctx, cancel: cancel, rooms: map[string]*transferRoom{}, limits: newRateLimitTable(1024), probes: newRateLimitTable(256), connections: map[string]int{}, maxFile: a.cfg.TransferMaxFileBytes, bytesPerSecond: a.cfg.TransferBytesPerSecond, reconnect: transferReconnect, stun: defaultTransferSTUN}
 	if h.maxFile <= 0 {
 		h.maxFile = 10 << 30
 	}
 	h.maxRelays = 64
+	h.maxRooms = transferRooms
+	h.maxRoomsPerOwner = transferRoomsPerOwner
 	h.folderConcurrency = transferFolderDefaultConcurrency
 	h.enabled.Store(!a.cfg.TransferDisabled)
 	h.wg.Add(1)
@@ -330,7 +335,7 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 	h := a.transfers
 	ip := a.clientIP(r)
 	h.mu.Lock()
-	if h.ctx.Err() != nil || !h.allowIPLocked("create", ip, a.runtimeLimits().RateLimits.TransferCreatePerIP) || len(h.rooms) >= transferRooms {
+	if h.ctx.Err() != nil || !h.allowIPLocked("create", ip, a.runtimeLimits().RateLimits.TransferCreatePerIP) || len(h.rooms) >= h.maxRooms {
 		h.mu.Unlock()
 		return transferBusy()
 	}
@@ -341,7 +346,7 @@ func (a *App) createTransfer(w http.ResponseWriter, r *http.Request) error {
 			count++
 		}
 	}
-	if count >= 2 {
+	if count >= h.maxRoomsPerOwner {
 		h.mu.Unlock()
 		return transferBusy()
 	}
@@ -466,6 +471,14 @@ func (h *transferHub) broadcastLocked(room *transferRoom, value any) {
 	}
 }
 
+func (h *transferHub) maxConnectionsLocked() int {
+	return max(transferConnections, h.maxRooms*2+8)
+}
+
+func (h *transferHub) maxConnectionsPerIPLocked() int {
+	return max(8, h.maxRoomsPerOwner*4)
+}
+
 func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
 	if !a.transferOrigin(r, true) || r.Header.Get("Authorization") != "" {
 		a.fail(w, forbidden())
@@ -474,7 +487,7 @@ func (a *App) transferSocket(w http.ResponseWriter, r *http.Request) {
 	h := a.transfers
 	ip := a.clientIP(r)
 	h.mu.Lock()
-	if h.ctx.Err() != nil || h.connectionCount >= transferConnections || h.connections[ip] >= 8 || !h.allowIPLocked("socket", ip, a.runtimeLimits().RateLimits.TransferSocketPerIP) {
+	if h.ctx.Err() != nil || h.connectionCount >= h.maxConnectionsLocked() || h.connections[ip] >= h.maxConnectionsPerIPLocked() || !h.allowIPLocked("socket", ip, a.runtimeLimits().RateLimits.TransferSocketPerIP) {
 		h.mu.Unlock()
 		a.fail(w, transferBusy())
 		return

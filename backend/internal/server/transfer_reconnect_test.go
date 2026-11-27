@@ -196,3 +196,73 @@ func TestTransferLeaveDoesNotRetainPair(t *testing.T) {
 		t.Fatal("explicit leave retained room")
 	}
 }
+
+func TestTransferReconnectConfigurableWindow(t *testing.T) {
+	f := newFixture(t)
+	// 默认 5 分钟
+	if got := f.app.transferSettingValues()["transfer_reconnect_minutes"]; got != "5" {
+		t.Fatalf("默认断线恢复时长应为 5 分钟，实际 %q", got)
+	}
+	// 更新为 30 分钟
+	f.app.applyTransferSettings(map[string]string{"transfer_reconnect_minutes": "30"})
+	if got := f.app.transferSettingValues()["transfer_reconnect_minutes"]; got != "30" {
+		t.Fatalf("更新后断线恢复时长应为 30 分钟，实际 %q", got)
+	}
+	now := time.Now()
+	room := &transferRoom{
+		expires: now.Add(2 * time.Hour),
+		members: [2]*transferMember{{disconnectedAt: now}, {}},
+	}
+	f.app.transfers.mu.Lock()
+	if f.app.transfers.reconnectExpiredLocked(room, now.Add(29*time.Minute)) {
+		f.app.transfers.mu.Unlock()
+		t.Fatal("29 分钟不应判定为超时")
+	}
+	if !f.app.transfers.reconnectExpiredLocked(room, now.Add(30*time.Minute)) {
+		f.app.transfers.mu.Unlock()
+		t.Fatal("30 分钟应判定为超时")
+	}
+	f.app.transfers.mu.Unlock()
+
+	// 超出范围的值应被忽略，保持原值 30
+	f.app.applyTransferSettings(map[string]string{"transfer_reconnect_minutes": "61"})
+	if got := f.app.transferSettingValues()["transfer_reconnect_minutes"]; got != "30" {
+		t.Fatalf("非法值不应覆盖原设置，实际 %q", got)
+	}
+	// 设为 0 表示断线立即结束
+	f.app.applyTransferSettings(map[string]string{"transfer_reconnect_minutes": "0"})
+	if got := f.app.transferSettingValues()["transfer_reconnect_minutes"]; got != "0" {
+		t.Fatalf("应允许设为 0，实际 %q", got)
+	}
+}
+
+func TestTransferRoomQuotaConfigurableAndWSLinkage(t *testing.T) {
+	f := newFixture(t)
+	vals := f.app.transferSettingValues()
+	if vals["transfer_max_rooms"] != "32" || vals["transfer_max_rooms_per_owner"] != "5" {
+		t.Fatalf("默认房间配额应为 32/5，实际 %s/%s", vals["transfer_max_rooms"], vals["transfer_max_rooms_per_owner"])
+	}
+	f.app.applyTransferSettings(map[string]string{
+		"transfer_max_rooms":           "64",
+		"transfer_max_rooms_per_owner": "8",
+	})
+	f.app.transfers.mu.Lock()
+	maxConns := f.app.transfers.maxConnectionsLocked()
+	maxPerIP := f.app.transfers.maxConnectionsPerIPLocked()
+	f.app.transfers.mu.Unlock()
+	if maxConns != 64*2+8 {
+		t.Fatalf("WebSocket 总连接上限应联动为 %d，实际 %d", 64*2+8, maxConns)
+	}
+	if maxPerIP != 8*4 {
+		t.Fatalf("WebSocket 单 IP 上限应联动为 %d，实际 %d", 8*4, maxPerIP)
+	}
+	// 非法越界值应被忽略
+	f.app.applyTransferSettings(map[string]string{
+		"transfer_max_rooms":           "0",
+		"transfer_max_rooms_per_owner": "99",
+	})
+	vals = f.app.transferSettingValues()
+	if vals["transfer_max_rooms"] != "64" || vals["transfer_max_rooms_per_owner"] != "8" {
+		t.Fatalf("越界值不应覆盖原配额，实际 %s/%s", vals["transfer_max_rooms"], vals["transfer_max_rooms_per_owner"])
+	}
+}

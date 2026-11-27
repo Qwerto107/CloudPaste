@@ -28,12 +28,18 @@ func (a *App) transferSettingRange(key string) (int64, int64) {
 		return 1, transferFolderMaxConcurrency
 	case "transfer_max_file_mb":
 		return 1, 10240
+	case "transfer_reconnect_minutes":
+		return 0, 60
+	case "transfer_max_rooms":
+		return 1, 256
+	case "transfer_max_rooms_per_owner":
+		return 1, 32
 	}
 	return 0, 0
 }
 
 func (a *App) restoreTransferSettings() error {
-	rows, err := a.db.Query("SELECT key,value FROM settings WHERE key IN ('transfer_rate_mb','transfer_max_relays','transfer_max_file_mb','transfer_folder_concurrency','transfer_stun','transfer_enabled')")
+	rows, err := a.db.Query("SELECT key,value FROM settings WHERE key IN ('transfer_rate_mb','transfer_max_relays','transfer_max_file_mb','transfer_folder_concurrency','transfer_reconnect_minutes','transfer_max_rooms','transfer_max_rooms_per_owner','transfer_stun','transfer_enabled')")
 	if err != nil {
 		return err
 	}
@@ -86,6 +92,12 @@ func (a *App) applyTransferSettings(values map[string]string) {
 			h.folderConcurrency = int(n)
 		case "transfer_max_file_mb":
 			h.maxFile = n << 20
+		case "transfer_reconnect_minutes":
+			h.reconnect = time.Duration(n) * time.Minute
+		case "transfer_max_rooms":
+			h.maxRooms = int(n)
+		case "transfer_max_rooms_per_owner":
+			h.maxRoomsPerOwner = int(n)
 		}
 	}
 	h.dispatchFolderQueuesLocked()
@@ -96,11 +108,14 @@ func (a *App) transferSettingValues() map[string]string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return map[string]string{
-		"transfer_enabled":            strconv.FormatBool(h.enabled.Load()),
-		"transfer_stun":               h.stun,
-		"transfer_rate_mb":            strconv.FormatInt(h.bytesPerSecond>>20, 10),
-		"transfer_max_relays":         strconv.Itoa(h.maxRelays),
-		"transfer_folder_concurrency": strconv.Itoa(h.folderConcurrency),
-		"transfer_max_file_mb":        strconv.FormatInt(h.maxFile>>20, 10),
+		"transfer_enabled":             strconv.FormatBool(h.enabled.Load()),
+		"transfer_stun":                h.stun,
+		"transfer_rate_mb":             strconv.FormatInt(h.bytesPerSecond>>20, 10),
+		"transfer_max_relays":          strconv.Itoa(h.maxRelays),
+		"transfer_folder_concurrency":  strconv.Itoa(h.folderConcurrency),
+		"transfer_max_file_mb":         strconv.FormatInt(h.maxFile>>20, 10),
+		"transfer_reconnect_minutes":   strconv.FormatInt(int64(h.reconnect/time.Minute), 10),
+		"transfer_max_rooms":           strconv.Itoa(h.maxRooms),
+		"transfer_max_rooms_per_owner": strconv.Itoa(h.maxRoomsPerOwner),
 	}
 }

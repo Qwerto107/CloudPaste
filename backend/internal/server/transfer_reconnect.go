@@ -46,8 +46,9 @@ func (a *App) leaveTransfer(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *transferHub) reconnectExpiredLocked(room *transferRoom, now time.Time) bool {
+	window := h.reconnect
 	for _, member := range room.members {
-		if member != nil && !member.disconnectedAt.IsZero() && !now.Before(member.disconnectedAt.Add(transferReconnect)) {
+		if member != nil && !member.disconnectedAt.IsZero() && !now.Before(member.disconnectedAt.Add(window)) {
 			return true
 		}
 	}
@@ -56,9 +57,10 @@ func (h *transferHub) reconnectExpiredLocked(room *transferRoom, now time.Time) 
 
 func (h *transferHub) peerOfflineLocked(room *transferRoom) map[string]any {
 	deadline := room.expires
+	window := h.reconnect
 	for _, member := range room.members {
-		if member != nil && !member.disconnectedAt.IsZero() && member.disconnectedAt.Add(transferReconnect).Before(deadline) {
-			deadline = member.disconnectedAt.Add(transferReconnect)
+		if member != nil && !member.disconnectedAt.IsZero() && member.disconnectedAt.Add(window).Before(deadline) {
+			deadline = member.disconnectedAt.Add(window)
 		}
 	}
 	return map[string]any{"type": "peer-offline", "reconnect_until": deadline, "generation": room.generation}
@@ -75,7 +77,7 @@ func (h *transferHub) disconnectMemberLocked(member *transferMember, socket *web
 	if member.socketCancel != nil {
 		member.socketCancel()
 	}
-	if !room.paired || room.ctx.Err() != nil || h.reconnectExpiredLocked(room, time.Now()) {
+	if !room.paired || room.ctx.Err() != nil || h.reconnect <= 0 || h.reconnectExpiredLocked(room, time.Now()) {
 		h.removeLocked(room)
 		return
 	}

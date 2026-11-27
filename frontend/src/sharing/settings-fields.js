@@ -122,6 +122,27 @@ export const fields = {
     label: "启用设备互传",
     help: "关闭后不能创建或加入新连接，已有连接不受影响",
   },
+  transfer_reconnect_minutes: {
+    label: "断线恢复保留时长",
+    help: "意外断线后保留配对的时长（0–60 分钟），0 表示断线立即结束",
+    unit: "分钟",
+    min: 0,
+    max: 60,
+  },
+  transfer_max_rooms: {
+    label: "全站最大在线房间数",
+    help: "同时存在的互传房间总数上限（1–256），WebSocket 容量随此值自动联动",
+    unit: "个",
+    min: 1,
+    max: 256,
+  },
+  transfer_max_rooms_per_owner: {
+    label: "单用户 / 单 IP 最大房间数",
+    help: "同一账号或同一 IP 同时拥有的房间上限（1–32，含断线待恢复房间）",
+    unit: "个",
+    min: 1,
+    max: 32,
+  },
   transfer_stun: {
     label: "STUN 服务器列表",
     help: "每行一个，最多 5 个，留空停用",
@@ -331,12 +352,19 @@ export const sections = {
     {
       title: "连接设置",
       icon: "settings",
-      keys: ["transfer_enabled", "transfer_stun", "transfer_debug_logs"],
+      keys: [
+        "transfer_enabled",
+        "transfer_reconnect_minutes",
+        "transfer_stun",
+        "transfer_debug_logs",
+      ],
     },
     {
       title: "传输资源",
       icon: "transfer",
       keys: [
+        "transfer_max_rooms",
+        "transfer_max_rooms_per_owner",
         "transfer_rate_mb",
         "transfer_max_relays",
         "transfer_max_file_mb",
