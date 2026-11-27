@@ -21,6 +21,7 @@ const receiveWindow = 8 * 1024 * 1024;
 const legacyReceiveWindow = 2 * 1024 * 1024;
 const sendBufferLimit = 4 * 1024 * 1024;
 const defaultReconnectWindow = 5 * 60 * 1000;
+const latencyPollInterval = 5000;
 
 // getRandomValues 也能用于局域网 HTTP；这些编号仅关联消息，认证票据由服务端生成。
 export function transferID() {
@@ -75,6 +76,8 @@ export class TransferClient {
         clearTimeout(this.reconnectTimer);
         this.connectSocket(true);
       } else if (this.paired && this.socket?.readyState === WebSocket.OPEN) {
+        if (this.directReady && this.peer)
+          void this.logConnectionDetails(this.peer, true, true);
         // 恢复前台后先检查旧连接，不能只依赖可能尚未更新的 readyState。
         clearTimeout(this.checkTimer);
         try {
@@ -139,7 +142,7 @@ export class TransferClient {
     };
   }
 
-  async logConnectionDetails(peer = this.peer, display = false) {
+  async logConnectionDetails(peer = this.peer, display = false, silent = false) {
     if (!display && !this.debugEnabled() && !this.auditEnabled) return;
     try {
       const details = await this.connectionDetails(peer);
@@ -151,7 +154,6 @@ export class TransferClient {
             port: details.remote.port,
           },
         };
-        // 连接建立时只取一次界面快照，不要求开启日志，也不新增统计轮询。
         if (display && this.directReady)
           this.onEvent({
             type: "connection-info",
@@ -159,19 +161,42 @@ export class TransferClient {
             remote: details.remote,
             roundTripMs: details.roundTripMs,
           });
-        if (this.debugEnabled()) this.debug("直连链路详情", details);
+        if (!silent && this.debugEnabled()) this.debug("直连链路详情", details);
       } else if (!this.closed && this.peer === peer) {
-        if (display && this.directReady)
+        if (display && !silent && this.directReady)
           this.onEvent({ type: "connection-info", remote: {} });
-        if (this.debugEnabled()) this.debug("直连链路统计暂不可用");
+        if (!silent && this.debugEnabled()) this.debug("直连链路统计暂不可用");
       }
     } catch (error) {
       if (!this.closed && this.peer === peer) {
-        if (display && this.directReady)
+        if (display && !silent && this.directReady)
           this.onEvent({ type: "connection-info", remote: {} });
-        this.debug("读取直连统计失败", { error: error.name }, true);
+        if (!silent) this.debug("读取直连统计失败", { error: error.name }, true);
       }
     }
+  }
+
+  startLatencyPolling(peer = this.peer) {
+    this.stopLatencyPolling();
+    if (!peer || this.closed || !this.directReady) return;
+    const schedule = () => {
+      this.latencyTimer = setTimeout(async () => {
+        this.latencyTimer = null;
+        if (this.closed || !this.directReady || this.peer !== peer) return;
+        if (globalThis.document?.visibilityState !== "hidden") {
+          await this.logConnectionDetails(peer, true, true);
+        }
+        if (!this.closed && this.directReady && this.peer === peer) {
+          schedule();
+        }
+      }, latencyPollInterval);
+    };
+    schedule();
+  }
+
+  stopLatencyPolling() {
+    clearTimeout(this.latencyTimer);
+    this.latencyTimer = null;
   }
 
   logTransferEnd(message) {
@@ -348,6 +373,7 @@ export class TransferClient {
   }
 
   pauseTransfers() {
+    this.stopLatencyPolling();
     if (this.paused) return;
     this.paused = true;
     const peer = this.peer,
@@ -1495,8 +1521,8 @@ export class TransferClient {
         protocol: channel.protocol,
         sctpMaxMessageBytes: this.peer?.sctp?.maxMessageSize ?? null,
       });
-      // 只在通道建立和文件终态取统计快照，不定时轮询或逐块打印。
       void this.logConnectionDetails(this.peer, true);
+      this.startLatencyPolling(this.peer);
       this.onEvent({ type: "direct", ready: true });
     };
     channel.onclose = () => {
@@ -1705,6 +1731,7 @@ export class TransferClient {
 
   peerFailed(reason = "直连不可用") {
     if (this.closed) return;
+    this.stopLatencyPolling();
     this.debug("直连不可用", { reason }, true);
     this.directReady = false;
     this.onEvent({ type: "direct", ready: false });
@@ -1771,6 +1798,7 @@ export class TransferClient {
     this.closed = true;
     this.resumeToken = null;
     this.stunOverride = null;
+    this.stopLatencyPolling();
     for (const timer of [
       this.reconnectTimer,
       this.connectTimer,

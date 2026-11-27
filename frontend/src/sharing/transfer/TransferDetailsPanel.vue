@@ -115,9 +115,13 @@ const routeLabel = computed(() => {
         <div class="transfer-details-metrics">
           <div class="transfer-details-metric">
             <span>延迟</span>
-            <strong class="mono">{{
-              latency === null ? "—" : `${latency} ms`
-            }}</strong>
+            <strong class="mono"
+              ><span
+                :key="latency === null ? 'none' : latency"
+                class="transfer-latency-tick"
+                >{{ latency === null ? "—" : `${latency} ms` }}</span
+              ></strong
+            >
           </div>
           <div class="transfer-details-metric">
             <span>链路</span>

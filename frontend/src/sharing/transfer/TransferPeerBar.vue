@@ -124,7 +124,8 @@ const linkParts = computed(() => {
               </svg>
               <span
                 v-if="linkParts.latency"
-                class="transfer-peer-link-latency"
+                :key="linkParts.latency"
+                class="transfer-peer-link-latency transfer-latency-tick"
                 >{{ linkParts.latency }}</span
               >
             </template>
