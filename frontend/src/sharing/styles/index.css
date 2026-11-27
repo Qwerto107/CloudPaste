@@ -1,0 +1,4 @@
+/* CloudPaste 全局样式入口：令牌 -> 基础与主题 -> 视觉对齐层 */
+@import "./tokens.css";
+@import "./base.css";
+@import "./design.css";

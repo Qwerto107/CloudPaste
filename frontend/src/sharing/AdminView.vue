@@ -8,24 +8,24 @@ import {
   ref,
   watch,
 } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute } from "vue-router";
 import { NModal } from "naive-ui";
-import { request, shareURL } from "./api.js";
-import { session, clearSession } from "./session.js";
+import { request } from "./api.js";
 import { useConfirmation, useFileDeletionConfirmation } from "./ui/confirm.js";
 import Icon from "./Icon.vue";
 import PageIllustration from "./PageIllustration.vue";
 import StatValue from "./StatValue.vue";
+import AdminAccountPanel from "./admin/AdminAccountPanel.vue";
+import AdminKeyCreatedBanner from "./admin/AdminKeyCreatedBanner.vue";
+import AdminEditorModal from "./admin/AdminEditorModal.vue";
+import AdminTable from "./admin/AdminTable.vue";
+
 const confirmAction = useConfirmation();
 const confirmFileDeletion = useFileDeletionConfirmation();
 const MarkdownPreview = defineAsyncComponent(
   () => import("./MarkdownPreview.vue"),
 );
-const MarkdownEditor = defineAsyncComponent(
-  () => import("./MarkdownEditor.vue"),
-);
 const route = useRoute();
-const router = useRouter();
 const panel = computed(() => route.meta.panel);
 const title = computed(
   () =>
@@ -306,6 +306,11 @@ async function openEditor(item = null) {
   }
 }
 
+function closeEditor() {
+  editing.value = false;
+  values.custom_key = "";
+}
+
 async function save() {
   busy.value = true;
   error.value = "";
@@ -407,6 +412,7 @@ async function remove(item) {
     busy.value = false;
   }
 }
+
 async function storageAction(item, action) {
   busy.value = true;
   error.value = "";
@@ -422,6 +428,7 @@ async function storageAction(item, action) {
     busy.value = false;
   }
 }
+
 async function textPreview(item) {
   try {
     const record = await request(`/pastes/${encodeURIComponent(item.id)}`);
@@ -430,29 +437,7 @@ async function textPreview(item) {
     error.value = reason.message;
   }
 }
-const currentPassword = ref("");
-const newPassword = ref("");
-const newUsername = ref(session.name);
-async function changePassword() {
-  busy.value = true;
-  error.value = "";
-  try {
-    await request("/admin/change-password", {
-      method: "POST",
-      body: {
-        currentPassword: currentPassword.value,
-        newPassword: newPassword.value,
-        newUsername: newUsername.value,
-      },
-    });
-    clearSession();
-    await router.replace("/admin/login");
-  } catch (reason) {
-    error.value = reason.message;
-  } finally {
-    busy.value = false;
-  }
-}
+
 async function copyKey() {
   try {
     await navigator.clipboard.writeText(newlyCreatedKey.value);
@@ -461,6 +446,7 @@ async function copyKey() {
     error.value = "复制失败，请手动复制";
   }
 }
+
 function hideKeys() {
   // 刷新或离开页面时清理明文，并取消尚未完成的显示请求。
   keyController?.abort();
@@ -470,6 +456,7 @@ function hideKeys() {
   newKeyVisible.value = false;
   customKeyVisible.value = false;
 }
+
 async function toggleKey(item) {
   if (revealedKeys.value[item.id]) {
     delete revealedKeys.value[item.id];
@@ -495,6 +482,12 @@ async function toggleKey(item) {
     }
   }
 }
+
+function changePage(nextPage) {
+  page.value = nextPage;
+  load();
+}
+
 watch(panel, () => {
   page.value = 1;
   filter.value = "";
@@ -514,6 +507,7 @@ onBeforeUnmount(() => {
   hideKeys();
 });
 </script>
+
 <template>
   <header class="management-heading">
     <div>
@@ -538,358 +532,39 @@ onBeforeUnmount(() => {
   </div>
   <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
   <p v-if="success" class="success" role="status">{{ success }}</p>
-  <section v-if="newlyCreatedKey" class="panel result management-editor new-key-panel">
-    <div class="editor-heading">
-      <h2>保存新密钥</h2>
-      <UiButton class="quiet" size="small" @click="newlyCreatedKey = ''"
-        >关闭</UiButton
-      >
-    </div>
-    <div class="management-panel-body">
-    <p class="muted small">请妥善保存密钥，也可在下方列表中切换显示。</p>
-    <div class="copy-row">
-      <UiInput
-        :value="newlyCreatedKey"
-        :type="newKeyVisible ? 'text' : 'password'"
-        aria-label="新密钥"
-        readonly
-      />
-      <UiButton
-        :aria-pressed="newKeyVisible"
-        @click="newKeyVisible = !newKeyVisible"
-      >
-        <span v-if="newKeyVisible">隐藏密钥</span>
-        <span v-else>显示密钥</span>
-      </UiButton>
-      <UiButton class="primary" @click="copyKey">复制</UiButton>
-    </div>
-    </div>
-  </section>
-  <section v-if="panel === 'account'" class="panel management-editor account-panel">
-    <div class="editor-heading">
-      <h2>{{ session.name || "当前账号" }}</h2>
-      <span class="muted small">{{
-        session.type === "admin" ? "管理员" : "API Key 用户"
-      }}</span>
-    </div>
-    <template v-if="session.type === 'admin'"
-      ><form class="account-form" @submit.prevent="changePassword">
-        <label
-          >账号<UiInput
-            v-model="newUsername"
-            required
-            autocomplete="username" /></label
-        ><label
-          >当前密码<UiInput
-            v-model="currentPassword"
-            type="password"
-            required
-            autocomplete="current-password" /></label
-        ><label
-          >新密码<UiInput
-            v-model="newPassword"
-            type="password"
-            minlength="6"
-            maxlength="72"
-            required
-            aria-label="新密码"
-            autocomplete="new-password" /></label
-        ><small class="muted account-password-hint"
-          >至少 6 个字符，最多 72 字节</small
-        ><div>
-          <UiButton class="primary" :disabled="busy"
-            >更新账号并重新登录</UiButton
-          >
-        </div>
-      </form></template
-    ><div v-else class="management-panel-body"
-      ><p>当前权限：</p>
-      <ul>
-        <li
-          v-for="entry in permissions.filter(
-            (entry) => (session.permissions & entry.bit) !== 0,
-          )"
-          :key="entry.bit"
-        >
-          {{ entry.label }}
-        </li>
-      </ul></div
-    >
-  </section>
+  <AdminKeyCreatedBanner
+    v-if="newlyCreatedKey"
+    :created-key="newlyCreatedKey"
+    :visible="newKeyVisible"
+    @close="newlyCreatedKey = ''"
+    @toggle-visible="newKeyVisible = !newKeyVisible"
+    @copy="copyKey"
+  />
+  <AdminAccountPanel
+    v-if="panel === 'account'"
+    :permissions="permissions"
+    :busy="busy"
+    @update:busy="busy = $event"
+    @error="error = $event"
+  />
   <template v-else>
-    <NModal
+    <AdminEditorModal
       :show="editing"
-      preset="card"
-      class="management-dialog"
-      :title="
-        (editID ? '编辑' : '新增') +
-        title.replace('密钥与权限', '密钥').replace('管理', '')
-      "
-      :mask-closable="!busy"
-      :closable="false"
-      :auto-focus="false"
-      role="dialog"
-      :style="{ width: 'min(560px, calc(100vw - 32px))' }"
-      @update:show="
-        (show) => {
-          if (!show && !busy) {
-            editing = false;
-            values.custom_key = '';
-          }
-        }
-      "
-    >
-      <form class="management-dialog-form" @submit.prevent="save">
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <template v-if="panel === 'storage'"
-          ><div class="form-row">
-            <label
-              >名称<UiInput
-                v-model="values.name"
-                required
-                maxlength="100" /></label
-            ><label
-              >类型<UiSelect
-                v-model="values.storage_type"
-                :disabled="!!editID"
-                aria-label="存储类型"
-              >
-                <option>LOCAL</option>
-                <option>S3</option>
-              </UiSelect></label
-            >
-          </div>
-          <label v-if="values.storage_type === 'LOCAL'"
-            >本地根目录<UiInput
-              v-model="values.root_path"
-              placeholder="/files"
-              required /></label
-          ><template v-else
-            ><label
-              >Endpoint（AWS 可留空）<UiInput
-                v-model="values.endpoint_url"
-                type="url"
-                placeholder="https://s3.example.com"
-            /></label>
-            <div class="form-row">
-              <label
-                >Bucket<UiInput v-model="values.bucket_name" required /></label
-              ><label
-                >Region<UiInput v-model="values.region" placeholder="us-east-1"
-              /></label>
-            </div>
-            <div class="form-row">
-              <label
-                >Access Key<UiInput
-                  v-model="values.access_key_id"
-                  autocomplete="off"
-                  :placeholder="editID ? '留空保留现有凭据' : ''"
-                  :required="!editID" /></label
-              ><label
-                >Secret Key<UiInput
-                  v-model="values.secret_access_key"
-                  type="password"
-                  autocomplete="new-password"
-                  :placeholder="editID ? '留空保留现有凭据' : ''"
-                  :required="!editID"
-              /></label>
-            </div>
-            <label class="check"
-              ><UiCheckbox
-                v-model="values.force_path_style"
-                type="checkbox"
-              />使用 Path Style</label
-            ></template
-          ><label class="check"
-            ><UiCheckbox
-              v-model="values.is_public"
-              type="checkbox"
-            />允许有文件权限的 API Key 使用（仍受存储 ACL 限制）</label
-          ><label class="check"
-            ><UiCheckbox
-              v-model="values.readonly"
-              type="checkbox"
-            />只读存储</label
-          ><label
-            >状态<UiSelect v-model="values.status" aria-label="存储状态">
-              <option>ENABLED</option>
-              <option>DISABLED</option>
-            </UiSelect></label
-          ><label>备注<UiInput v-model="values.remark" /></label
-        ></template>
-        <template v-else-if="panel === 'keys'"
-          ><label
-            >名称<UiInput v-model="values.name" required maxlength="100"
-          /></label>
-          <div v-if="!editID">
-            <label for="custom-key">自定义密钥</label>
-            <div class="copy-row">
-              <UiInput
-                id="custom-key"
-                v-model="values.custom_key"
-                :type="customKeyVisible ? 'text' : 'password'"
-                autocomplete="new-password"
-                placeholder="留空自动生成"
-                aria-describedby="custom-key-hint"
-              />
-              <UiButton
-                type="button"
-                :aria-pressed="customKeyVisible"
-                @click="customKeyVisible = !customKeyVisible"
-              >
-                <span v-if="customKeyVisible">隐藏密钥</span>
-                <span v-else>显示密钥</span>
-              </UiButton>
-            </div>
-            <small id="custom-key-hint" class="muted">
-              可选，不限制长度和字符，留空自动生成。建议使用随机组合。
-            </small>
-          </div>
-          <UiFieldset>
-            <legend>权限</legend>
-            <label v-for="entry in permissions" :key="entry.bit" class="check"
-              ><UiCheckbox
-                v-model="selectedPermissions"
-                type="checkbox"
-                :value="entry.bit"
-              />{{ entry.label }}</label
-            >
-          </UiFieldset>
-          <UiFieldset :disabled="busy">
-            <legend>允许使用的存储</legend>
-            <div v-if="storageChoices.length" class="storage-options">
-              <label
-                v-for="item in storageChoices"
-                :key="item.id"
-                class="check"
-                :class="{
-                  selected: values.storage_config_ids.includes(item.id),
-                }"
-              >
-                <UiCheckbox
-                  v-model="values.storage_config_ids"
-                  type="checkbox"
-                  :value="item.id"
-                />
-                {{ item.name }}
-                <small class="muted">{{ item.storage_type }}</small>
-              </label>
-            </div>
-            <p v-else class="muted small">暂无存储，请先在存储管理中添加。</p>
-            <p class="muted small">
-              点击勾选或取消，不选表示允许使用全部公开存储。
-            </p>
-          </UiFieldset>
-          <label
-            >授权路径<UiInput v-model="values.basic_path" placeholder="/"
-          /></label>
-          <div class="expiry-field">
-            <label for="key-expires-at">有效期</label>
-            <div class="copy-row">
-              <UiDateTime
-                id="key-expires-at"
-                v-model="values.expires_at"
-                type="datetime-local"
-                :disabled="busy"
-                aria-describedby="key-expiry-help"
-              />
-              <UiButton
-                type="button"
-                :disabled="busy || !values.expires_at"
-                @click="values.expires_at = null"
-              >
-                清空
-              </UiButton>
-            </div>
-            <p id="key-expiry-help" class="muted small">
-              按本地时间选择，清空表示不过期。
-            </p>
-          </div>
-          <label class="check"
-            ><UiCheckbox
-              v-model="values.is_enable"
-              type="checkbox"
-            />启用密钥</label
-          ></template
-        >
-        <template v-else
-          ><label v-if="panel === 'texts'"
-            >标题<UiInput v-model="values.title" maxlength="200" /></label
-          ><label v-if="panel === 'files'"
-            >文件名称<UiInput v-model="values.filename" required
-          /></label>
-          <!-- 编辑器工具栏含按钮，不能包在 label 中，否则点击正文会触发加粗。 -->
-          <div v-if="panel === 'texts'" class="markdown-field">
-            <span class="field-label">文本内容</span>
-            <MarkdownEditor v-model="values.content" :disabled="busy" />
-          </div>
-          <label
-            >备注<UiInput v-model="values.remark" maxlength="4000"
-          /></label>
-          <div class="form-row">
-            <label
-              >访问密码<UiInput
-                v-model="values.password"
-                type="text"
-                autocomplete="new-password"
-                maxlength="72"
-                :placeholder="
-                  values.password_available === false
-                    ? '原密码不可恢复，输入新密码'
-                    : '未设置，直接输入即可修改'
-                " /></label
-            ><label
-              >最多查看次数<UiInput
-                v-model.number="values.max_views"
-                type="number"
-                min="0"
-            /></label>
-          </div>
-          <label class="check"
-            ><UiCheckbox
-              v-model="values.clearPassword"
-              type="checkbox"
-            />取消现有密码保护</label
-          >
-          <div class="expiry-field">
-            <label for="share-expires-at">有效期</label>
-            <div class="copy-row">
-              <UiDateTime
-                id="share-expires-at"
-                v-model="values.expires_at"
-                type="datetime-local"
-                :disabled="busy"
-                aria-describedby="share-expiry-help"
-              />
-              <UiButton
-                type="button"
-                :disabled="busy || !values.expires_at"
-                @click="values.expires_at = null"
-              >
-                清空
-              </UiButton>
-            </div>
-            <p id="share-expiry-help" class="muted small">
-              按本地时间选择，留空表示不过期。
-            </p>
-          </div>
-        </template>
-        <div class="management-dialog-actions">
-          <UiButton
-            type="button"
-            :disabled="busy"
-            @click="
-              editing = false;
-              values.custom_key = '';
-            "
-            >取消</UiButton
-          >
-          <UiButton class="primary" :disabled="busy">
-            {{ busy ? "正在保存…" : "保存" }}
-          </UiButton>
-        </div>
-      </form>
-    </NModal>
+      :panel="panel"
+      :title="title"
+      :edit-i-d="editID"
+      :busy="busy"
+      :error="error"
+      :values="values"
+      :permissions="permissions"
+      :selected-permissions="selectedPermissions"
+      :storage-choices="storageChoices"
+      :custom-key-visible="customKeyVisible"
+      @close="closeEditor"
+      @save="save"
+      @update:selected-permissions="selectedPermissions = $event"
+      @update:custom-key-visible="customKeyVisible = $event"
+    />
     <NModal
       :show="previewText !== null"
       preset="card"
@@ -940,172 +615,25 @@ onBeforeUnmount(() => {
         <span v-for="row in 4" :key="row"></span>
       </div>
       <p v-else-if="!visible.length" class="empty muted">这里还没有记录。</p>
-      <div v-else class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th v-if="panel === 'texts' || panel === 'files'">状态</th>
-              <th>
-                {{
-                  panel === "storage"
-                    ? "类型"
-                    : panel === "keys"
-                      ? "状态 / 权限"
-                      : "查看次数 / 有效期"
-                }}
-              </th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="item in visible"
-              :key="item.id"
-              :class="{ 'management-row-saved': item.id === savedID }"
-            >
-              <td class="management-name">
-                <strong>{{
-                  item.title || item.filename || item.name || item.slug
-                }}</strong
-                ><small v-if="item.slug" class="muted">{{ item.slug }}</small
-                ><small v-if="panel === 'keys'" class="key-value">
-                  <template v-if="revealedKeys[item.id]">{{
-                    revealedKeys[item.id]
-                  }}</template>
-                  <template v-else>{{ item.key }}</template>
-                </small>
-              </td>
-              <td
-                v-if="panel === 'texts' || panel === 'files'"
-                class="share-status-cell"
-              >
-                <span class="share-status" :class="shareState(item).kind">{{
-                  shareState(item).label
-                }}</span>
-                <small v-if="shareState(item).reason" class="muted">{{
-                  shareState(item).reason
-                }}</small>
-              </td>
-              <td v-if="panel === 'storage'">
-                {{ item.storage_type }}
-                <span v-if="item.is_default" class="badge">默认</span
-                ><small
-                  >{{
-                    ["LOCAL", "S3"].includes(item.storage_type)
-                      ? item.readonly
-                        ? "只读"
-                        : "可上传"
-                      : "已移除的存储类型"
-                  }}
-                  · {{ item.status }}</small
-                >
-              </td>
-              <td v-else-if="panel === 'keys'">
-                {{ item.is_enable ? "启用" : "停用"
-                }}<small>{{
-                  permissions
-                    .filter((entry) => (item.permissions & entry.bit) !== 0)
-                    .map((entry) => entry.label)
-                    .join("、") || "未授权"
-                }}</small>
-              </td>
-              <td v-else>
-                {{ item.views }} / {{ item.max_views || "不限"
-                }}<small>{{
-                  item.expires_at
-                    ? new Date(item.expires_at).toLocaleString()
-                    : "不过期"
-                }}</small>
-              </td>
-              <td class="management-row-actions">
-                <div class="row-actions">
-                  <UiButton
-                    v-if="panel === 'keys'"
-                    size="small"
-                    :disabled="!!revealingKeyID"
-                    :aria-pressed="!!revealedKeys[item.id]"
-                    @click="toggleKey(item)"
-                  >
-                    <span v-if="revealingKeyID === item.id">正在读取…</span>
-                    <span v-else-if="revealedKeys[item.id]">隐藏密钥</span>
-                    <span v-else>显示密钥</span>
-                  </UiButton>
-                  <!-- 链接保留新窗口打开语义，与同行操作使用相同的小尺寸按钮。 -->
-                  <UiButton
-                    v-if="item.slug"
-                    tag="a"
-                    type="button"
-                    size="small"
-                    :href="
-                      shareURL(panel === 'texts' ? 'paste' : 'file', item.slug)
-                    "
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    >打开分享</UiButton
-                  ><UiButton
-                    v-if="panel === 'texts'"
-                    size="small"
-                    @click="textPreview(item)"
-                  >
-                    预览</UiButton
-                  ><UiButton
-                    v-if="
-                      panel !== 'storage' ||
-                      ['LOCAL', 'S3'].includes(item.storage_type)
-                    "
-                    @click="openEditor(item)"
-                    size="small"
-                  >
-                    编辑</UiButton
-                  ><template
-                    v-if="
-                      panel === 'storage' &&
-                      ['LOCAL', 'S3'].includes(item.storage_type)
-                    "
-                    ><UiButton size="small" @click="storageAction(item, 'test')"
-                      >测试</UiButton
-                    ><UiButton
-                      v-if="!item.is_default"
-                      size="small"
-                      @click="storageAction(item, 'set-default')"
-                    >
-                      设为默认
-                    </UiButton></template
-                  ><UiButton class="danger" size="small" @click="remove(item)"
-                    >删除</UiButton
-                  >
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div
-        v-if="(panel === 'texts' || panel === 'files') && total > 30"
-        class="pagination"
-      >
-        <UiButton
-          size="small"
-          :disabled="page <= 1 || busy"
-          @click="
-            page--;
-            load();
-          "
-        >
-          上一页</UiButton
-        ><span>第 {{ page }} 页，共 {{ total }} 条</span
-        ><UiButton
-          size="small"
-          :disabled="page * 30 >= total || busy"
-          @click="
-            page++;
-            load();
-          "
-        >
-          下一页
-        </UiButton>
-      </div>
+      <AdminTable
+        v-else
+        :panel="panel"
+        :items="visible"
+        :saved-i-d="savedID"
+        :permissions="permissions"
+        :revealed-keys="revealedKeys"
+        :revealing-key-i-d="revealingKeyID"
+        :share-state="shareState"
+        :page="page"
+        :total="total"
+        :busy="busy"
+        @toggle-key="toggleKey"
+        @preview="textPreview"
+        @edit="openEditor"
+        @storage-action="storageAction"
+        @remove="remove"
+        @page-change="changePage"
+      />
     </section>
   </template>
 </template>

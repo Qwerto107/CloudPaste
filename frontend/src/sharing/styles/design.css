@@ -1,3 +1,5 @@
+/* 视觉对齐层（原 theme-design.css，令牌已统一至 tokens.css） */
+
 /*
  * 设计稿对齐层（design/cloudpaste-ui-v3.html）
  * 在 style.css、theme-vivid.css 之后加载，是最终生效的视觉规范：
@@ -6,44 +8,6 @@
  */
 
 /* ========== 设计令牌 ========== */
-:root {
-  --text: #101326;
-  --background: #f6f7fb;
-  --surface: #ffffff;
-  --surface-subtle: #f4f4f6;
-  --line: #e7e9f1;
-  --line-strong: #d9d9e0;
-  --muted: #626a86;
-  --success: #16a36b;
-  --success-bg: #e6f6ef;
-  --warning: #c98410;
-  --warning-bg: #fdf4e2;
-  --error: #d6455d;
-  --error-bg: #fcebee;
-  --page-sans: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui,
-    sans-serif;
-  --page-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
-  --design-shadow: 0 1px 2px #1013260a, 0 10px 30px -20px #10132633;
-  --design-pop: 0 12px 32px -12px #11121833;
-  --design-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-html[data-theme="dark"] {
-  --text: #eef0ff;
-  --background: #0b0d17;
-  --surface: #131628;
-  --surface-subtle: #1a1e35;
-  --line: #262b47;
-  --line-strong: #394068;
-  --muted: #99a0c2;
-  --success: #4cd39a;
-  --success-bg: #15302a;
-  --warning: #f0b44c;
-  --warning-bg: #352a15;
-  --error: #f27d91;
-  --error-bg: #3a1e28;
-  --design-shadow: inset 0 1px 0 #ffffff0d, 0 20px 40px -24px #000;
-  --design-pop: 0 12px 32px -12px #000;
-}
 
 /* ========== 页面基础 ========== */
 body {

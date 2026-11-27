@@ -1,0 +1,123 @@
+/* 统一设计令牌：合并浅色、暗色与各功能区主题变量（单一事实来源） */
+
+:root {
+  font-family: system-ui,
+    -apple-system,
+    "Segoe UI",
+    "Microsoft YaHei",
+    sans-serif;
+  color: var(--text);
+  background: var(--background);
+  font-synthesis: none;
+  --text: #101326;
+  --background: #f6f7fb;
+  --surface: #ffffff;
+  --surface-subtle: #f4f4f6;
+  --line: #e7e9f1;
+  --muted: #626a86;
+  --accent: var(--sec-text);
+  --soft: var(--sec-text-soft);
+  --primary: var(--sec-text);
+  --primary-hover: var(--sec-text-2);
+  --on-primary: #ffffff;
+  --error: #d6455d;
+  --error-bg: #fcebee;
+  --success: #16a36b;
+  --success-bg: #e6f6ef;
+  --shadow: 0 1px 2px #1013260a, 0 10px 30px -20px #10132633;
+  --shadow-action: 0 5px 14px #5952a526;
+  --radius-control: 7px;
+  --radius-panel: 14px;
+  --motion-fast: 150ms;
+  --motion-standard: 260ms;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  color-scheme: light;
+  --warning: #c98410;
+  --warning-bg: #fdf4e2;
+  --transfer-waiting: var(--warning);
+  --motion-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --sec-text: #6366f1;
+  --sec-text-2: #8b5cf6;
+  --sec-text-soft: #eef0ff;
+  --sec-file: #0ea5e9;
+  --sec-file-2: #6366f1;
+  --sec-file-soft: #e3f4fd;
+  --sec-transfer: #10b981;
+  --sec-transfer-2: #0ea5e9;
+  --sec-transfer-soft: #dcf6ec;
+  --sec-admin: #f97316;
+  --sec-admin-2: #ec4899;
+  --sec-admin-soft: #ffeee2;
+  --accent-2: var(--sec-text-2);
+  --accent-gradient: linear-gradient(135deg, var(--accent), var(--accent-2));
+  --mobile-nav: calc(62px + env(safe-area-inset-bottom));
+  --page-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --line-strong: #d9d9e0;
+  --page-sans: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui,
+    sans-serif;
+  --design-shadow: 0 1px 2px #1013260a, 0 10px 30px -20px #10132633;
+  --design-pop: 0 12px 32px -12px #11121833;
+  --design-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+html[data-theme="dark"] {
+  --text: #eef0ff;
+  --background: #0b0d17;
+  --surface: #131628;
+  --surface-subtle: #1a1e35;
+  --line: #262b47;
+  --muted: #99a0c2;
+  --accent: #c0baf7;
+  --soft: #38334f;
+  --primary: #c0baf7;
+  --primary-hover: #d2ceff;
+  --on-primary: #ffffff;
+  --error: #f27d91;
+  --error-bg: #3a1e28;
+  --success: #4cd39a;
+  --success-bg: #15302a;
+  --shadow: inset 0 1px 0 #ffffff0d, 0 20px 40px -24px #000;
+  --shadow-action: 0 5px 14px #00000030;
+  color-scheme: dark;
+  --warning: #f0b44c;
+  --warning-bg: #352a15;
+  --sec-text: #818cf8;
+  --sec-text-2: #a78bfa;
+  --sec-text-soft: #1f2147;
+  --sec-file: #38bdf8;
+  --sec-file-2: #818cf8;
+  --sec-file-soft: #0f2a3a;
+  --sec-transfer: #34d399;
+  --sec-transfer-2: #38bdf8;
+  --sec-transfer-soft: #0f2e24;
+  --sec-admin: #fb923c;
+  --sec-admin-2: #f472b6;
+  --sec-admin-soft: #36210f;
+  --line-strong: #394068;
+  --design-shadow: inset 0 1px 0 #ffffff0d, 0 20px 40px -24px #000;
+  --design-pop: 0 12px 32px -12px #000;
+}
+
+html[data-section="file"] {
+  --accent: var(--sec-file);
+  --accent-2: var(--sec-file-2);
+  --primary: var(--sec-file);
+  --primary-hover: var(--sec-file-2);
+  --soft: var(--sec-file-soft);
+}
+
+html[data-section="transfer"] {
+  --accent: var(--sec-transfer);
+  --accent-2: var(--sec-transfer-2);
+  --primary: var(--sec-transfer);
+  --primary-hover: var(--sec-transfer-2);
+  --soft: var(--sec-transfer-soft);
+}
+
+html[data-section="admin"] {
+  --accent: var(--sec-admin);
+  --accent-2: var(--sec-admin-2);
+  --primary: var(--sec-admin);
+  --primary-hover: var(--sec-admin-2);
+  --soft: var(--sec-admin-soft);
+}

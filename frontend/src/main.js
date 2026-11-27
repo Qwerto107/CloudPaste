@@ -1,10 +1,7 @@
 import { createApp, defineAsyncComponent } from "vue";
 import App from "./App.vue";
 import router from "./router/index.js";
-import "./sharing/style.css";
-import "./sharing/theme-vivid.css";
-// 设计稿对齐层：最后加载，统一控件尺寸、字号与各页面布局。
-import "./sharing/theme-design.css";
+import "./sharing/styles/index.css";
 import { cleanupLegacyCaches } from "./sharing/cleanup.js";
 import UiButton from "./sharing/ui/UiButton.vue";
 import UiInput from "./sharing/ui/UiInput.vue";
