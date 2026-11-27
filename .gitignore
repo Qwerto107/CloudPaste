@@ -122,3 +122,13 @@ out
 
 # 保留的旧 Node 本地数据库与缓存。
 /.legacy-node-data/
+
+# 本地临时审计、UI 评审文档与设计预览稿。
+/SECURITY_AUDIT_REPORT.md
+/TRANSFER_UI_IMPROVEMENTS.md
+/UI_BEAUTIFICATION_DETAILED_PLAN.md
+/UI_VISUAL_COMPARISON.md
+/ui_preview.html
+/design/*.png
+/design/redesign-*.html
+/docs/ui-review-*/
