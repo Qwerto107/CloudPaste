@@ -41,7 +41,7 @@ export default defineConfig(({ mode }) => {
       ],
     },
     define: {
-      __APP_VERSION__: JSON.stringify("1.0.3"),
+      __APP_VERSION__: JSON.stringify("1.0.4"),
       __APP_COMMIT__: JSON.stringify(build.commit),
       __APP_ENV__: JSON.stringify(env.VITE_APP_ENV || "production"),
       __BACKEND_URL__: JSON.stringify(env.VITE_BACKEND_URL || ""),
