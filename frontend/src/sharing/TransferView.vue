@@ -498,7 +498,7 @@ function returnToEntry(tab = "join") {
   entryTab.value = tab;
   code.value = "";
   detailsOpen.value = filesOpen.value = attachmentsOpen.value = false;
-  if (tab === "join") nextTick(() => pairCodeInput.value?.focus());
+  if (tab === "join") nextTick(() => transferEntry.value?.focusCode());
 }
 async function leaveConversation() {
   if (
@@ -931,7 +931,7 @@ async function open(kind) {
     if (kind === "join" && reason.code === "TRANSFER_UNAVAILABLE") {
       // 失效代码不保留在分格输入框中，便于直接输入新的配对码。
       code.value = "";
-      nextTick(() => pairCodeInput.value?.focus());
+      nextTick(() => transferEntry.value?.focusCode());
     }
   } finally {
     busy.value = false;
@@ -1633,6 +1633,79 @@ onBeforeUnmount(() => {
               连接已断开 · 消息已保留
             </p>
           </div>
+          <div
+            v-if="connected && (selected.length || selectedFolder)"
+            class="transfer-chat-queue"
+          >
+            <section
+              v-if="selectedFolder"
+              class="transfer-queue"
+              aria-label="待发送文件夹"
+            >
+              <h3 class="transfer-list-heading">待发送文件夹</h3>
+              <div class="transfer-selected-folder">
+                <Icon name="folder" />
+                <div class="transfer-selected-folder-copy">
+                  <strong :title="selectedFolder.name">{{
+                    selectedFolder.name
+                  }}</strong>
+                  <span class="muted"
+                    >{{ selectedFolder.count }} 项 ·
+                    {{ size(selectedFolder.size) }}</span
+                  >
+                </div>
+                <UiButton
+                  type="button"
+                  class="quiet"
+                  size="small"
+                  icon="close"
+                  aria-label="移除待发送文件夹"
+                  @click="selectedFolder = null"
+                />
+              </div>
+              <UiButton
+                class="primary"
+                size="small"
+                icon="upload"
+                @click="offerFolder"
+                >发送文件夹</UiButton
+              >
+            </section>
+            <section
+              v-if="selected.length"
+              class="transfer-queue"
+              aria-label="待发送文件"
+            >
+              <h3 class="transfer-list-heading">
+                待发送 <span class="transfer-count">{{ selected.length }}</span>
+              </h3>
+              <ul class="transfer-selected">
+                <li v-for="(file, index) in selected" :key="index">
+                  <Icon name="file" />
+                  <span class="transfer-selected-name">{{ file.name }}</span>
+                  <span class="transfer-selected-size">{{
+                    size(file.size)
+                  }}</span>
+                  <UiButton
+                    type="button"
+                    class="quiet"
+                    size="small"
+                    icon="close"
+                    title="移除待发送文件"
+                    :aria-label="`移除 ${file.name}`"
+                    @click="selected.splice(index, 1)"
+                  />
+                </li>
+              </ul>
+              <UiButton
+                class="primary"
+                size="small"
+                icon="upload"
+                @click="offer"
+                >发送所选文件（{{ selected.length }}）</UiButton
+              >
+            </section>
+          </div>
           <form
             class="transfer-message-composer"
             @submit.prevent="sendText"
@@ -1726,79 +1799,6 @@ onBeforeUnmount(() => {
               ><span class="transfer-send-label">发送</span></UiButton
             >
           </form>
-          <div
-            v-if="connected && (selected.length || selectedFolder)"
-            class="transfer-chat-queue"
-          >
-            <section
-              v-if="selectedFolder"
-              class="transfer-queue"
-              aria-label="待发送文件夹"
-            >
-              <h3 class="transfer-list-heading">待发送文件夹</h3>
-              <div class="transfer-selected-folder">
-                <Icon name="folder" />
-                <div class="transfer-selected-folder-copy">
-                  <strong :title="selectedFolder.name">{{
-                    selectedFolder.name
-                  }}</strong>
-                  <span class="muted"
-                    >{{ selectedFolder.count }} 项 ·
-                    {{ size(selectedFolder.size) }}</span
-                  >
-                </div>
-                <UiButton
-                  type="button"
-                  class="quiet"
-                  size="small"
-                  icon="close"
-                  aria-label="移除待发送文件夹"
-                  @click="selectedFolder = null"
-                />
-              </div>
-              <UiButton
-                class="primary"
-                size="small"
-                icon="upload"
-                @click="offerFolder"
-                >发送文件夹</UiButton
-              >
-            </section>
-            <section
-              v-if="selected.length"
-              class="transfer-queue"
-              aria-label="待发送文件"
-            >
-              <h3 class="transfer-list-heading">
-                待发送 <span class="transfer-count">{{ selected.length }}</span>
-              </h3>
-              <ul class="transfer-selected">
-                <li v-for="(file, index) in selected" :key="index">
-                  <Icon name="file" />
-                  <span class="transfer-selected-name">{{ file.name }}</span>
-                  <span class="transfer-selected-size">{{
-                    size(file.size)
-                  }}</span>
-                  <UiButton
-                    type="button"
-                    class="quiet"
-                    size="small"
-                    icon="close"
-                    title="移除待发送文件"
-                    :aria-label="`移除 ${file.name}`"
-                    @click="selected.splice(index, 1)"
-                  />
-                </li>
-              </ul>
-              <UiButton
-                class="primary"
-                size="small"
-                icon="upload"
-                @click="offer"
-                >发送所选文件（{{ selected.length }}）</UiButton
-              >
-            </section>
-          </div>
           <input
             ref="folderInput"
             hidden

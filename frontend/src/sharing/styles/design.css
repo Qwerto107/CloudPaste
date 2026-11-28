@@ -974,7 +974,7 @@ html[data-theme="dark"] #app .share-name-input {
   margin-top: 0;
 }
 #app .transfer-entry-card {
-  display: grid !important;
+  display: grid;
   align-content: start;
   gap: 16px !important;
   padding: 16px !important;
@@ -1282,13 +1282,13 @@ html[data-theme="dark"] #app .share-name-input {
   min-width: 0;
 }
 #app .transfer-peer-status {
-  gap: 10px !important;
-  font-size: 14px !important;
-  font-weight: 600 !important;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
 }
 #app .transfer-peer-status i {
-  width: 10px !important;
-  height: 10px !important;
+  width: 10px;
+  height: 10px;
 }
 #app .transfer-peer-sep {
   flex: none;
@@ -1523,10 +1523,11 @@ html[data-theme="dark"] #app .transfer-message:not(.mine) {
   font-size: 12px;
 }
 #app .transfer-message-composer {
-  display: flex !important;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px !important;
-  padding: 10px !important;
+  gap: 6px;
+  padding: 10px;
   border-top: 1px solid var(--line);
 }
 #app .transfer-composer-tools {
@@ -1540,7 +1541,9 @@ html[data-theme="dark"] #app .transfer-message:not(.mine) {
   border-radius: 6px;
 }
 #app .transfer-message-composer > .ui-input {
-  flex: 1;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
 }
 #app .transfer-message-composer .transfer-send {
   height: 32px;
@@ -1554,7 +1557,7 @@ html[data-theme="dark"] #app .transfer-message:not(.mine) {
 #app .transfer-file-panel {
   display: grid;
   gap: 10px;
-  padding: 16px !important;
+  padding: 16px;
 }
 #app .transfer-details-panel .transfer-section-heading h2,
 #app .transfer-file-panel .transfer-section-heading h2 {
@@ -1655,11 +1658,10 @@ html[data-theme="dark"] #app .transfer-message:not(.mine) {
 }
 #app .collection-file-row {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
+  grid-template-columns: 32px minmax(0, 1fr) auto auto auto;
   gap: 10px;
   align-items: center;
-  padding: 9px 16px;
-  border-bottom: 1px solid var(--line);
+  padding: 9px 2px;
 }
 #app .collection-file-row .file-ext {
   width: 32px;
@@ -2566,10 +2568,10 @@ body .n-base-select-option {
     grid-column: 1 / -1;
   }
   #app .pair-code {
-    grid-template-columns: repeat(4, 60px) !important;
+    grid-template-columns: repeat(4, minmax(0, 60px)) !important;
   }
   #app .pair-code input {
-    width: 60px !important;
+    width: 100% !important;
     height: 64px !important;
     font-size: 26px !important;
     border-radius: 14px !important;
@@ -2604,10 +2606,72 @@ body .n-base-select-option {
   }
 }
 
-/* 手机：列表底部给悬浮新建按钮留位置（放在最后，避免被上面的 padding:0 覆盖） */
-@media (max-width: 720px) {
+/* 手机（<=650px）：修复各页面被 #app / !important 覆盖的移动端规则与断点 */
+@media (max-width: 650px) {
   #app .management-list {
     padding-bottom: 72px !important;
+  }
+  #app .management-toolbar {
+    padding: 8px !important;
+  }
+  #app .management-toolbar > .ui-input {
+    max-width: none;
+  }
+  #app .admin-content .management-list .table-scroll td {
+    padding: 0 !important;
+    border-bottom: 0;
+    font-size: 12px;
+  }
+  #app .audit-table-scroll .audit-table .audit-row td {
+    padding: 0 !important;
+    border-bottom: 0;
+    font-size: 11.5px;
+  }
+  #app .audit-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #app .settings-savebar {
+    bottom: calc(var(--mobile-nav) + 8px);
+    z-index: 20;
+  }
+  #app .mobile-sheet .share-settings.panel {
+    padding: 0 !important;
+    gap: 16px;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+  #app .mobile-sheet .upload-settings-fields {
+    gap: 16px;
+  }
+  #app .file-queue .file-upload-entry {
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+  }
+  #app .file-queue .file-upload-entry progress {
+    grid-column: 2 / 4;
+  }
+  #app .collection-file-row {
+    grid-template-columns: 28px minmax(0, 1fr) auto auto;
+    gap: 5px;
+    padding: 9px 0;
+  }
+  #app .page-switch {
+    width: 40px !important;
+    height: 24px !important;
+  }
+  #app .page-switch::after {
+    top: 3px !important;
+    left: 3px !important;
+    width: 18px !important;
+    height: 18px !important;
+  }
+  #app .page-switch:checked::after {
+    transform: translateX(16px) !important;
+  }
+  #app .login-panel:not(.share-lock) {
+    margin: 20px auto 0;
+    padding: 22px !important;
   }
 }
 @media (max-width: 720px) {
@@ -2745,7 +2809,7 @@ body .n-base-select-option {
 }
 
 /* 手机全屏聊天：内容区不留边距，聊天铺满屏幕宽度（优先级需高于上面的 #app .site-main） */
-@media (max-width: 720px) {
+@media (max-width: 650px) {
   html:has(.transfer-conversation) #app .site-main {
     padding: 0 !important;
   }
@@ -2778,7 +2842,7 @@ body .n-base-select-option {
 }
 
 /* 手机全屏聊天：聊天面板去掉边框、圆角和阴影，铺满 390px（覆盖 #app .panel 的 !important 边框） */
-@media (max-width: 720px) {
+@media (max-width: 650px) {
   #app .transfer-conversation .transfer-workspace .transfer-chat.panel,
   #app .transfer-conversation .transfer-conversation-sidebar .panel {
     border: 0 !important;
@@ -2788,7 +2852,7 @@ body .n-base-select-option {
 }
 
 /* 手机全屏聊天输入栏：只保留“+”入口，文件/文件夹/图片按钮收进“+”里 */
-@media (max-width: 720px) {
+@media (max-width: 650px) {
   #app .transfer-conversation .transfer-composer-tools {
     display: none !important;
   }

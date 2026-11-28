@@ -54,8 +54,11 @@ const linkParts = computed(() => {
     <div class="mobile-chat-who">
       <strong>{{ peerName }}</strong>
       <span class="transfer-peer-status" :data-state="connectionState"
-        ><i aria-hidden="true"></i>{{ connectionLabel
-        }}<template v-if="connected"> · {{ connectionLink }}</template></span
+        ><i aria-hidden="true"></i
+        ><span class="mobile-chat-status-text"
+          >{{ connectionLabel
+          }}<template v-if="connected"> · {{ connectionLink }}</template></span
+        ></span
       >
     </div>
     <div class="mobile-chat-file-action">

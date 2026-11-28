@@ -1259,7 +1259,7 @@ html[data-theme="dark"] .transfer-page {
   display: none;
 }
 @media (max-width: 650px) {
-  .transfer-entry-tabs {
+  #app .transfer-entry-tabs {
     display: flex;
     gap: 2px;
     margin-top: 16px;
@@ -1267,7 +1267,7 @@ html[data-theme="dark"] .transfer-page {
     border-radius: 10px;
     background: var(--surface-subtle);
   }
-  .transfer-entry-tabs button {
+  #app .page-segment.transfer-entry-tabs button {
     flex: 1;
     padding: 8px 0;
     border: 0;
@@ -1278,14 +1278,14 @@ html[data-theme="dark"] .transfer-page {
     font-size: 14px;
     cursor: pointer;
   }
-  .transfer-entry-tabs button[aria-pressed="true"] {
+  #app .page-segment.transfer-entry-tabs button[aria-pressed="true"] {
     background: var(--soft);
     color: var(--accent);
     font-weight: 600;
     box-shadow: 0 1px 2px #1013260a;
   }
-  .transfer-entry-grid[data-tab="join"] > :first-child,
-  .transfer-entry-grid[data-tab="create"] > :last-child {
+  #app .transfer-entry-grid[data-tab="join"] > :first-child,
+  #app .transfer-entry-grid[data-tab="create"] > :last-child {
     display: none;
   }
   .transfer-entry-grid {
@@ -1691,6 +1691,7 @@ html[data-theme="dark"] .transfer-messages {
   display: none;
 }
 .transfer-chat .transfer-message-composer {
+  flex: none;
   padding: 8px 10px;
   border-top: 1px solid var(--line);
   gap: 6px;
@@ -1703,6 +1704,7 @@ html[data-theme="dark"] .transfer-messages {
   padding: 0;
 }
 .transfer-chat-queue {
+  flex: none;
   padding: 8px 12px;
   border-top: 1px solid var(--line);
   max-height: 180px;
@@ -1838,14 +1840,14 @@ html[data-theme="dark"] .transfer-messages {
   .transfer-page > .hero .muted {
     display: none;
   }
-  .transfer-entry-tabs {
+  #app .transfer-entry-tabs {
     margin: 0 0 14px;
   }
   .transfer-entry-grid {
     margin: 0;
     grid-template-columns: minmax(0, 1fr);
   }
-  .transfer-entry-heading {
+  #app .transfer-entry-card .transfer-entry-heading {
     display: none;
   }
   .transfer-entry-card {
@@ -1865,8 +1867,11 @@ html[data-theme="dark"] .transfer-messages {
   .transfer-code-actions .ui-button {
     height: 32px;
   }
-  .transfer-entry-card .primary {
+  #app .transfer-entry-card > .ui-button.primary.n-button--primary-type {
     height: 48px;
+    --n-height: 48px;
+    --n-border-radius: 12px;
+    --n-font-size: 16px;
     border-radius: 12px;
     font-size: 16px;
   }
@@ -1883,16 +1888,16 @@ html[data-theme="dark"] .transfer-messages {
   .transfer-wait-heading h1 {
     font-size: 20px;
   }
-  html:has(.transfer-conversation #app) {
+  html:has(.transfer-conversation) #app {
     padding-bottom: 0;
   }
-  html:has(.transfer-conversation .site-header),
-  html:has(.transfer-conversation .site-announcement),
-  html:has(.transfer-conversation .site-footer),
-  html:has(.transfer-conversation .custom-content) {
+  html:has(.transfer-conversation) #app .site-header,
+  html:has(.transfer-conversation) #app .site-announcement,
+  html:has(.transfer-conversation) #app .site-footer,
+  html:has(.transfer-conversation) #app .custom-content {
     display: none;
   }
-  html:has(.transfer-conversation .site-main) {
+  html:has(.transfer-conversation) #app .site-main {
     padding: 0;
   }
   .transfer-conversation {
@@ -1905,6 +1910,7 @@ html[data-theme="dark"] .transfer-messages {
     display: none;
   }
   .mobile-chat-heading {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -1928,14 +1934,25 @@ html[data-theme="dark"] .transfer-messages {
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-  .mobile-chat-who .transfer-peer-status {
+  #app .mobile-chat-who .transfer-peer-status {
+    display: flex;
+    max-width: 100%;
     gap: 7px;
     font-size: 11.5px;
+    font-weight: 500;
+    overflow: hidden;
   }
-  .mobile-chat-who .transfer-peer-status i {
+  #app .mobile-chat-who .transfer-peer-status i {
+    flex: none;
     width: 6px;
     height: 6px;
     box-shadow: 0 0 0 3px var(--peer-bg);
+  }
+  .mobile-chat-status-text {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   .mobile-chat-file-action {
     position: relative;
@@ -1953,10 +1970,13 @@ html[data-theme="dark"] .transfer-messages {
     font-size: 9px;
     pointer-events: none;
   }
-  .transfer-connection-banner {
+  #app .transfer-conversation .transfer-connection-banner {
+    flex: none;
     margin: 0;
+    padding: 8px 12px;
     border-radius: 0;
     border-width: 0 0 1px;
+    font-size: 12px;
   }
   .transfer-workspace {
     display: flex;
@@ -1977,10 +1997,10 @@ html[data-theme="dark"] .transfer-messages {
   .transfer-chat .transfer-section-heading {
     display: none;
   }
-  .transfer-conversation-sidebar {
+  #app .transfer-conversation-sidebar {
     display: contents;
   }
-  .transfer-conversation-sidebar .panel {
+  #app .transfer-conversation-sidebar .panel {
     padding: 0;
     border: 0;
     box-shadow: none;
@@ -1997,15 +2017,17 @@ html[data-theme="dark"] .transfer-messages {
   .transfer-messages {
     padding: 12px;
   }
-  .transfer-chat .transfer-message-composer {
+  #app .transfer-chat .transfer-message-composer {
     position: static;
-    padding-block: 8px calc(8px + env(safe-area-inset-bottom));
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
     align-items: center;
   }
   .transfer-composer-tools {
     display: none;
   }
-  .mobile-chat-plus.ui-button {
+  #app .transfer-message-composer .mobile-chat-plus.ui-button {
+    grid-column: 1;
+    grid-row: 1;
     display: inline-flex;
     width: 36px;
     height: 36px;
